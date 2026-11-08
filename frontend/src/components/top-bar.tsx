@@ -2,7 +2,7 @@ import { useTheme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Moon, Sun } from "lucide-react"
+import { Moon, RefreshCw, Sun } from "lucide-react"
 import { formatNumber } from "@/lib/formatters"
 
 export function formatBeijingTime(ms: number | null | undefined): string {
@@ -31,6 +31,8 @@ interface TopBarProps {
   rows?: number
   timeRange: "24h" | "7d"
   onTimeRangeChange: (range: "24h" | "7d") => void
+  onRefresh?: () => void
+  refreshing?: boolean
 }
 
 export function TopBar({
@@ -39,6 +41,8 @@ export function TopBar({
   rows,
   timeRange,
   onTimeRangeChange,
+  onRefresh,
+  refreshing = false,
 }: TopBarProps) {
   const { theme, setTheme } = useTheme()
 
@@ -78,6 +82,19 @@ export function TopBar({
             近 7 天
           </ToggleGroupItem>
         </ToggleGroup>
+
+        {onRefresh && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={onRefresh}
+            disabled={refreshing}
+            aria-label="刷新数据"
+          >
+            <RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} />
+          </Button>
+        )}
 
         <Button
           variant="ghost"

@@ -461,6 +461,33 @@ function makeGroupSourceDb(file, rows) {
   db.close();
 }
 
+function makeUserSourceDb(file, rows) {
+  const db = new DatabaseSync(file);
+  db.exec(LOGS_SCHEMA);
+  const ins = db.prepare(
+    `INSERT INTO logs (req_id, site, source_kind, input_format, t_ms, t_local, user_name, token_name,
+                       channel_id, channel_name, model, cost, quota_raw,
+                       input_total, input_uncached, cache_read, output, latency_ms, log_type, raw_json)
+     VALUES (?, 'test', 'api', 'openai', ?, '2026-11-02 12:00:00', ?, ?,
+             ?, ?, 'm', ?, 0, ?, 0, 0, ?, 1000, ?, '')`,
+  );
+  for (const r of rows) {
+    ins.run(
+      r.req_id,
+      r.t_ms,
+      r.user_name ?? null,
+      r.token_name ?? 't1',
+      r.channel_id ?? 13,
+      r.channel_name ?? '渠道一',
+      r.cost,
+      r.input_total ?? 0,
+      r.output ?? 0,
+      r.log_type ?? 2,
+    );
+  }
+  db.close();
+}
+
 test('主力模型与分组聚合：top_model、归档与未分组', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'v2-api-groups-'));
   const sourceFile = path.join(dir, 'source.db');
@@ -595,6 +622,98 @@ test('主力模型与分组聚合：top_model、归档与未分组', async (t) =
       last_t: null,
       top_model: null,
     }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /api/users：按用户聚合（用户排行）
+// ---------------------------------------------------------------------------
+
+test('用户聚合：按 user_name 汇总、NULL/空串归并、空区间', async (t) => {
+  const dir = makeTempDir('v2-api-users-');
+  const sourceFile = path.join(dir, 'source.db');
+  const detailDay = beijingDayStart(Date.now()) - DAY_MS;
+  const baseT = detailDay + 3600000;
+
+  makeUserSourceDb(sourceFile, [
+    // alice：两笔售出，合计 15
+    { req_id: 'a1', t_ms: baseT, user_name: 'alice', cost: 10, input_total: 100, output: 5 },
+    { req_id: 'a2', t_ms: baseT + 1000, user_name: 'alice', cost: 5, input_total: 50, output: 5 },
+    // bob：一笔售出
+    { req_id: 'b1', t_ms: baseT + 2000, user_name: 'bob', cost: 4, input_total: 20 },
+    // user_name 为 NULL / 空串：归入同一行「未命名用户」
+    { req_id: 'n1', t_ms: baseT + 3000, user_name: null, cost: 2, input_total: 10, output: 5 },
+    { req_id: 'n2', t_ms: baseT + 4000, user_name: '', cost: 3, input_total: 30, output: 5 },
+    // 非计费日志与 Model test 不得计入
+    { req_id: 'x1', t_ms: baseT + 5000, user_name: 'alice', cost: 999, input_total: 1000, token_name: 'Model test' },
+    { req_id: 'x2', t_ms: baseT + 6000, user_name: 'bob', cost: 888, input_total: 1000, log_type: 1 },
+  ]);
+
+  const source = new DatabaseSync(sourceFile, { readOnly: true });
+  const dashboard = openTempDashboard(dir);
+  const api = createApi({
+    source,
+    dashboard,
+    config: { currency: 'USD', quota_per_unit: 500000, accounts: [] },
+    siteName: 'test',
+    sourceLabel: 'db/sites/test.db',
+  });
+
+  t.after(() => {
+    source.close();
+    dashboard.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const range = params({ from: detailDay, to: detailDay + DAY_MS - 1 });
+
+  await t.test('两个用户各有售出与请求：revenue/requests/share 与降序', () => {
+    const data = api.users(range);
+    assert.equal(data.total_revenue, 24);
+    assert.deepEqual(data.users.map((u) => u.user_name), ['alice', '', 'bob']);
+
+    const [alice, unnamed, bob] = data.users;
+    // 只输出聚合字段，不带 token_name / raw_json 等明细或凭据
+    assert.deepEqual(Object.keys(alice), ['user_name', 'revenue', 'requests', 'tokens', 'share']);
+    assert.equal(alice.revenue, 15);
+    assert.equal(alice.requests, 2);
+    assert.equal(alice.tokens, 160);
+    assert.equal(alice.share, 0.625);
+
+    assert.equal(bob.user_name, 'bob');
+    assert.equal(bob.revenue, 4);
+    assert.equal(bob.requests, 1);
+    assert.equal(bob.tokens, 20);
+    assert.equal(bob.share, 0.166667);
+    assert.ok(alice.revenue > unnamed.revenue && unnamed.revenue > bob.revenue);
+  });
+
+  await t.test('user_name 为 NULL 与空串归并到同一行', () => {
+    const unnamed = api.users(range).users.filter((u) => u.user_name === '');
+    assert.equal(unnamed.length, 1);
+    assert.equal(unnamed[0].revenue, 5);
+    assert.equal(unnamed[0].requests, 2);
+    assert.equal(unnamed[0].tokens, 50);
+    assert.equal(unnamed[0].share, 0.208333);
+  });
+
+  await t.test('归档没有 user 维度：不并入，archive 不可用', () => {
+    const { archive } = api.users(range);
+    assert.deepEqual(archive, {
+      from_day: '',
+      to_day: '',
+      days: 0,
+      available: false,
+      partial_fields: [],
+    });
+  });
+
+  await t.test('空区间返回 users: []、total_revenue: 0', () => {
+    const empty = api.users(params({ from: detailDay - 30 * DAY_MS, to: detailDay - 29 * DAY_MS }));
+    assert.deepEqual(empty.users, []);
+    assert.equal(empty.total_revenue, 0);
+    assert.equal(empty.archive.available, false);
+    assert.deepEqual(empty.archive.partial_fields, []);
   });
 });
 

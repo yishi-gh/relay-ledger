@@ -22,6 +22,3 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
-# 预览数据快照（含真实业务数据，不入库）
-src/data/preview.json

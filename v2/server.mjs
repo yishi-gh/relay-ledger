@@ -232,6 +232,7 @@ const API_ROUTES = {
   '/api/profit': (api, url) => api.profit(url.searchParams),
   '/api/channels': (api, url) => api.channels(url.searchParams),
   '/api/groups': (api, url) => api.groups(url.searchParams),
+  '/api/users': (api, url) => api.users(url.searchParams),
   '/api/upstreams': (api, url) => api.upstreams(url.searchParams),
   '/api/quality': (api) => api.quality(),
   '/api/rows': (api, url) => api.rows(url.searchParams),

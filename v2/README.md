@@ -120,6 +120,7 @@ v2/
 | `GET /api/profit?from=&to=&granularity=day\|hour` | 站点盈利：渠道售出、账户成本/利润/毛利率、未映射渠道与数据质量 |
 | `GET /api/channels?from=&to=` | 按 `channel_id, channel_name` 聚合，含延迟分位、上游归属与 `top_model` |
 | `GET /api/groups?from=&to=` | 按 `group_name` 聚合渠道数、售出、token、请求、缓存率、延迟、TPS 与 `top_model` |
+| `GET /api/users?from=&to=` | 按 `user_name` 聚合售出、token、请求与占比；归档无 user 维度，不并入 |
 | `GET /api/upstreams?from=&to=` | 账户级账本：期初期末余额、credits、consumption、毛利 |
 | `GET /api/quality` | 源库最后时间、行数、error_logs 行数、job_runs、collect_errors、schema_ok |
 | `GET /api/rows?from=&to=&page=&page_size=` | 逐条明细，`t_ms DESC`；`page_size` 上限 200（超限收敛到 200） |

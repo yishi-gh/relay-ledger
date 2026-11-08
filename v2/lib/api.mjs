@@ -566,6 +566,8 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
   const GROUP_LATENCY_SQL = hasGroupName
     ? latencyPercentileSql({ partitionBy: "COALESCE(group_name, '')", keyAlias: 'group_key' })
     : null;
+  // user_name 同样不在 REQUIRED_SOURCE_COLUMNS 里：缺列时整段归入未命名用户
+  const USER_KEY_SQL = columns.logs?.has('user_name') ? "COALESCE(user_name, '')" : "''";
 
   function sourceMaxT() {
     // 只取本站计费日志的终点：最新的充值/系统日志不该把默认范围往前推
@@ -1355,6 +1357,47 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
     return { groups: rows };
   }
 
+  /**
+   * 按 user_name 聚合（NULL / 空串统一为 ''，前端显示「未命名用户」）。
+   * 归档 logs_daily 只有渠道维度、没有 user 维度，金额无法归属到用户：
+   * 不并入归档，archive 固定不可用，避免用户合计与站点总额出现无法解释的差额。
+   */
+  function users(searchParams) {
+    const range = resolveRange(searchParams);
+    const agg = source.prepare(
+      `SELECT ${USER_KEY_SQL} AS user_name,
+              COUNT(*) AS requests,
+              COALESCE(SUM(cost), 0) AS revenue,
+              COALESCE(SUM(input_total), 0) AS input_total,
+              COALESCE(SUM(output), 0) AS output
+         FROM logs
+        WHERE ${LOCAL_FILTER} AND t_ms BETWEEN ? AND ?
+        GROUP BY ${USER_KEY_SQL}`,
+    ).all(range.from, range.to);
+
+    const rows = agg.map((r) => ({
+      user_name: r.user_name ?? '',
+      revenue: round6(r.revenue ?? 0) ?? 0,
+      requests: Number(r.requests ?? 0),
+      tokens: Number(r.input_total ?? 0) + Number(r.output ?? 0),
+    }));
+    // 先取整再求和：total 与逐行 revenue 展示一致
+    const totalRevenue = round6(rows.reduce((sum, r) => sum + r.revenue, 0)) ?? 0;
+
+    rows.sort((a, b) => (b.revenue - a.revenue)
+      || (a.user_name < b.user_name ? -1 : a.user_name > b.user_name ? 1 : 0));
+
+    return {
+      users: rows.map((r) => ({
+        ...r,
+        share: totalRevenue > 0 ? round6(r.revenue / totalRevenue) ?? 0 : 0,
+      })),
+      total_revenue: totalRevenue,
+      // 与前端约定：归档不可用时日期为空串（其余接口沿用 null）
+      archive: { from_day: '', to_day: '', days: 0, available: false, partial_fields: [] },
+    };
+  }
+
   function upstreams(searchParams) {
     const range = resolveRange(searchParams);
     return {
@@ -1458,5 +1501,5 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
     };
   }
 
-  return { meta, overview, trend, profit, channels, groups, upstreams, quality, rows };
+  return { meta, overview, trend, profit, channels, groups, users, upstreams, quality, rows };
 }
