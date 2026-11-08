@@ -1,0 +1,124 @@
+# relay-ledger nginx 站点模板（HTTPS + 面板登录）
+#
+# 用途：面板前面不用 Basic Auth，由 v2/tools/panel-auth.mjs 提供登录页与会话 Cookie，
+#       nginx 用 auth_request 校验每个请求。
+#
+# 安装（路径按发行版可能不同，二选一）：
+#   sudo cp v2/deploy/nginx.conf.example /etc/nginx/sites-available/relay-ledger.conf
+#   sudo ln -s /etc/nginx/sites-available/relay-ledger.conf /etc/nginx/sites-enabled/
+#   # Debian/Ubuntu 以外的系统：放到 /etc/nginx/conf.d/relay-ledger.conf
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# 需要替换的占位：
+#   - relay.example.com            面板域名
+#   - ssl_certificate / _key      证书路径（下面用 certbot 的默认路径）
+#   - /var/www/certbot             80 端口 ACME 校验的 webroot
+#   - 127.0.0.1:8788               面板本体（v2/server.mjs），与 relay-panel.service 一致
+#   - 127.0.0.1:8790               登录服务（v2/tools/panel-auth.mjs），与 relay-auth.service 一致
+#
+# 依赖：nginx 需编译 http_auth_request 模块，`nginx -V 2>&1 | grep auth_request` 可确认。
+#
+# 三个 location 的分工：
+#   /login   公开，渲染登录页、接收表单并下发 Cookie
+#   /verify  只给 auth_request 用（internal），返回 204 / 401，无响应体
+#   /logout  公开，清 Cookie 后 302 回 /login
+#
+# Cookie 传递：auth_request 子请求不会自动带上原请求的 Cookie，必须显式转发
+# `proxy_set_header Cookie $http_cookie;`，否则 /verify 永远 401、登录后立刻被踢回登录页。
+# /login（POST 表单）与 /logout 也需要它：前者做限速判断，后者只清 Cookie。
+
+# 80 端口：ACME 校验 + 全量跳 https
+server {
+    listen 80;
+    listen [::]:80;
+    server_name relay.example.com;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    # nginx < 1.25.1 不支持 `http2 on;`，改用：listen 443 ssl http2;
+    http2 on;
+    server_name relay.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/relay.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/relay.example.com/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    # ------------------------------------------------------------------ gzip
+    # 首访约 1.9 MB 静态资源（含 1.1 MB 图表库）。少了下面任一项都会白传：
+    #   - gzip_proxied any：面板响应来自 proxy_pass，缺了它 nginx 不压缩上游响应
+    #   - gzip_types 里的 text/javascript / application/javascript：app.js 靠它压缩
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_types text/css text/javascript application/javascript application/json image/svg+xml;
+
+    # ---------------------------------------------------------------- 登录服务
+    location = /login {
+        proxy_pass http://127.0.0.1:8790;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # POST 登录表单需要请求体，这里不能 proxy_pass_request_body off
+        proxy_set_header Cookie $http_cookie;
+    }
+
+    # auth_request 子请求：只回 204 / 401，无 body
+    location = /verify {
+        internal;
+        proxy_pass http://127.0.0.1:8790;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # auth_request 的标准写法：子请求不需要原请求体
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        # 关键：子请求默认不带原请求的 Cookie，必须显式转发
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header X-Original-URI $request_uri;
+    }
+
+    location = /logout {
+        proxy_pass http://127.0.0.1:8790;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Cookie $http_cookie;
+    }
+
+    # ---------------------------------------------------------------- 面板本体
+    location / {
+        auth_request /verify;
+        error_page 401 = @login;
+
+        proxy_pass http://127.0.0.1:8788;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # 面板没有 websocket，清掉客户端带来的 Connection 头即可
+        proxy_set_header Connection "";
+        proxy_read_timeout 60s;
+    }
+
+    # 未登录：带上原始路径，登录后回到原页面
+    location @login {
+        return 302 /login?next=$request_uri;
+    }
+}

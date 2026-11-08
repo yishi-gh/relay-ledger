@@ -1,0 +1,47 @@
+# relay-ledger 面板服务（systemd 单元模板）
+#
+# 作用：对外提供 JSON API 与静态页面，只监听 127.0.0.1:8788，由 nginx 反向代理并做登录校验。
+#       面板本身没有鉴权，不要直接暴露到公网。
+#
+# 安装：
+#   sudo cp v2/deploy/relay-panel.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now relay-panel
+#   systemctl status relay-panel && journalctl -u relay-panel -n 30
+#
+# 需要按实际环境替换的占位：
+#   - User / Group    运行用户（占位值 relay-ledger，需先创建用户与数据目录）
+#   - /opt/relay-ledger   项目根目录（该目录下应有 v2/ 与 web/vendor/）
+#   - /usr/bin/node       `command -v node` 的结果，Node 必须 >= 22.13
+#
+# 前置：
+#   - sudo install -d -o relay-ledger -g relay-ledger -m 0750 /var/lib/relay-ledger
+#   - /etc/relay-ledger/instance.json 已就位（数据目录、站点 id、日志库路径都在里面）
+#   - 站点日志库 <dataDir>/db/sites/<site.id>.db 由采集器创建；空库也能启动，页面显示空态
+
+[Unit]
+Description=relay-ledger panel (read-only dashboard)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=relay-ledger
+Group=relay-ledger
+WorkingDirectory=/opt/relay-ledger
+Environment=RELAY_LEDGER_INSTANCE=/etc/relay-ledger/instance.json
+Environment=NODE_ENV=production
+# 只监听回环地址；公网入口走 nginx + relay-auth
+ExecStart=/usr/bin/node v2/server.mjs --host=127.0.0.1 --port=8788
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/var/lib/relay-ledger
+
+[Install]
+WantedBy=multi-user.target

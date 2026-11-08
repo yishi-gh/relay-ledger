@@ -1,0 +1,30 @@
+# 实例配置与运行期数据目录（每台部署各不同）
+instance.json
+data/
+
+# 运行时数据库（体积大，由采集任务写入）
+db/sites/*.db
+db/sites/*.db-journal
+db/sites/*.db-wal
+db/sites/*.db-shm
+v2/db/*.db
+v2/db/*.db-*
+
+# 凭据：账户 token / refresh token / cookie，以及本站 PAT
+v2/secrets/*
+!v2/secrets/.gitkeep
+!v2/secrets/accounts.example.json
+meta/*
+!meta/.gitkeep
+
+# 采集插件导出的明文快照，不要进版本库
+*.capture.json
+accounts.capture*.json
+
+# 杂项
+.credentials/
+node_modules/
+*.log
+.openchamber/
+.DS_Store
+Thumbs.db

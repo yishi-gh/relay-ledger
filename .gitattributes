@@ -1,0 +1,2 @@
+# 统一换行：仓库内一律 LF，避免 Windows 检出把脚本与文档改成 CRLF。
+* text=auto eol=lf

@@ -1,0 +1,52 @@
+# relay-ledger 采集服务（systemd 单元模板）
+#
+# 作用：常驻运行 v2/jobs/run-scheduler.mjs，每 15 分钟采集一次上游余额与站点日志，
+#       并每天执行一次日志清理与归档。
+#
+# 安装：
+#   sudo cp v2/deploy/relay-collector.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now relay-collector
+#   systemctl status relay-collector && journalctl -u relay-collector -n 50
+#
+# 需要按实际环境替换的占位：
+#   - User / Group    运行用户（占位值 relay-ledger，需先创建用户与数据目录）
+#   - /opt/relay-ledger   项目根目录（该目录下应有 v2/ 与 web/vendor/）
+#   - /usr/bin/node       `command -v node` 的结果，Node 必须 >= 22.13
+#
+# 前置：
+#   - sudo useradd --system --home /opt/relay-ledger --shell /usr/sbin/nologin relay-ledger
+#   - sudo install -d -o relay-ledger -g relay-ledger -m 0750 /var/lib/relay-ledger
+#   - /etc/relay-ledger/instance.json 与 <dataDir>/accounts.json 已就位，
+#     accounts.json 权限 0600、属主为上面的运行用户
+#   - 直读模式（collect.source = "db"）时，运行用户还要能读 NewAPI 的 one-api.db 及其 WAL 文件
+#
+# 采集只写自己的看板库与站点日志库，不写站点业务库，也不需要站点业务库的写权限。
+
+[Unit]
+Description=relay-ledger collector (balances + site logs)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=relay-ledger
+Group=relay-ledger
+WorkingDirectory=/opt/relay-ledger
+Environment=RELAY_LEDGER_INSTANCE=/etc/relay-ledger/instance.json
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node v2/jobs/run-scheduler.mjs
+Restart=always
+RestartSec=10
+# runner 收到 SIGTERM 会清掉定时器后退出 0；给在跑的一轮留出收尾时间
+KillSignal=SIGTERM
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+# /home 保持可读：直读模式下业务库常在 /home/newapi 下
+ProtectHome=read-only
+ReadWritePaths=/var/lib/relay-ledger
+
+[Install]
+WantedBy=multi-user.target

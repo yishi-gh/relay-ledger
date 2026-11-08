@@ -1,0 +1,25 @@
+# relay-ledger 采集（cron 备选）
+#
+# 与 v2/deploy/relay-collector.service（常驻 runner）二选一，不要同时启用：
+# 同时启用会重复采集，数据幂等但白费请求，也更容易触发上游限流。
+# 推荐常驻方案；cron 适合不能装 systemd 或只想按点跑的环境。
+#
+# 用法：crontab -e 后粘贴下面两行，按实际路径修改。
+#
+# 需要改的地方：
+#   - /opt/relay-ledger                    项目根目录（含 v2/ 与 web/vendor/）
+#   - /etc/relay-ledger/instance.json      实例配置路径
+#   - /usr/bin/node                        `command -v node` 的结果；Node 必须 >= 22.13
+#   - /var/lib/relay-ledger/logs           日志目录，先 install -d -o relay-ledger
+#
+# 凭据：<dataDir>/accounts.json 与 PAT 文件须 0600（PAT 可 0640 root:relay-ledger），
+# 属主为 crontab 所属用户；token / cookie / PAT 不要写进 cron 行或命令行参数。
+#
+# 时间点：余额落在 :10/:25/:40/:55（整点后 10 秒的等价近似，cron 无法精确到秒），
+# 日志排在余额之后，避免同一分钟抢源库；两者都是 15 分钟一轮。
+
+# 余额与充值：每 15 分钟（:10 / :25 / :40 / :55）
+10,25,40,55 * * * * cd /opt/relay-ledger && RELAY_LEDGER_INSTANCE=/etc/relay-ledger/instance.json /usr/bin/node v2/jobs/collect-spend.mjs >> /var/lib/relay-ledger/logs/collect-spend.log 2>&1
+
+# 站点日志：每 15 分钟，错开余额 4 分钟（:14 / :29 / :44 / :59）
+14,29,44,59 * * * * cd /opt/relay-ledger && RELAY_LEDGER_INSTANCE=/etc/relay-ledger/instance.json /usr/bin/node v2/jobs/collect-site-logs.mjs >> /var/lib/relay-ledger/logs/collect-site-logs.log 2>&1

@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>中转站经营看板</title>
+  <!-- Tabler 1.7.3 CSS -->
+  <link rel="stylesheet" href="/vendor-tabler.css">
+  <!-- 自定义覆盖样式（Tabler 设计节奏适配版） -->
+  <link rel="stylesheet" href="styles.css?v=12">
+</head>
+<body class="layout-fluid">
+  <!-- 全局加载进度指示条 -->
+  <div class="progress-bar" id="global-progress" aria-hidden="true"></div>
+
+  <div class="page">
+    <!-- 顶栏：Tabler 经典品牌栏 (轻量、克制) -->
+    <header class="navbar navbar-expand-md d-print-none sticky-top" id="topbar">
+      <div class="container-xl app-container">
+        <div class="navbar-brand d-flex align-items-center gap-2">
+          <span class="fs-2 fw-bold text-reset" id="brand-name" style="letter-spacing: -0.02em;">relay-ledger</span>
+          <span class="text-secondary small fw-normal">经营看板</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="page-wrapper">
+      <!-- 1. 页头（大留白、层级清晰、两端对齐） -->
+      <div class="page-header d-print-none">
+        <div class="container-xl app-container">
+          <div class="row g-3 align-items-center justify-content-between">
+            <div class="col-12 col-md-auto">
+              <!-- 左侧上下两层：12px 弱化眉标 + 28px 粗体主标题 + 13px 弱化说明 -->
+              <div class="page-pretitle text-secondary fw-medium" style="font-size: 12px; letter-spacing: 0.04em;">OVERVIEW · 总览</div>
+              <h1 class="page-title fw-bold my-1" style="font-size: 28px; line-height: 1.2;">经营看板</h1>
+              <div class="text-secondary small mt-1" id="cutoff-info" style="font-size: 13px;">
+                数据截止 <span class="mono text-body fw-medium" id="cutoff-time" title="最后一条业务请求的时间">—</span>
+                <span class="text-secondary mx-1">·</span>
+                上次采集 <span class="mono text-body fw-medium" id="collect-time" title="采集器最后一次成功拉取站点日志的时间">—</span>
+              </div>
+            </div>
+            <div class="col-12 col-md-auto">
+              <!-- 右侧同一行：四档范围 segmented control + 主题按钮 + 刷新按钮 -->
+              <div class="d-flex flex-wrap align-items-center gap-2">
+                <div class="btn-group" id="range-presets" role="group" aria-label="统计时间范围">
+                  <button type="button" class="btn btn-sm btn-outline-secondary seg-btn" data-range="24h">近 24 小时</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary seg-btn active" data-range="7d">近 7 天</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary seg-btn" data-range="30d">近 30 天</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary seg-btn" data-range="all">全部</button>
+                </div>
+                <!-- 主题切换按钮 -->
+                <button type="button" class="btn btn-sm btn-icon btn-outline-secondary" id="btn-theme-toggle" aria-label="切换浅色/深色主题" title="切换浅色/深色">
+                  <svg class="icon icon-moon hide-theme-dark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+                  </svg>
+                  <svg class="icon icon-sun hide-theme-light" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2"></path>
+                    <path d="M12 20v2"></path>
+                    <path d="M4.93 4.93l1.41 1.41"></path>
+                    <path d="M17.66 17.66l1.41 1.41"></path>
+                    <path d="M2 12h2"></path>
+                    <path d="M20 12h2"></path>
+                    <path d="M6.34 17.66l-1.41 1.41"></path>
+                    <path d="M19.07 4.93l-1.41 1.41"></path>
+                  </svg>
+                </button>
+                <!-- 刷新主按钮 (蓝色 btn-primary) -->
+                <button type="button" class="btn btn-sm btn-primary btn-refresh" id="btn-refresh" aria-label="刷新看板数据">
+                  <svg class="icon icon-refresh me-1" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4"></path>
+                    <path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"></path>
+                  </svg>
+                  <span id="btn-refresh-text">刷新</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 页面主要内容区 -->
+      <div class="page-body">
+        <div class="container-xl app-container d-flex flex-column gap-3 main-content">
+          <!-- ① KPI 行 (第一排 4 张卡：三段式解剖，迷你 sparkline 与同比芯片，右侧环形仪表) -->
+          <section class="section-kpi" aria-label="核心经营指标">
+            <div class="row row-deck row-cards g-3">
+              <!-- 卡片 1: 本站售出 -->
+              <div class="col-sm-6 col-lg-3">
+                <article class="card kpi-card" id="card-revenue">
+                  <div class="card-body d-flex flex-column justify-content-between h-100">
+                    <div>
+                      <div class="d-flex align-items-center justify-content-between mb-2">
+                        <span class="text-secondary small fw-medium" style="font-size: 12px;">本站售出</span>
+                      </div>
+                      <div class="kpi-value-slot mb-1">
+                        <span class="num fw-bold kpi-value" id="kpi-revenue-val">—</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="d-flex align-items-center justify-content-between mt-1">
+                        <div class="d-flex align-items-center gap-1">
+                          <span class="kpi-pop-badge" id="kpi-revenue-pop">—</span>
+                          <span class="text-secondary" style="font-size: 11px;">较上周期</span>
+                        </div>
+                      </div>
+                      <div class="kpi-sparkline mt-2" id="sparkline-revenue"></div>
+                    </div>
+                    <span class="kpi-sub-text" id="kpi-revenue-sub" hidden></span>
+                  </div>
+                </article>
+              </div>
+
+              <!-- 卡片 2: Token 消耗 -->
+              <div class="col-sm-6 col-lg-3">
+                <article class="card kpi-card" id="card-tokens">
+                  <div class="card-body d-flex flex-column justify-content-between h-100">
+                    <div>
+                      <div class="d-flex align-items-center justify-content-between mb-2">
+                        <span class="text-secondary small fw-medium" style="font-size: 12px;">Token 消耗</span>
+                        <span class="text-secondary small" style="font-size: 12px;">输入+输出</span>
+                      </div>
+                      <div class="kpi-value-slot mb-1">
+                        <span class="num fw-bold kpi-value" id="kpi-tokens-val">—</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="d-flex align-items-center justify-content-between mt-1">
+                        <div class="d-flex align-items-center gap-1">
+                          <span class="kpi-pop-badge" id="kpi-tokens-pop">—</span>
+                          <span class="text-secondary" style="font-size: 11px;">较上周期</span>
+                        </div>
+                      </div>
+                      <div class="kpi-sparkline mt-2" id="sparkline-tokens"></div>
+                    </div>
+                    <span class="kpi-sub-text" id="kpi-tokens-sub" hidden></span>
+                  </div>
+                </article>
+              </div>
+
+              <!-- 卡片 3: 总请求数 -->
+              <div class="col-sm-6 col-lg-3">
+                <article class="card kpi-card" id="card-requests">
+                  <div class="card-body d-flex flex-column justify-content-between h-100">
+                    <div>
+                      <div class="d-flex align-items-center justify-content-between mb-2">
+                        <span class="text-secondary small fw-medium" style="font-size: 12px;">总请求数</span>
+                        <span class="text-secondary small" style="font-size: 12px;">调用量</span>
+                      </div>
+                      <div class="kpi-value-slot mb-1">
+                        <span class="num fw-bold kpi-value" id="kpi-requests-val">—</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="d-flex align-items-center justify-content-between mt-1">
+                        <div class="d-flex align-items-center gap-1">
+                          <span class="kpi-pop-badge" id="kpi-requests-pop">—</span>
+                          <span class="text-secondary" style="font-size: 11px;">较上周期</span>
+                        </div>
+                      </div>
+                      <div class="kpi-sparkline mt-2" id="sparkline-requests"></div>
+                    </div>
+                    <span class="kpi-sub-text" id="kpi-requests-sub" hidden></span>
+                  </div>
+                </article>
+              </div>
+
+              <!-- 卡片 4: 综合缓存率 (参考图右上环形仪表) -->
+              <div class="col-sm-6 col-lg-3">
+                <article class="card kpi-card" id="card-cache">
+                  <div class="card-body d-flex flex-column justify-content-between h-100">
+                    <div class="d-flex align-items-center justify-content-between mb-1">
+                      <span class="text-secondary small fw-medium" style="font-size: 12px;">综合缓存率</span>
+                      <span class="text-secondary small" style="font-size: 12px;">命中效率</span>
+                    </div>
+                    <div class="d-flex align-items-center justify-content-between">
+                      <div class="kpi-cache-left">
+                        <div class="kpi-value-slot mb-1">
+                          <span class="num fw-bold text-success kpi-value" id="kpi-cache-val">—</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-1 mt-1">
+                          <span class="kpi-pop-badge" id="kpi-cache-pop">—</span>
+                          <span class="text-secondary" style="font-size: 11px;" id="kpi-cache-sub">读取占比</span>
+                        </div>
+                      </div>
+                      <div class="kpi-ring-gauge flex-shrink-0" id="sparkline-cache"></div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </section>
+
+          <!-- ② 财务行 (第二排 4 张卡的节奏：上游成本 / 利润 / 毛利率 / 快照覆盖度) -->
+          <section class="section-finance" aria-label="财务与核算">
+            <div class="row row-deck row-cards g-3">
+              <!-- 财务卡 1: 上游成本 -->
+              <div class="col-sm-6 col-lg-3">
+                <article class="card finance-card" id="card-upstream">
+                  <div class="card-body d-flex flex-column justify-content-between h-100">
+                    <div>
+                      <div class="d-flex align-items-center justify-content-between mb-2">
+                        <span class="text-secondary small fw-medium" style="font-size: 12px;">上游成本</span>
+                        <span class="badge badge-amber" id="kpi-upstream-badge">待接快照</span>
+                      </div>
+                      <div class="kpi-value-slot mb-1" id="kpi-upstream-slot">
+                        <span class="h1 mb-0 fw-bold num text-secondary kpi-value" id="kpi-upstream-val">—</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-secondary small mb-2" id="kpi-upstream-sub" style="font-size: 12px;">待接入站点余额快照</div>
+                      <div class="progress progress-xs" style="height: 4px;">
+                        <div class="progress-bar bg-primary" id="kpi-upstream-progress" style="width: 0%;"></div>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+
+              <!-- 财务卡 2: 经营利润 -->
+              <div class="col-sm-6 col-lg-3">
+                <article class="card finance-card" id="card-profit">
+                  <div class="card-body d-flex flex-column justify-content-between h-100">
+                    <div>
+                      <div class="d-flex align-items-center justify-content-between mb-2">
+                        <span class="text-secondary small fw-medium" style="font-size: 12px;">经营利润</span>
+                        <span class="badge badge-amber" id="kpi-profit-badge">待接快照</span>
+                      </div>
+                      <div class="kpi-value-slot mb-1" id="kpi-profit-slot">
+                        <span class="h1 mb-0 fw-bold num text-secondary kpi-value" id="kpi-profit-val">—</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-secondary small mb-2" id="kpi-profit-sub" style="font-size: 12px;">售出扣减上游支出</div>
+                      <div class="progress progress-xs" style="height: 4px;">
+                        <div class="progress-bar bg-success" id="kpi-profit-progress" style="width: 0%;"></div>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+
+              <!-- 财务卡 3: 综合毛利率 -->
+              <div class="col-sm-6 col-lg-3">
+                <article class="card finance-card" id="card-margin">
+                  <div class="card-body d-flex flex-column justify-content-between h-100">
+                    <div>
+                      <div class="d-flex align-items-center justify-content-between mb-2">
+                        <span class="text-secondary small fw-medium" style="font-size: 12px;">综合毛利率</span>
+                        <span class="badge badge-amber" id="kpi-margin-badge">待接快照</span>
+                      </div>
+                      <div class="kpi-value-slot mb-1" id="kpi-margin-slot">
+                        <span class="h1 mb-0 fw-bold num text-secondary kpi-value" id="kpi-margin-val">—</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-secondary small mb-2" id="kpi-margin-sub" style="font-size: 12px;">核算利润占售出比例</div>
+                      <div class="progress progress-xs" style="height: 4px;">
+                        <div class="progress-bar bg-info" id="kpi-margin-progress" style="width: 0%;"></div>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+
+              <!-- 财务卡 4: 快照覆盖度 -->
+              <div class="col-sm-6 col-lg-3">
+                <article class="card finance-card" id="card-integrity">
+                  <div class="card-body d-flex flex-column justify-content-between h-100">
+                    <div>
+                      <div class="d-flex align-items-center justify-content-between mb-2">
+                        <span class="text-secondary small fw-medium" style="font-size: 12px;">快照覆盖度</span>
+                        <span class="badge badge-neutral" id="kpi-integrity-badge">0 / 10 站点</span>
+                      </div>
+                      <div class="kpi-value-slot mb-1" id="kpi-integrity-slot">
+                        <span class="h1 mb-0 fw-bold num text-secondary kpi-value" id="kpi-integrity-val">0%</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-secondary small mb-2" id="kpi-integrity-sub" style="font-size: 12px;">有快照的站点占比</div>
+                      <div class="progress progress-xs" style="height: 4px;">
+                        <div class="progress-bar bg-secondary" id="kpi-integrity-progress" style="width: 0%;"></div>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </section>
+
+          <!-- ③ 图标磁贴行 (参考图第三排 4 个小卡，高约 72px) -->
+          <section class="section-tiles" aria-label="业务概览磁贴">
+            <div class="row row-deck row-cards g-3">
+              <!-- 磁贴 1: 上游站点 (主蓝) -->
+              <div class="col-sm-6 col-lg-3">
+                <div class="card card-tile">
+                  <div class="card-body p-3 d-flex align-items-center gap-3">
+                    <div class="tile-icon flex-shrink-0 d-flex align-items-center justify-content-center" style="background-color: var(--tblr-primary); color: #ffffff;">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                        <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                        <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                        <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                      </svg>
+                    </div>
+                    <div class="tile-content">
+                      <div class="tile-val fw-bold num" id="tile-upstream-sites">10 个</div>
+                      <div class="tile-label text-secondary" style="font-size: 12px;">上游站点</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 磁贴 2: 在售渠道 (绿) -->
+              <div class="col-sm-6 col-lg-3">
+                <div class="card card-tile">
+                  <div class="card-body p-3 d-flex align-items-center gap-3">
+                    <div class="tile-icon flex-shrink-0 d-flex align-items-center justify-content-center" style="background-color: var(--tblr-success); color: #ffffff;">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                        <polyline points="2 17 12 22 22 17"></polyline>
+                        <polyline points="2 12 12 17 22 12"></polyline>
+                      </svg>
+                    </div>
+                    <div class="tile-content">
+                      <div class="tile-val fw-bold num" id="tile-channels-count">—</div>
+                      <div class="tile-label text-secondary" style="font-size: 12px;">在售渠道</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 磁贴 3: 未映射售出 (琥珀) -->
+              <div class="col-sm-6 col-lg-3">
+                <div class="card card-tile">
+                  <div class="card-body p-3 d-flex align-items-center gap-3">
+                    <div class="tile-icon flex-shrink-0 d-flex align-items-center justify-content-center" style="background-color: var(--tblr-warning); color: #ffffff;">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                      </svg>
+                    </div>
+                    <div class="tile-content">
+                      <div class="tile-val fw-bold num" id="tile-unmapped-rev">—</div>
+                      <div class="tile-label text-secondary" style="font-size: 12px;">未映射售出</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 磁贴 4: 数据新鲜度 (灰蓝 / 蔚蓝) -->
+              <div class="col-sm-6 col-lg-3">
+                <div class="card card-tile">
+                  <div class="card-body p-3 d-flex align-items-center gap-3">
+                    <div class="tile-icon flex-shrink-0 d-flex align-items-center justify-content-center" style="background-color: var(--tblr-azure); color: #ffffff;">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                      </svg>
+                    </div>
+                    <div class="tile-content">
+                      <div class="tile-val fw-bold" id="tile-freshness">—</div>
+                      <div class="tile-label text-secondary" style="font-size: 12px;">数据新鲜度</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ④ 收入与请求趋势 (全宽卡片，图表高度 300px，图例右对齐) -->
+          <section class="section-card-full" id="panel-trend">
+            <div class="card">
+              <div class="card-header d-flex align-items-center justify-content-between py-2 px-3">
+                <h3 class="card-title m-0 fw-bold card-title-with-range" style="font-size: 16px;">收入与请求趋势<span class="range-label" data-range-label></span></h3>
+              </div>
+              <div class="card-body p-3">
+                <div class="chart-container" id="trend-chart-box" style="height: 300px;">
+                  <div id="trend-chart" class="echarts-dom"></div>
+                  <div id="chart-fallback" class="chart-fallback" hidden></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ⑤ 站点盈利：图 (320px) + 汇总表 -->
+          <section class="section-card-full" id="panel-profit">
+            <div class="card">
+              <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2 py-2 px-3">
+                <h3 class="card-title m-0 fw-bold card-title-with-range" style="font-size: 16px;">站点盈利<span class="range-label" data-range-label></span></h3>
+                <div class="card-actions d-flex align-items-center gap-2 profit-controls">
+                  <div class="btn-group" id="profit-granularity" role="group" aria-label="盈利统计粒度">
+                    <button type="button" class="btn btn-sm btn-outline-secondary seg-btn active" data-granularity="day">日</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary seg-btn" data-granularity="hour">小时</button>
+                  </div>
+                  <select class="form-select form-select-sm profit-select" id="profit-site" aria-label="站点筛选">
+                    <option value="all">全部站点</option>
+                  </select>
+                </div>
+              </div>
+              <div class="card-body p-3 border-bottom">
+                <div class="chart-container profit-chart-container" style="height: 320px;">
+                  <div id="profit-chart" class="echarts-dom"></div>
+                  <div id="profit-fallback" class="chart-fallback" hidden></div>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-sm table-vcenter card-table table-hover data-table" id="table-profit">
+                  <thead>
+                    <tr class="text-secondary small" style="font-size: 12px; letter-spacing: 0.04em;">
+                      <th>站点 / 类型</th>
+                      <th class="num text-end">售出</th>
+                      <th class="num text-end">充值</th>
+                      <th class="num text-end">成本</th>
+                      <th class="num text-end">利润</th>
+                      <th class="num text-end">毛利率</th>
+                      <th class="cell-center">状态</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbody-profit">
+                    <tr>
+                      <td colspan="7" class="table-loading text-center text-secondary py-4">正在核算站点盈利...</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="card-footer py-2 px-3 text-secondary small bg-transparent" id="profit-footer">
+                <span id="profit-unmapped-note">未映射渠道售出：—</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- ⑥ 渠道经营表现 -->
+          <section class="section-card-full" id="panel-details">
+            <div class="card">
+              <div class="card-header d-flex align-items-center justify-content-between gap-2 flex-wrap">
+                <h3 class="card-title card-title-with-range">
+                  渠道经营表现
+                  <span class="badge bg-secondary-lt ms-2" id="channel-count-badge">0 个渠道</span>
+                  <span class="range-label" data-range-label></span>
+                </h3>
+                <div class="col-picker" id="cols-channels"></div>
+              </div>
+              <div class="card-body p-0 details-body">
+                <div class="table-responsive tab-panel" id="panel-tab-channels">
+                  <table class="table table-sm table-vcenter card-table table-hover data-table" id="table-channels">
+                    <thead>
+                      <tr class="text-secondary small" style="font-size: 12px; letter-spacing: 0.04em;">
+                        <!-- 表头由 app.js 的列模型生成（受列选择器控制） -->
+                      </tr>
+                    </thead>
+                    <tbody id="tbody-channels">
+                      <tr>
+                        <td colspan="9" class="table-loading text-center text-secondary py-4">正在加载渠道数据...</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                </div>
+            </div>
+          </section>
+
+          <!-- ⑦ 分组经营表现 -->
+          <section class="section-card-full" id="panel-groups-card">
+            <div class="card">
+              <div class="card-header d-flex align-items-center justify-content-between gap-2 flex-wrap">
+                <h3 class="card-title card-title-with-range">
+                  分组经营表现
+                  <span class="badge bg-secondary-lt ms-2" id="group-count-badge">0 个分组</span>
+                  <span class="range-label" data-range-label></span>
+                </h3>
+                <div class="col-picker" id="cols-groups"></div>
+              </div>
+              <div class="card-body p-0 details-body">
+                <div class="table-responsive tab-panel" id="panel-tab-groups">
+                  <table class="table table-sm table-vcenter card-table table-hover data-table" id="table-groups">
+                    <thead>
+                      <tr class="text-secondary small" style="font-size: 12px; letter-spacing: 0.04em;">
+                        <!-- 表头由 app.js 的列模型生成（受列选择器控制） -->
+                      </tr>
+                    </thead>
+                    <tbody id="tbody-groups">
+                      <tr>
+                        <td colspan="11" class="table-loading text-center text-secondary py-4">正在加载分组数据...</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ⑧ 上游账户与核算 -->
+          <section class="section-card-full" id="panel-upstreams-card">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title card-title-with-range">
+                  上游账户与核算
+                  <span class="badge bg-secondary-lt ms-2" id="upstream-count-badge">0 个账户</span>
+                  <span class="range-label" data-range-label></span>
+                </h3>
+              </div>
+              <div class="card-body p-0 details-body">
+                <div class="table-responsive tab-panel" id="panel-tab-upstreams">
+                  <table class="table table-sm table-vcenter card-table table-hover data-table" id="table-upstreams">
+                    <thead>
+                      <tr class="text-secondary small" style="font-size: 12px; letter-spacing: 0.04em;">
+                        <th>账户 / 类型</th>
+                        <th class="cell-center">启用状态</th>
+                        <th class="num text-end">当前余额</th>
+                        <th class="num text-end">充值/赠额</th>
+                        <th class="num text-end">上报消费</th>
+                        <th class="num text-end">推导消费</th>
+                        <th class="num text-end">毛利率</th>
+                        <th class="cell-center">状态</th>
+                        <th class="cell-center">最后同步</th>
+                      </tr>
+                    </thead>
+                    <tbody id="tbody-upstreams">
+                      <tr>
+                        <td colspan="9" class="table-loading text-center text-secondary py-4">正在读取上游账户配置...</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- ⑨ 页脚状态条 (一行 12px 弱化状态，含任务抽屉展开) -->
+      <footer class="footer footer-transparent d-print-none py-3 mt-4" id="panel-quality">
+        <div class="container-xl app-container">
+          <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 text-secondary" style="font-size: 12px;">
+            <div class="d-flex flex-wrap align-items-center gap-2">
+              <span class="badge badge-success" id="q-source-badge">源库就绪</span>
+              <span>日志 <span class="num fw-bold text-body" id="q-source-rows">—</span> 条</span>
+              <span class="text-muted">·</span>
+              <span>最新日志 <span class="mono text-body" id="q-source-time">—</span> (<span id="q-source-freshness">—</span>)</span>
+              <span class="text-muted">·</span>
+              <span>采集 <span class="badge badge-neutral" id="q-task-badge">采集待接入</span></span>
+              <span class="badge badge-warning" id="q-collect-errors" hidden></span>
+              <span id="q-error-rows" hidden></span>
+              <span id="q-error-sub" hidden></span>
+              <span id="q-schema-status" hidden></span>
+              <span id="q-jobs-summary" hidden></span>
+              <span id="q-checked-time" hidden></span>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+              <button type="button" class="btn btn-sm btn-ghost-secondary text-secondary py-0 px-2" id="btn-toggle-jobs" aria-expanded="false" style="font-size: 12px;">
+                <span>任务记录</span>
+                <svg class="chevron-icon ms-1" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+              </button>
+              <span class="text-muted">|</span>
+              <span id="footer-brand">中转站经营看板</span>
+            </div>
+          </div>
+
+          <!-- 任务抽屉 -->
+          <div class="quality-drawer border rounded mt-2 p-2 bg-surface" id="quality-drawer" hidden>
+            <div class="p-2 text-secondary small jobs-empty-callout" id="jobs-empty-callout">
+              <span id="jobs-status-desc">本地离线预览模式：未连接后台采集 cron，任务记录为空。</span>
+            </div>
+            <div class="table-responsive" id="jobs-table-wrap" hidden>
+              <table class="table table-sm table-vcenter card-table table-hover data-table" id="table-jobs">
+                <thead>
+                  <tr class="text-secondary small" style="font-size: 12px;">
+                    <th>任务名称</th>
+                    <th class="cell-center">状态</th>
+                    <th>开始时间</th>
+                    <th>完成时间 / 耗时</th>
+                    <th>详情 / 备注</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-jobs"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 脚本：优先加载本地 echarts 库，随后加载业务控制逻辑 -->
+  <script src="/vendor/echarts.min.js"></script>
+  <script src="app.js?v=12" type="module"></script>
+</body>
+</html>

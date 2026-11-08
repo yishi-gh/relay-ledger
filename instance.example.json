@@ -1,0 +1,20 @@
+{
+  "_comment": "复制为 instance.json 后按需修改；data_dir 是运行期数据目录，不要提交。相对路径相对于本文件所在目录解析。",
+  "site": {
+    "id": "relay",
+    "name": "My Relay",
+    "base_url": "https://relay.example.com",
+    "log_path": "/api/log"
+  },
+  "paths": {
+    "data_dir": "./data",
+    "relay_db": "/home/newapi/one-api.db",
+    "site_token": "",
+    "accounts": ""
+  },
+  "collect": {
+    "source": "db",
+    "spend_interval_ms": 900000,
+    "logs_interval_ms": 900000
+  }
+}

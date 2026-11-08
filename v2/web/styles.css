@@ -1,0 +1,536 @@
+/* ==========================================================================
+   中转站经营看板 · Tabler 1.7.3 专用补充样式表 (仪表盘节奏复刻版)
+   设计规范：
+   1. 颜色严格采用 var(--tblr-*)，无硬编码 hex
+   2. 卡片规范：8px 圆角、1px 边框、无投影、无渐变背景、card-body 内边距 20px
+   3. 栅格间距严格为 16px，大中小屏严密无缝
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. 基础数字排版与字体
+   -------------------------------------------------------------------------- */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.mono {
+  font-family: var(--tblr-font-monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+.cell-center {
+  text-align: center;
+}
+
+/* --------------------------------------------------------------------------
+   2. 全局加载指示进度条
+   -------------------------------------------------------------------------- */
+.progress-bar#global-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--tblr-primary);
+  transform-origin: 0% 50%;
+  transform: scaleX(0);
+  transition: transform 0.25s ease;
+  z-index: 1050;
+  pointer-events: none;
+}
+
+.progress-bar#global-progress.active {
+  transform: scaleX(0.75);
+}
+
+.progress-bar#global-progress.done {
+  transform: scaleX(1);
+  opacity: 0;
+  transition: transform 0.2s ease, opacity 0.4s ease 0.1s;
+}
+
+/* 刷新按钮加载旋转 */
+.btn-refresh .icon-refresh {
+  transition: transform 0.4s ease;
+}
+
+.btn-refresh.loading .icon-refresh {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}
+
+/* --------------------------------------------------------------------------
+   3. 卡片标准约束 (8px 圆角、无阴影、无渐变、20px 内边距)
+   -------------------------------------------------------------------------- */
+.card {
+  border-radius: 8px !important;
+  border: 1px solid var(--tblr-border-color) !important;
+  box-shadow: none !important;
+  background-image: none !important;
+  background-color: var(--tblr-card-bg, var(--tblr-bg-surface));
+}
+
+/* 页面底色压深一档，卡片浮起来：靠色差分层，不靠阴影 */
+/* 页面底色与白卡拉开一档：靠色差分层，不靠阴影（浅色白卡下方用灰蓝底，暗色用更深一档） */
+:root,
+[data-bs-theme="light"] {
+  --app-page-bg: #eef2f6;
+}
+[data-bs-theme="dark"] {
+  --app-page-bg: #0e1013;
+}
+body {
+  background-color: var(--app-page-bg) !important;
+}
+
+.card-body {
+  padding: 20px !important;
+}
+
+/* 统一卡片间隙为 16px */
+.row-cards {
+  --tblr-gutter-x: 16px;
+  --tblr-gutter-y: 16px;
+}
+
+/* --------------------------------------------------------------------------
+   4. 分段按钮组激活态 (Segmented Buttons)
+   -------------------------------------------------------------------------- */
+.btn-group > .seg-btn.active {
+  background-color: var(--tblr-primary);
+  border-color: var(--tblr-primary);
+  color: var(--tblr-primary-fg, #ffffff);
+  font-weight: 600;
+  z-index: 2;
+}
+
+/* --------------------------------------------------------------------------
+   5. 状态徽章语义样式 (融入 Tabler 调色盘变量)
+   -------------------------------------------------------------------------- */
+.badge-success {
+  background-color: rgba(var(--tblr-success-rgb), 0.15);
+  color: var(--tblr-success);
+  border: 1px solid rgba(var(--tblr-success-rgb), 0.3);
+}
+
+.badge-amber,
+.badge-warning {
+  background-color: rgba(var(--tblr-warning-rgb), 0.15);
+  color: var(--tblr-warning);
+  border: 1px solid rgba(var(--tblr-warning-rgb), 0.3);
+}
+
+.badge-danger {
+  background-color: rgba(var(--tblr-danger-rgb), 0.15);
+  color: var(--tblr-danger);
+  border: 1px solid rgba(var(--tblr-danger-rgb), 0.3);
+}
+
+.badge-info {
+  background-color: rgba(var(--tblr-info-rgb), 0.15);
+  color: var(--tblr-info);
+  border: 1px solid rgba(var(--tblr-info-rgb), 0.3);
+}
+
+.badge-neutral {
+  background-color: rgba(var(--tblr-secondary-rgb), 0.15);
+  color: var(--tblr-secondary);
+  border: 1px solid rgba(var(--tblr-secondary-rgb), 0.3);
+}
+
+/* 采集失败徽标：title 里带逐条明细，给出可悬停提示 */
+#q-collect-errors {
+  cursor: help;
+}
+
+/* --------------------------------------------------------------------------
+   6. KPI 指标卡解剖 (高度适中、大留白、迷你 sparkline、同比芯片、环形仪表)
+   -------------------------------------------------------------------------- */
+.kpi-card {
+  min-height: 148px;
+}
+
+.kpi-value {
+  font-size: 30px;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.kpi-unit-suffix {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--tblr-secondary);
+  margin-left: 3px;
+  vertical-align: baseline;
+}
+
+.kpi-sparkline {
+  height: 38px;
+  width: 100%;
+}
+
+.kpi-ring-gauge {
+  width: 96px;
+  height: 96px;
+}
+
+.kpi-pop-badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.kpi-sub-text[hidden] {
+  display: none !important;
+}
+
+/* --------------------------------------------------------------------------
+   7. 财务卡解剖
+   -------------------------------------------------------------------------- */
+.finance-card {
+  min-height: 138px;
+}
+
+.finance-card .kpi-value {
+  font-size: 28px;
+}
+
+/* --------------------------------------------------------------------------
+   8. 图标磁贴行解剖 (矮卡高约 72px，左侧 40x40 圆角方块填色底 + 白图标)
+   -------------------------------------------------------------------------- */
+.card-tile {
+  min-height: 72px;
+}
+
+.card-tile .card-body {
+  padding: 14px 18px !important;
+}
+
+.tile-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+}
+
+.tile-val {
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+/* --------------------------------------------------------------------------
+   9. 图表容器尺寸与降级
+   -------------------------------------------------------------------------- */
+.chart-container {
+  position: relative;
+  width: 100%;
+}
+
+.echarts-dom {
+  width: 100%;
+  height: 100%;
+}
+
+.chart-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--tblr-bg-surface-secondary, rgba(var(--tblr-body-color-rgb), 0.03));
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+}
+
+.chart-fallback[hidden] {
+  display: none !important;
+}
+
+.chart-fallback-svg {
+  width: 100%;
+  max-width: 480px;
+  height: 140px;
+  margin-bottom: 8px;
+}
+
+.chart-fallback-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--tblr-body-color);
+}
+
+.chart-fallback-sub {
+  font-size: 0.75rem;
+}
+
+/* --------------------------------------------------------------------------
+   10. 表格系统 (横向滚动 + Sticky 首列 + 金额右对齐 + 弱化表头)
+   -------------------------------------------------------------------------- */
+.table-responsive {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.data-table {
+  white-space: nowrap;
+}
+
+.data-table thead th {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--tblr-secondary);
+  font-weight: 600;
+  border-bottom: 1px solid var(--tblr-border-color);
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.data-table tbody td {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+.data-table th.num,
+.data-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+#table-profit {
+  min-width: 680px;
+}
+
+#table-channels {
+  min-width: 860px;
+}
+
+#table-groups {
+  min-width: 960px;
+}
+
+#table-upstreams {
+  min-width: 700px;
+}
+
+/* 首列 Sticky 钉在左侧，左右滚动时边界清晰 */
+#table-profit th:first-child,
+#table-profit td:first-child,
+#table-channels th:first-child,
+#table-channels td:first-child,
+#table-groups th:first-child,
+#table-groups td:first-child,
+#table-upstreams th:first-child,
+#table-upstreams td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background-color: var(--tblr-card-bg, var(--tblr-bg-surface));
+  box-shadow: 2px 0 4px -2px rgba(0, 0, 0, 0.15);
+}
+
+#table-profit th:first-child,
+#table-channels th:first-child,
+#table-groups th:first-child,
+#table-upstreams th:first-child {
+  z-index: 3;
+  background-color: var(--tblr-table-bg, var(--tblr-card-bg, var(--tblr-bg-surface)));
+}
+
+#table-profit tbody tr:hover td:first-child,
+#table-channels tbody tr:hover td:first-child,
+#table-groups tbody tr:hover td:first-child,
+#table-upstreams tbody tr:hover td:first-child {
+  background-color: var(--tblr-table-hover-bg, rgba(var(--tblr-body-color-rgb), 0.05));
+}
+
+/* --------------------------------------------------------------------------
+   11. 上游账户与渠道单元格辅助样式
+   -------------------------------------------------------------------------- */
+.upstream-acc-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.upstream-acc-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.channel-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 主力模型：主行数值 + 次行模型名 */
+.top-model-cell {
+  line-height: 1.2;
+}
+
+.top-model-name {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* 数据卡标题旁的查询区间：muted 小字，可与标题/徽章一起换行 */
+.card-title-with-range {
+  min-width: 0;
+}
+
+.range-label {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--tblr-secondary);
+  overflow-wrap: break-word;
+}
+
+/* --------------------------------------------------------------------------
+   12. 任务抽屉与标签面板折叠
+   -------------------------------------------------------------------------- */
+.chevron-icon {
+  transition: transform 0.2s ease;
+}
+
+#btn-toggle-jobs[aria-expanded="true"] .chevron-icon {
+  transform: rotate(180deg);
+}
+
+.quality-drawer[hidden],
+.tab-panel[hidden] {
+  display: none !important;
+}
+
+/* --------------------------------------------------------------------------
+   13. 响应式布局自适应微调 (782px 与移动端)
+   -------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .profit-chart-container {
+    height: 280px !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   页面左右留白：跟随 Tabler 演示的流式布局，只留 24px 边距，超宽屏才收口
+   -------------------------------------------------------------------------- */
+/* body.layout-fluid 会把所有 container-* 的 max-width 拉成 100%，这里提高一级特异性收回 */
+body.layout-fluid .app-container {
+  max-width: 1600px;
+  padding-inline: 24px;
+}
+
+@media (max-width: 768px) {
+  .app-container {
+    padding-inline: 16px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   指标色阶：只给数字文字上色，不加底色块
+   -------------------------------------------------------------------------- */
+.metric-good { color: var(--tblr-success); font-weight: 600; }
+.metric-warn { color: var(--tblr-warning); font-weight: 600; }
+.metric-bad  { color: var(--tblr-danger);  font-weight: 600; }
+
+/* --------------------------------------------------------------------------
+   表格列选择器（渠道经营表现 / 分组经营表现）
+   卡头右侧按钮 + 多选面板；只切换列集合，不隐藏 <td>
+   -------------------------------------------------------------------------- */
+.col-picker {
+  position: relative;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.col-picker-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.col-picker-count {
+  color: var(--tblr-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.col-picker-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  min-width: 168px;
+  padding: 6px;
+  border: 1px solid var(--tblr-border-color);
+  border-radius: 8px;
+  background-color: var(--tblr-bg-surface, var(--tblr-card-bg));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+
+.col-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.col-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.col-picker-item:hover {
+  background-color: var(--tblr-bg-surface-secondary, rgba(0, 0, 0, 0.04));
+}
+
+.col-picker-item.is-locked {
+  color: var(--tblr-secondary);
+  cursor: default;
+}
+
+.col-picker-item input {
+  margin: 0;
+}
+
+.col-picker-foot {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--tblr-border-color);
+}
+
+.col-picker-all {
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--tblr-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.col-picker-all:hover {
+  background-color: var(--tblr-bg-surface-secondary, rgba(0, 0, 0, 0.04));
+}

@@ -1,0 +1,13 @@
+{
+  "_note": "旧回退配置：仅当 secrets/accounts.json（或 instance.json 的 paths.accounts）不存在时只读加载，不会写回。正式账户请写 accounts.json；令牌用 auth.token_env 指向环境变量名（例如 RELAY_UPSTREAM_A_TOKEN），不要把明文 token 提交进仓库。",
+  "version": 2,
+  "currency": "USD",
+  "quota_per_unit": 500000,
+  "upstream": {
+    "timeout_ms": 20000,
+    "min_interval_ms": 1200,
+    "retry_delay_ms": 500,
+    "job_stale_ms": 1800000
+  },
+  "accounts": []
+}

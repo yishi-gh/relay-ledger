@@ -1,0 +1,61 @@
+# relay-ledger 面板登录服务（systemd 单元模板）
+#
+# 作用：提供登录页、会话 Cookie 与 nginx auth_request 校验端点，替代 Basic Auth。
+#       只监听 127.0.0.1:8790，仅 nginx 访问。
+#
+# 安装：
+#   sudo cp v2/deploy/relay-auth.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now relay-auth
+#   systemctl status relay-auth && journalctl -u relay-auth -n 30
+#
+# 需要按实际环境替换的占位：
+#   - User / Group    运行用户（占位值 relay-ledger，需先创建用户与数据目录）
+#   - /opt/relay-ledger   项目根目录
+#   - /usr/bin/node       `command -v node` 的结果，Node 必须 >= 22.13
+#
+# 凭据（部署时人工创建，程序不会自动生成、不会打印内容）：
+#   /etc/relay-ledger/panel-password    面板密码，明文，一行
+#   /etc/relay-ledger/session-secret    会话签名密钥，一行随机串
+#
+#   权限：目录 0750，属主 root、组为运行用户；文件 0640：
+#     sudo install -d -m 0750 -o root -g relay-ledger /etc/relay-ledger
+#     printf '%s\n' '换成你的密码' | sudo tee /etc/relay-ledger/panel-password >/dev/null
+#     head -c 32 /dev/urandom | base64 | sudo tee /etc/relay-ledger/session-secret >/dev/null
+#     sudo chown root:relay-ledger /etc/relay-ledger/panel-password /etc/relay-ledger/session-secret
+#     sudo chmod 640 /etc/relay-ledger/panel-password /etc/relay-ledger/session-secret
+#
+#   密钥必须在重启之间保持不变：换了密钥，所有已登录会话立即失效。
+#   程序默认路径在 /root 下（0700），运行用户读不到，所以这里用 Environment= 改到 /etc/relay-ledger。
+#   不要为了省事改成 User=root。
+#
+# 端口与 nginx 的 /login、/verify、/logout 一一对应，见 v2/deploy/nginx.conf.example。
+
+[Unit]
+Description=relay-ledger panel login (panel-auth)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=relay-ledger
+Group=relay-ledger
+WorkingDirectory=/opt/relay-ledger
+Environment=RELAY_LEDGER_INSTANCE=/etc/relay-ledger/instance.json
+Environment=NODE_ENV=production
+Environment=PANEL_PASSWORD_FILE=/etc/relay-ledger/panel-password
+Environment=PANEL_SESSION_SECRET_FILE=/etc/relay-ledger/session-secret
+ExecStart=/usr/bin/node v2/tools/panel-auth.mjs --port=8790
+Restart=always
+RestartSec=5
+# 收到 SIGTERM / SIGINT 会关掉监听后退出 0
+KillSignal=SIGTERM
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/var/lib/relay-ledger
+
+[Install]
+WantedBy=multi-user.target
