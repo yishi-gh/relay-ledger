@@ -1,0 +1,158 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Inter Variable', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+    /* 数字与正文同一字体：靠 tabular-nums 对齐，不再用等宽字体（JetBrains 视觉上过吵） */
+    --font-mono: 'Inter Variable', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-12: var(--chart-12);
+    --color-chart-11: var(--chart-11);
+    --color-chart-10: var(--chart-10);
+    --color-chart-9: var(--chart-9);
+    --color-chart-8: var(--chart-8);
+    --color-chart-7: var(--chart-7);
+    --color-chart-6: var(--chart-6);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-chart-cost: var(--chart-cost);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --chart-1: oklch(0.488 0.243 264.376); /* shadcn 官方 indigo-600 */
+    --chart-2: oklch(0.696 0.170 162.480); /* shadcn 官方 emerald-500 */
+    --chart-3: oklch(0.769 0.188 70.080);  /* shadcn 官方 amber-500 */
+    --chart-4: oklch(0.627 0.265 303.900); /* shadcn 官方 violet-500 */
+    --chart-5: oklch(0.645 0.246 16.439);  /* shadcn 官方 rose-500 */
+    --chart-6: oklch(0.715 0.143 215.221); /* Tailwind 官方 cyan-500 */
+    --chart-7: oklch(0.646 0.222 41.116);  /* Tailwind 官方 orange-600 */
+    --chart-8: oklch(0.768 0.233 130.850); /* Tailwind 官方 lime-500 */
+    --chart-9: oklch(0.652 0.297 328.600); /* Tailwind 官方 fuchsia-500 */
+    --chart-10: oklch(0.500 0.134 242.749); /* Tailwind 官方 sky-700 */
+    --chart-11: oklch(0.704 0.040 256.788); /* Tailwind 官方 slate-400 */
+    --chart-12: oklch(0.370 0.013 73.639);  /* Tailwind 官方 stone-700 */
+    --chart-cost: oklch(0.72 0.005 0); /* 成本柱：真正中性浅灰 */
+    --radius: 0.625rem;
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --chart-1: oklch(0.673 0.182 275.524); /* Tailwind 官方 indigo-400 */
+    --chart-2: oklch(0.765 0.177 163.223); /* Tailwind 官方 emerald-400 */
+    --chart-3: oklch(0.879 0.169 91.605);  /* Tailwind 官方 amber-300 */
+    --chart-4: oklch(0.627 0.265 303.900); /* shadcn 官方 violet-500 */
+    --chart-5: oklch(0.712 0.194 13.428);  /* Tailwind 官方 rose-400 */
+    --chart-6: oklch(0.789 0.154 211.530); /* Tailwind 官方 cyan-400 */
+    --chart-7: oklch(0.705 0.213 47.604);  /* Tailwind 官方 orange-500 */
+    --chart-8: oklch(0.841 0.238 128.850); /* Tailwind 官方 lime-400 */
+    --chart-9: oklch(0.740 0.238 322.160); /* Tailwind 官方 fuchsia-400 */
+    --chart-10: oklch(0.677 0.182 237.323); /* Tailwind 官方 sky-500 */
+    --chart-11: oklch(0.869 0.022 252.894); /* Tailwind 官方 slate-300 */
+    --chart-12: oklch(0.553 0.013 58.071);  /* Tailwind 官方 stone-500 */
+    --chart-cost: oklch(0.52 0.005 0); /* 成本柱：真正中性深灰 */
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+    text-rendering: optimizeLegibility;
+  }
+  html {
+    @apply font-sans;
+  }
+}
