@@ -90,9 +90,11 @@ export function ProfitView({
   const [sortState, setSortState] = React.useState<SortState | null>(null)
 
   // 切换时间范围回到默认口径顺序
-  React.useEffect(() => {
+  const [prevTimeRange, setPrevTimeRange] = React.useState(timeRange)
+  if (prevTimeRange !== timeRange) {
+    setPrevTimeRange(timeRange)
     setSortState(null)
-  }, [timeRange])
+  }
 
   const handleSort = React.useCallback((key: string) => {
     setSortState((prev) => nextSort(prev, key))
@@ -176,9 +178,9 @@ export function ProfitView({
   }
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col space-y-4">
-      {/* 图表与表：内容密度比例 1 : 1.15，等高对齐，<1280 上下堆叠 */}
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_1.15fr] gap-4 items-stretch xl:flex-1 xl:min-h-0">
+    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
+      {/* 图表与表：内容密度比例 1 : 1.15，自然适应高度，<1280 上下堆叠 */}
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_1.15fr] gap-4 items-stretch min-h-[300px] xl:flex-1 xl:min-h-0">
         {/* 左卡：账户盈利 (1fr, p-4) */}
         <Card className="col-span-1 h-full max-xl:h-auto shadow-xs overflow-hidden flex flex-col justify-between min-w-0 p-4">
           <CardHeader className="p-0 pb-2.5 shrink-0">

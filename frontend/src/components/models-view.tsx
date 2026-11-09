@@ -105,39 +105,41 @@ export function ModelsView({
   const [sortState, setSortState] = React.useState<SortState | null>(null)
 
   // 窗口改变时重置排序口径
-  React.useEffect(() => {
+  const [prevTimeRange, setPrevTimeRange] = React.useState(timeRange)
+  if (prevTimeRange !== timeRange) {
+    setPrevTimeRange(timeRange)
     setSortState(null)
-  }, [timeRange])
+  }
 
   // 数据请求
   React.useEffect(() => {
     let cancelled = false
-    setNotReady(false)
 
-    async function load() {
-      if (!dateRange) {
-        if (previewMode) {
-          setData(getMockModels())
-        }
-        return
+    if (!dateRange) {
+      if (previewMode) {
+        Promise.resolve().then(() => {
+          if (!cancelled) setData(getMockModels())
+        })
       }
+      return
+    }
 
-      try {
-        const res = await fetchModels(dateRange)
+    void fetchModels(dateRange)
+      .then((res) => {
         if (cancelled) return
         setData(res)
-      } catch {
+        setNotReady(false)
+      })
+      .catch(() => {
         if (cancelled) return
         if (previewMode) {
           setData(getMockModels())
+          setNotReady(false)
         } else {
           setNotReady(true)
           setData(null)
         }
-      }
-    }
-
-    void load()
+      })
 
     return () => {
       cancelled = true
@@ -156,7 +158,9 @@ export function ModelsView({
         : [...prev, key]
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-      } catch {}
+      } catch {
+        // ignore
+      }
       return next
     })
   }, [])
@@ -184,7 +188,7 @@ export function ModelsView({
   const isScrollable = sortedRows.length > 10
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col space-y-4">
+    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
       {/* 1. 顶部 4 张 KPI 卡片 */}
       <section className="grid grid-cols-2 md:grid-cols-4 gap-3.5 shrink-0">
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">

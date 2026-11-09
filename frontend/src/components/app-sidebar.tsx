@@ -17,10 +17,12 @@ import {
   BarChart3,
   Cpu,
   Radio,
+  Layers,
   Server,
   Wallet,
-  ShieldCheck,
   HeartPulse,
+  ShieldCheck,
+  Activity,
   Settings,
   type LucideIcon,
 } from "lucide-react"
@@ -30,14 +32,16 @@ export type ViewKey =
   | "profit"
   | "rank"
   | "models"
-  | "details"
   | "channels_detail"
   | "groups_detail"
   | "upstreams"
   | "capital"
   | "health"
   | "quality"
+  | "system"
   | "settings"
+
+export type CompatibleViewKey = ViewKey | "details" | "ops"
 
 interface NavItem {
   key: ViewKey
@@ -52,27 +56,29 @@ interface NavGroup {
 
 const NAV_GROUPS: NavGroup[] = [
   {
-    label: "经营",
+    label: "经营分析",
     items: [
       { key: "overview", title: "总览", icon: LayoutDashboard },
       { key: "profit", title: "盈利", icon: TrendingUp },
-    ],
-  },
-  {
-    label: "明细",
-    items: [
       { key: "rank", title: "排行", icon: BarChart3 },
       { key: "models", title: "模型经营", icon: Cpu },
-      { key: "details", title: "经营明细", icon: Radio },
-      { key: "upstreams", title: "上游账户", icon: Server },
     ],
   },
   {
-    label: "运维",
+    label: "运营与资产",
     items: [
+      { key: "channels_detail", title: "渠道明细", icon: Radio },
+      { key: "groups_detail", title: "分组明细", icon: Layers },
+      { key: "upstreams", title: "上游账户", icon: Server },
       { key: "capital", title: "资金与续航", icon: Wallet },
+    ],
+  },
+  {
+    label: "系统与运维",
+    items: [
       { key: "health", title: "渠道健康", icon: HeartPulse },
       { key: "quality", title: "数据质量", icon: ShieldCheck },
+      { key: "system", title: "系统状态", icon: Activity },
     ],
   },
 ]
@@ -122,7 +128,7 @@ export function AppSidebar({
         </div>
       </SidebarHeader>
 
-      {/* 侧栏导航分组：经营 / 明细 / 运维 */}
+      {/* 侧栏导航分组：经营分析 / 运营与资产 / 系统与运维 (共 11 个业务页) */}
       <SidebarContent>
         {NAV_GROUPS.map((group) => (
           <SidebarGroup key={group.label} className="py-2">
@@ -133,7 +139,10 @@ export function AppSidebar({
               <SidebarMenu>
                 {group.items.map((item) => {
                   const Icon = item.icon
-                  const isActive = currentView === item.key
+                  const isActive =
+                    currentView === item.key ||
+                    (item.key === "channels_detail" && (currentView as string) === "details") ||
+                    (item.key === "system" && (currentView as string) === "ops")
                   return (
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton

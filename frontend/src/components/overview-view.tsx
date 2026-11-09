@@ -76,7 +76,7 @@ export function OverviewView({
     kpiData.accountableRevenue < kpiData.revenue
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col space-y-4">
+    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
       {/* 1. KPI 分层：主卡 + 3 张辅卡 (紧凑行, shrink-0) */}
       <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4 items-stretch shrink-0">
         {/* 主卡：本站售出 */}
@@ -239,8 +239,8 @@ export function OverviewView({
         </Card>
       </section>
 
-      {/* 2. 趋势拆两张：按内容密度 1.6 : 1 并排，填满一屏剩余高度 (flex-1 min-h-0) */}
-      <section className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4 items-stretch lg:flex-1 lg:min-h-0">
+      {/* 2. 趋势拆两张：按内容密度 1.6 : 1 并排，自然适应高度 */}
+      <section className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4 items-stretch min-h-[280px] shrink-0 lg:flex-1 lg:min-h-[260px]">
         {/* 左卡：售出结构 (1.6fr) */}
         <Card className="col-span-1 h-auto lg:h-full shadow-xs overflow-hidden flex flex-col justify-between min-w-0 p-4">
           <CardHeader className="p-0 pb-2 shrink-0">

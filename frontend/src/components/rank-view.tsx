@@ -200,11 +200,11 @@ export function RankView({
   }, [top5Users, totalUserRevenue, remainingUsersCount])
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col space-y-3.5">
-      {/* 三张卡竖向排列：渠道排行 / 分组排行 / 用户排行，各占约 1/3 高度 (grid-rows-3) */}
-      <div className="grid grid-rows-3 gap-3.5 h-full min-h-0 flex-1 max-md:flex max-md:flex-col max-md:gap-3 max-md:h-auto">
+    <div className="flex-1 min-h-0 flex flex-col gap-3.5 overflow-y-auto pr-1">
+      {/* 三张宽卡纵向排布：渠道排行 / 分组排行 / 用户排行，支持自适应自然流动与滚动 */}
+      <div className="flex flex-col gap-3.5 flex-1 min-h-0">
         {/* 卡 1：渠道售出排行 */}
-        <Card className="h-auto md:h-full md:min-h-0 shadow-xs overflow-hidden flex flex-col p-3.5">
+        <Card className="h-auto min-h-[220px] shadow-xs overflow-hidden flex flex-col p-3.5">
           <CardHeader className="p-0 pb-2 flex flex-wrap items-center justify-between gap-1.5 shrink-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               渠道售出排行
@@ -374,7 +374,7 @@ export function RankView({
         </Card>
 
         {/* 卡 2：业务分组售出排行 */}
-        <Card className="h-auto md:h-full md:min-h-0 shadow-xs overflow-hidden flex flex-col p-3.5">
+        <Card className="h-auto min-h-[220px] shadow-xs overflow-hidden flex flex-col p-3.5">
           <CardHeader className="p-0 pb-2 flex flex-wrap items-center justify-between gap-1.5 shrink-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               业务分组售出排行
@@ -539,7 +539,7 @@ export function RankView({
         </Card>
 
         {/* 卡 3：用户排行 */}
-        <Card className="h-auto md:h-full md:min-h-0 shadow-xs overflow-hidden flex flex-col p-3.5">
+        <Card className="h-auto min-h-[220px] shadow-xs overflow-hidden flex flex-col p-3.5">
           <CardHeader className="p-0 pb-2 flex flex-wrap items-center justify-between gap-1.5 shrink-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               用户售出排行

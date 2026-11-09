@@ -57,6 +57,7 @@ test('打开站点库时补齐聚合覆盖索引，看板聚合走 index-only sc
       .map((r) => r.name);
     assert.ok(names.includes('idx_logs_agg'), `缺少 idx_logs_agg：${names.join(',')}`);
     assert.ok(names.includes('idx_logs_overview'), `缺少 idx_logs_overview：${names.join(',')}`);
+    assert.ok(names.includes('idx_logs_channels'), `缺少 idx_logs_channels：${names.join(',')}`);
 
     const ro = openLogsDb(t.file, { readOnly: true });
     try {
@@ -69,6 +70,102 @@ test('打开站点库时补齐聚合覆盖索引，看板聚合走 index-only sc
     }
   } finally {
     t.cleanup();
+  }
+});
+
+// 与 v2/lib/api.mjs channels() 的三条 SQL 同列：渠道汇总、渠道×模型、渠道延迟分位数。
+// 断言覆盖索引能让它们都走 index-only scan（不回表读 3 KB 的堆表行）。
+const CHANNELS_AGG_SQL = `SELECT channel_id,
+        MAX(channel_name) AS channel_name,
+        COUNT(*) AS requests,
+        COALESCE(SUM(cost), 0) AS revenue,
+        COALESCE(SUM(quota_raw), 0) AS quota,
+        COALESCE(SUM(input_total), 0) AS input_total,
+        COALESCE(SUM(output), 0) AS output,
+        COALESCE(SUM(cache_read), 0) AS cache_read,
+        COALESCE(SUM(input_uncached), 0) AS input_uncached,
+        COALESCE(SUM(latency_ms), 0) AS latency_sum,
+        MAX(t_ms) AS last_t
+   FROM logs
+  WHERE log_type = 2 AND (token_name IS NULL OR token_name <> 'Model test') AND t_ms BETWEEN ? AND ?
+  GROUP BY channel_id
+  ORDER BY revenue DESC, requests DESC, channel_id ASC`;
+
+const CHANNELS_TOP_MODEL_SQL = `SELECT channel_id AS group_key, model,
+        COALESCE(SUM(cost), 0) AS revenue,
+        COALESCE(SUM(input_total), 0) AS input_total,
+        COALESCE(SUM(output), 0) AS output
+   FROM logs
+  WHERE log_type = 2 AND (token_name IS NULL OR token_name <> 'Model test') AND t_ms BETWEEN ? AND ?
+  GROUP BY channel_id, model`;
+
+const CHANNELS_LATENCY_SQL = `WITH ranked AS (
+    SELECT channel_id, latency_ms,
+           ROW_NUMBER() OVER (PARTITION BY channel_id ORDER BY latency_ms) - 1 AS rn,
+           COUNT(*) OVER (PARTITION BY channel_id) AS cnt
+      FROM logs
+     WHERE log_type = 2 AND (token_name IS NULL OR token_name <> 'Model test')
+       AND t_ms BETWEEN ? AND ? AND latency_ms IS NOT NULL
+  )
+  SELECT channel_id, MAX(cnt) AS cnt FROM ranked GROUP BY channel_id`;
+
+test('/api/channels 的三条聚合都走 idx_logs_channels 的覆盖索引', () => {
+  const t = makeDb([
+    // 造几行，保证 planner 的统计不是完全空表
+    ...Array.from({ length: 20 }, (_, i) => ({
+      req_id: `r${i}`,
+      site: 's',
+      source_kind: 'k',
+      input_format: 'f',
+      t_ms: 1_700_000_000_000 + i * 1000,
+      t_local: '2026-11-01 00:00:00',
+      token_name: i % 5 === 0 ? 'Model test' : 'tk',
+      channel_id: i % 3,
+      channel_name: `渠道${i % 3}`,
+      model: `model-${i % 2}`,
+      cost: 0.01 * i,
+      quota_raw: 100,
+      input_total: 1000,
+      input_uncached: 800,
+      cache_read: 200,
+      output: 100,
+      latency_ms: 500 + i,
+      log_type: 2,
+      raw_json: '{}',
+    })),
+  ]);
+  try {
+    for (const sql of [CHANNELS_AGG_SQL, CHANNELS_TOP_MODEL_SQL, CHANNELS_LATENCY_SQL]) {
+      const plan = t.db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(0, 1);
+      const detail = plan.map((r) => r.detail).join(' | ');
+      assert.match(detail, /USING COVERING INDEX idx_logs_channels/, `未走覆盖索引：${detail}`);
+    }
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('老库缺 group_name 列时仍能建索引（索引只包含必需列）', () => {
+  const dir = makeTempDir('v2-site-logs-old-');
+  const file = path.join(dir, 'old.db');
+  const raw = new DatabaseSync(file);
+  // api.mjs 把 group_name 当可选列；旧站点库没有它，索引若引用这列会直接建失败
+  const oldSchema = LOGS_SCHEMA.replace('\n  group_name       TEXT,', '');
+  assert.ok(!oldSchema.includes('group_name'), '测试前提：建表语句要真的去掉 group_name');
+  raw.exec(oldSchema);
+  raw.close();
+  try {
+    const db = openLogsDb(file);
+    try {
+      const names = db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_logs_channels'")
+        .all();
+      assert.equal(names.length, 1);
+    } finally {
+      db.close();
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

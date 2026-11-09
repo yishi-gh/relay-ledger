@@ -126,39 +126,41 @@ export function CapitalView({
   const [sortState, setSortState] = React.useState<SortState | null>(null)
 
   // 窗口改变时重置排序口径
-  React.useEffect(() => {
+  const [prevTimeRange, setPrevTimeRange] = React.useState(timeRange)
+  if (prevTimeRange !== timeRange) {
+    setPrevTimeRange(timeRange)
     setSortState(null)
-  }, [timeRange])
+  }
 
   // 数据请求
   React.useEffect(() => {
     let cancelled = false
-    setNotReady(false)
 
-    async function load() {
-      if (!dateRange) {
-        if (previewMode) {
-          setData(getMockCapital({ from: 0, to: Date.now() }))
-        }
-        return
+    if (!dateRange) {
+      if (previewMode) {
+        Promise.resolve().then(() => {
+          if (!cancelled) setData(getMockCapital({ from: 0, to: Date.now() }))
+        })
       }
+      return
+    }
 
-      try {
-        const res = await fetchCapital(dateRange)
+    void fetchCapital(dateRange)
+      .then((res) => {
         if (cancelled) return
         setData(res)
-      } catch {
+        setNotReady(false)
+      })
+      .catch(() => {
         if (cancelled) return
         if (previewMode) {
           setData(getMockCapital(dateRange))
+          setNotReady(false)
         } else {
           setNotReady(true)
           setData(null)
         }
-      }
-    }
-
-    void load()
+      })
 
     return () => {
       cancelled = true
@@ -170,6 +172,18 @@ export function CapitalView({
   }, [])
 
   const rows = data?.accounts || []
+  const shortest = React.useMemo(() => {
+    return rows.reduce<{
+      name: string
+      days: number
+    } | null>((acc, a) => {
+      if (a.channels_live === 0) return acc
+      if (a.runway_days == null || !Number.isFinite(a.runway_days)) return acc
+      if (acc && a.runway_days >= acc.days) return acc
+      return { name: a.name || a.account_id, days: a.runway_days }
+    }, null)
+  }, [rows])
+
   const sortedRows = React.useMemo(() => {
     return sortRows(rows, sortState, CAPITAL_ACCESSORS)
   }, [rows, sortState])
@@ -178,7 +192,7 @@ export function CapitalView({
   const isScrollable = sortedRows.length > 8
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col space-y-4">
+    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
       {/* 1. 顶部 4 张 KPI 卡片 */}
       <section className="grid grid-cols-2 md:grid-cols-4 gap-3.5 shrink-0">
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">
@@ -243,11 +257,18 @@ export function CapitalView({
               <span className="text-muted-foreground">—</span>
             )}
           </div>
-          <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-            {total?.accounts_counted !== undefined
-              ? `基于 ${total.accounts_counted} 个有消耗账户加权估算`
-              : "总可用余额 ÷ 7 日日均成本"}
-          </span>
+          <div className="text-[12px] leading-[16px] text-muted-foreground mt-1 flex flex-col gap-0.5">
+            <span>
+              {total?.accounts_counted !== undefined
+                ? `基于 ${total.accounts_counted} 个有消耗账户加权估算`
+                : "总可用余额 ÷ 7 日日均成本"}
+            </span>
+            {shortest && (
+              <span className={shortest.days < 3 ? "text-rose-600 dark:text-rose-400 font-medium" : shortest.days < 7 ? "text-amber-600 dark:text-amber-400 font-medium" : "text-muted-foreground"}>
+                最短: {shortest.days.toFixed(1)} 天 ({shortest.name})
+              </span>
+            )}
+          </div>
         </Card>
       </section>
 

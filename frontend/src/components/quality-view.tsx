@@ -15,31 +15,14 @@ import {
   AlertTriangle,
   AlertCircle,
   Info,
-  Activity,
-  Inbox,
 } from "lucide-react"
 import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip as RechartsTooltip,
-} from "@/lib/recharts-sized"
-import {
   formatNumber,
-  formatPercent,
   formatTimestamp,
   formatTimestampShort,
 } from "@/lib/formatters"
-import {
-  fetchErrors,
-  getMockErrors,
-  type ErrorsPayload,
-  type DateRange,
-  type RangeType,
-} from "@/lib/api"
+import { FreshnessCard } from "@/components/freshness-card"
+import type { DateRange, RangeType } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { UpstreamAccount } from "@/components/upstreams-view"
 
@@ -68,71 +51,21 @@ export interface QualityData {
   checked_at?: number | null
 }
 
-interface QualityViewProps {
+export interface QualityViewProps {
   quality: QualityData
-  accounts: UpstreamAccount[]
+  accounts?: UpstreamAccount[]
   dateRange?: DateRange | null
   timeRange?: RangeType
   previewMode?: boolean
-}
-
-function formatTimeOnly(ms: number | null | undefined): string {
-  if (!ms) return "—"
-  const d = new Date(ms)
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  lastRefreshTime?: number
 }
 
 export function QualityView({
   quality,
-  accounts,
-  dateRange,
-  timeRange = "24h",
-  previewMode = false,
+  accounts = [],
 }: QualityViewProps) {
-  const [errorsData, setErrorsData] = React.useState<ErrorsPayload | null>(null)
-  const [notReady, setNotReady] = React.useState(false)
+  const allRuns = quality.job_runs || []
 
-  React.useEffect(() => {
-    let cancelled = false
-    setNotReady(false)
-
-    async function load() {
-      if (!dateRange) {
-        if (previewMode) {
-          setErrorsData(getMockErrors({ from: 0, to: Date.now() }))
-        }
-        return
-      }
-
-      try {
-        const res = await fetchErrors(dateRange)
-        if (cancelled) return
-        setErrorsData(res)
-      } catch {
-        if (cancelled) return
-        if (previewMode) {
-          setErrorsData(getMockErrors(dateRange))
-        } else {
-          setNotReady(true)
-          setErrorsData(null)
-        }
-      }
-    }
-
-    void load()
-
-    return () => {
-      cancelled = true
-    }
-  }, [dateRange, previewMode])
-
-  const recentRuns = React.useMemo(() => {
-    return (quality.job_runs || []).slice(0, 6)
-  }, [quality.job_runs])
-
-  // not_configured 不是失败：它表示该账户本来就没有会话数据源（如只给了永久 API Key），
-  // 把它算进「采集失败」会让每天都有假告警。
   const errors = (quality.collect_errors || []).filter(
     (e) => e.reason !== "not_configured"
   )
@@ -141,45 +74,33 @@ export function QualityView({
     return accounts.filter((a) => a.status === "unavailable")
   }, [accounts])
 
-  const displayAccounts = unavailableAccounts.slice(0, 6)
-  const remainingCount =
-    unavailableAccounts.length > 6 ? unavailableAccounts.length - 6 : 0
-
-  const chartBuckets = React.useMemo(() => {
-    if (!errorsData?.buckets) return []
-    return errorsData.buckets.map((b) => {
-      const shortLabel =
-        timeRange === "24h"
-          ? b.label.split(" ")[1] ?? b.label
-          : b.label.slice(5)
-      return {
-        ...b,
-        shortLabel,
-      }
-    })
-  }, [errorsData, timeRange])
-
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-3.5">
-      {/* 1. 顶部 4 张运维基础卡片（一屏自适应） */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3.5 min-h-0 flex-1">
-        {/* 卡 1: 数据源 */}
-        <Card className="shadow-xs overflow-hidden flex flex-col p-4 h-full min-h-0">
-          <CardHeader className="p-0 pb-2.5 shrink-0">
+    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
+      {/* 1. 基础状态卡片：采用 2x2 自适应栅格，确保采集失败与缺快照账户在桌面与移动端均能完整读出原因与列表 */}
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4 shrink-0">
+        {/* 卡 1: 数据新鲜度 */}
+        <FreshnessCard accounts={accounts} className="min-h-[160px]" />
+
+        {/* 卡 2: 数据源状态 */}
+        <Card className="shadow-xs overflow-hidden flex flex-col p-4 min-h-[160px]">
+          <CardHeader className="p-0 pb-3 shrink-0">
             <div className="flex items-center justify-between">
               <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-                数据源
+                数据源状态
               </CardTitle>
               <Database className="size-4 text-muted-foreground" />
             </div>
           </CardHeader>
-          <CardContent className="p-0 flex-1 min-h-0 flex flex-col justify-between">
-            <div className="grid grid-cols-2 gap-2 flex-1 min-h-0 auto-rows-fr">
+          <CardContent className="p-0 flex-1 min-h-0 flex flex-col justify-between gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 flex-1 min-h-0">
               <div className="rounded-lg border border-border/70 bg-muted/20 p-2.5 flex flex-col justify-center">
                 <span className="text-[12px] leading-[16px] text-muted-foreground font-medium">
                   最新数据时间
                 </span>
-                <span className="text-[12px] leading-[16px] font-mono tabular-nums font-semibold text-foreground mt-1 truncate" title={formatTimestamp(quality.source_last_t)}>
+                <span
+                  className="text-[13px] leading-[18px] font-mono tabular-nums font-semibold text-foreground mt-1 truncate"
+                  title={formatTimestamp(quality.source_last_t)}
+                >
                   {formatTimestampShort(quality.source_last_t)}
                 </span>
               </div>
@@ -188,7 +109,7 @@ export function QualityView({
                 <span className="text-[12px] leading-[16px] text-muted-foreground font-medium">
                   总行数
                 </span>
-                <span className="text-[18px] leading-[24px] font-mono tabular-nums font-semibold text-foreground mt-1">
+                <span className="text-[16px] leading-[22px] font-mono tabular-nums font-semibold text-foreground mt-1">
                   {formatNumber(quality.source_rows)}
                 </span>
               </div>
@@ -199,7 +120,7 @@ export function QualityView({
                 </span>
                 <span
                   className={cn(
-                    "text-[18px] leading-[24px] font-mono tabular-nums font-semibold mt-1",
+                    "text-[16px] leading-[22px] font-mono tabular-nums font-semibold mt-1",
                     (quality.error_rows ?? 0) > 0
                       ? "text-rose-600 dark:text-rose-400"
                       : "text-foreground"
@@ -214,150 +135,55 @@ export function QualityView({
                   Schema 状态
                 </span>
                 <div className="mt-1">
-                  {quality.schema_ok ? (
+                  {quality.schema_ok === true ? (
                     <Badge
                       variant="outline"
                       className="text-[12px] leading-[16px] h-5 px-1.5 font-medium text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
                     >
                       结构正常
                     </Badge>
-                  ) : (
+                  ) : quality.schema_ok === false ? (
                     <Badge
                       variant="destructive"
                       className="text-[12px] leading-[16px] h-5 px-1.5 font-medium"
                     >
                       校验异常
                     </Badge>
+                  ) : (
+                    <Badge
+                      variant="secondary"
+                      className="text-[12px] leading-[16px] h-5 px-1.5 font-medium text-muted-foreground"
+                    >
+                      未校验
+                    </Badge>
                   )}
                 </div>
               </div>
             </div>
 
-            <div className="mt-2 shrink-0 text-[12px] leading-[16px] text-muted-foreground truncate">
-              校验于{" "}
+            <div className="shrink-0 text-[12px] leading-[16px] text-muted-foreground truncate border-t border-border/50 pt-2">
+              校验时间：
               <span className="font-mono tabular-nums text-foreground">
-                {formatTimestampShort(quality.checked_at)}
+                {formatTimestamp(quality.checked_at)}
               </span>
             </div>
           </CardContent>
         </Card>
 
-        {/* 卡 2: 采集任务 */}
-        <Card className="shadow-xs overflow-hidden flex flex-col p-4 h-full min-h-0">
-          <CardHeader className="p-0 pb-2.5 shrink-0">
+        {/* 卡 3: 采集失败 (可读换行列表，原因完整展现不截断) */}
+        <Card className="shadow-xs overflow-hidden flex flex-col p-4 min-h-[180px]">
+          <CardHeader className="p-0 pb-3 shrink-0">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-                  采集任务
-                </CardTitle>
-                <Badge
-                  variant="secondary"
-                  className="text-[12px] leading-[16px] h-5 px-1.5 font-medium tabular-nums"
-                >
-                  最近 {recentRuns.length} 条
-                </Badge>
-              </div>
-              <Clock className="size-4 text-muted-foreground" />
-            </div>
-          </CardHeader>
-          <CardContent className="p-0 flex-1 min-h-0 flex flex-col">
-            <div className="rounded-lg border border-border bg-card flex-1 min-h-0 overflow-auto">
-              <Table className="w-full table-fixed text-sm">
-                <colgroup>
-                  <col style={{ width: "38%" }} />
-                  <col style={{ width: "20%" }} />
-                  <col style={{ width: "22%" }} />
-                  <col style={{ width: "20%" }} />
-                </colgroup>
-                <TableHeader className="bg-muted/50 sticky top-0 z-20 backdrop-blur-xs">
-                  <TableRow className="hover:bg-transparent border-b border-border">
-                    <TableHead className="h-7 px-2 text-[12px] leading-[16px] font-medium text-muted-foreground text-left whitespace-nowrap">
-                      任务
-                    </TableHead>
-                    <TableHead className="h-7 px-2 text-[12px] leading-[16px] font-medium text-muted-foreground text-left whitespace-nowrap">
-                      时间
-                    </TableHead>
-                    <TableHead className="h-7 px-2 text-[12px] leading-[16px] font-medium text-muted-foreground text-right whitespace-nowrap">
-                      耗时
-                    </TableHead>
-                    <TableHead className="h-7 px-2 text-[12px] leading-[16px] font-medium text-muted-foreground text-right whitespace-nowrap">
-                      状态
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {recentRuns.map((run, idx) => {
-                    const durationSec =
-                      run.finished_at && run.started_at
-                        ? ((run.finished_at - run.started_at) / 1000).toFixed(1)
-                        : null
-                    return (
-                      <TableRow
-                        key={idx}
-                        className="h-[36px] hover:bg-muted/40 transition-colors border-b border-border/60"
-                      >
-                        <TableCell
-                          className="px-2 py-0.5 font-mono text-[12px] leading-[16px] text-foreground truncate"
-                          title={run.job}
-                        >
-                          {run.job}
-                        </TableCell>
-                        <TableCell
-                          className="px-2 py-0.5 font-mono tabular-nums text-[12px] leading-[16px] text-muted-foreground whitespace-nowrap"
-                          title={formatTimestamp(run.started_at)}
-                        >
-                          {formatTimeOnly(run.started_at)}
-                        </TableCell>
-                        <TableCell className="px-2 py-0.5 text-right font-mono tabular-nums text-[12px] leading-[16px] text-foreground whitespace-nowrap">
-                          {durationSec != null ? `${durationSec}s` : "—"}
-                        </TableCell>
-                        <TableCell className="px-2 py-0.5 text-right whitespace-nowrap">
-                          {run.status === "complete" || run.status === "ok" ? (
-                            <Badge
-                              variant="outline"
-                              className="text-[12px] leading-[16px] h-5 px-1 font-medium text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
-                            >
-                              完成
-                            </Badge>
-                          ) : run.status === "partial" ? (
-                            <Badge
-                              variant="outline"
-                              className="text-[12px] leading-[16px] h-5 px-1 font-medium text-amber-600 dark:text-amber-400 border-amber-500/30 bg-amber-500/10"
-                            >
-                              部分
-                            </Badge>
-                          ) : (
-                            <Badge
-                              variant="destructive"
-                              className="text-[12px] leading-[16px] h-5 px-1 font-medium"
-                            >
-                              失败
-                            </Badge>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* 卡 3: 采集失败 */}
-        <Card className="shadow-xs overflow-hidden flex flex-col p-4 h-full min-h-0">
-          <CardHeader className="p-0 pb-2.5 shrink-0">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-                  采集失败
+                  采集失败记录
                 </CardTitle>
                 {errors.length > 0 && (
                   <Badge
                     variant="destructive"
                     className="text-[12px] leading-[16px] h-5 px-1.5 font-medium tabular-nums"
                   >
-                    {errors.length} 项
+                    {errors.length} 项异常
                   </Badge>
                 )}
               </div>
@@ -366,72 +192,38 @@ export function QualityView({
           </CardHeader>
           <CardContent className="p-0 flex-1 min-h-0 flex flex-col">
             {errors.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center rounded-lg border border-dashed border-border/70 bg-muted/10 text-muted-foreground text-[14px] leading-[20px]">
-                无失败记录
+              <div className="flex-1 flex items-center justify-center rounded-lg border border-dashed border-border/70 bg-muted/10 text-muted-foreground text-[13px] leading-[18px] py-4">
+                无采集失败记录
               </div>
             ) : (
-              <div className="rounded-lg border border-border bg-card flex-1 min-h-0 overflow-auto">
-                <Table className="w-full table-fixed text-sm">
-                  <colgroup>
-                    <col style={{ width: "42%" }} />
-                    <col style={{ width: "30%" }} />
-                    <col style={{ width: "28%" }} />
-                  </colgroup>
-                  <TableHeader className="bg-muted/50 sticky top-0 z-20 backdrop-blur-xs">
-                    <TableRow className="hover:bg-transparent border-b border-border">
-                      <TableHead className="h-7 px-2 text-[12px] leading-[16px] font-medium text-muted-foreground text-left whitespace-nowrap">
-                        账户
-                      </TableHead>
-                      <TableHead className="h-7 px-2 text-[12px] leading-[16px] font-medium text-muted-foreground text-left whitespace-nowrap">
-                        原因
-                      </TableHead>
-                      <TableHead className="h-7 px-2 text-[12px] leading-[16px] font-medium text-muted-foreground text-right whitespace-nowrap">
-                        时间
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {errors.map((err, idx) => (
-                      <TableRow
-                        key={idx}
-                        className="h-[36px] hover:bg-muted/40 transition-colors border-b border-border/60"
-                      >
-                        <TableCell
-                          className="px-2 py-0.5 font-normal text-[12px] leading-[16px] text-foreground truncate"
-                          title={err.name || err.account_id}
-                        >
-                          {err.name || err.account_id}
-                        </TableCell>
-                        <TableCell
-                          className="px-2 py-0.5 text-muted-foreground text-[12px] leading-[16px] truncate"
-                          title={err.reason}
-                        >
-                          <Badge
-                            variant="outline"
-                            className="text-[12px] leading-[16px] h-5 px-1 font-normal text-amber-600 dark:text-amber-400 border-amber-500/30"
-                          >
-                            {err.reason}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="px-2 py-0.5 text-right font-mono tabular-nums text-[12px] leading-[16px] text-muted-foreground whitespace-nowrap">
-                          {formatTimestampShort(err.at)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+              <div className="rounded-lg border border-border bg-card flex-1 min-h-0 overflow-auto max-h-[160px] divide-y divide-border/60">
+                {errors.map((err, idx) => (
+                  <div key={idx} className="p-2.5 flex flex-col gap-1 hover:bg-muted/30 transition-colors">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="font-medium text-[13px] leading-[18px] text-foreground">
+                        {err.name || err.account_id}
+                      </span>
+                      <span className="font-mono text-[12px] leading-[16px] text-muted-foreground">
+                        {formatTimestamp(err.at)}
+                      </span>
+                    </div>
+                    <div className="text-[12px] leading-[18px] text-amber-600 dark:text-amber-400 break-words">
+                      {err.reason}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* 卡 4: 缺快照提示 */}
-        <Card className="shadow-xs overflow-hidden flex flex-col p-4 h-full min-h-0">
-          <CardHeader className="p-0 pb-2.5 shrink-0">
+        {/* 卡 4: 缺快照提示 (全名单自适应展示，不截断固定 6 条) */}
+        <Card className="shadow-xs overflow-hidden flex flex-col p-4 min-h-[180px]">
+          <CardHeader className="p-0 pb-3 shrink-0">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-                  缺快照提示
+                  缺快照账户提示
                 </CardTitle>
                 <Badge
                   variant="outline"
@@ -443,25 +235,25 @@ export function QualityView({
               <AlertCircle className="size-4 text-muted-foreground" />
             </div>
           </CardHeader>
-          <CardContent className="p-0 flex-1 min-h-0 flex flex-col justify-between gap-2.5">
+          <CardContent className="p-0 flex-1 min-h-0 flex flex-col justify-between gap-2">
             <div className="rounded-lg border border-border/70 bg-muted/30 p-2.5 flex items-start gap-2 shrink-0">
               <Info className="size-4 text-muted-foreground shrink-0 mt-0.5" />
               <div className="text-[12px] leading-[16px] text-muted-foreground font-normal">
-                快照缺失只影响成本核算，不影响售出
+                快照缺失仅影响成本核算，不影响售出统计
               </div>
             </div>
 
             <div className="flex-1 min-h-0 flex flex-col justify-start">
               <div className="text-[12px] leading-[16px] text-muted-foreground font-medium mb-1.5 shrink-0">
-                缺失快照账户：
+                缺失快照账户全名单：
               </div>
               {unavailableAccounts.length === 0 ? (
-                <div className="text-[12px] leading-[16px] text-muted-foreground py-1">
-                  当前周期内暂无缺失快照账户
+                <div className="text-[13px] leading-[18px] text-muted-foreground py-1">
+                  当前周期内所有上游账户均具备有效快照
                 </div>
               ) : (
-                <div className="flex flex-wrap gap-1.5 overflow-y-auto max-h-[110px] p-0.5">
-                  {displayAccounts.map((acc) => (
+                <div className="flex flex-wrap gap-1.5 overflow-y-auto max-h-[90px] p-0.5">
+                  {unavailableAccounts.map((acc) => (
                     <Badge
                       key={acc.id}
                       variant="secondary"
@@ -471,268 +263,129 @@ export function QualityView({
                       {acc.name || acc.id}
                     </Badge>
                   ))}
-                  {remainingCount > 0 && (
-                    <Badge
-                      variant="outline"
-                      className="text-[12px] leading-[16px] py-0.5 px-2 font-normal text-muted-foreground border-border bg-muted/20"
-                    >
-                      另有 {remainingCount} 个
-                    </Badge>
-                  )}
                 </div>
               )}
             </div>
           </CardContent>
         </Card>
-      </div>
+      </section>
 
-      {/* 2. 补一张「HTTP 错误」卡片（整幅排布在下方） */}
-      <Card className="shadow-xs overflow-hidden flex flex-col p-4 flex-1 min-h-0">
-        <CardHeader className="p-0 pb-2.5 shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-                HTTP 错误
-              </CardTitle>
-              {errorsData?.available && (
-                <Badge
-                  variant="secondary"
-                  className="text-[12px] leading-[16px] h-5 px-1.5 font-medium tabular-nums"
-                >
-                  总计 {formatNumber(errorsData.total)} 次
-                </Badge>
-              )}
-            </div>
-            <Activity className="size-4 text-muted-foreground" />
+      {/* 2. 全宽采集任务运行历史大表 (全字段展示，不截断固定 6 条) */}
+      <Card className="shadow-xs overflow-hidden flex flex-col p-4 flex-1 min-h-[300px]">
+        <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0">
+          <div className="flex items-center gap-2">
+            <Clock className="size-4 text-muted-foreground" />
+            <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
+              采集任务运行历史
+            </CardTitle>
+            <Badge
+              variant="secondary"
+              className="text-[12px] leading-[16px] h-5 px-1.5 font-medium tabular-nums"
+            >
+              共 {allRuns.length} 条记录
+            </Badge>
           </div>
         </CardHeader>
 
         <CardContent className="p-0 flex-1 min-h-0 flex flex-col">
-          {notReady ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center rounded-lg border border-dashed border-border/70 bg-muted/10">
-              <AlertCircle className="size-8 text-muted-foreground/60 mb-2" />
-              <span className="text-[14px] leading-[20px] font-medium text-foreground">
-                接口未就绪
-              </span>
-              <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-                /api/errors 接口服务尚未上线或连接失败，单接口异常不影响整页其它模块
-              </span>
-            </div>
-          ) : !errorsData?.available ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center rounded-lg border border-dashed border-border/70 bg-muted/10">
-              <Inbox className="size-8 text-muted-foreground/40 mb-2" />
-              <span className="text-[14px] leading-[20px] font-medium text-foreground">
-                该区间没有错误记录
-              </span>
-              <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-                当前选定时间窗口内 HTTP 状态码均为正常成功请求
-              </span>
-            </div>
-          ) : (
-            <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-3.5">
-              {/* 左侧：Hourly 堆叠柱状图（4xx 灰蓝 / 5xx 红） */}
-              <div className="lg:col-span-7 xl:col-span-8 flex flex-col min-h-0">
-                <div className="flex items-center justify-between mb-1.5 shrink-0">
-                  <span className="text-[12px] leading-[16px] font-medium text-muted-foreground">
-                    小时级错误分布 (4xx / 5xx)
-                  </span>
-                  <div className="flex items-center gap-3 text-[12px] leading-[16px] text-muted-foreground">
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="size-2 rounded-xs bg-[var(--chart-11)] shrink-0" />
-                      4xx (客户端错误)
-                    </span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="size-2 rounded-xs bg-[var(--chart-5)] shrink-0" />
-                      5xx (服务端错误)
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex-1 min-h-[160px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={chartBuckets}
-                      margin={{ top: 8, right: 8, left: -20, bottom: 0 }}
-                    >
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        vertical={false}
-                        stroke="var(--border)"
-                        strokeOpacity={0.6}
-                      />
-                      <XAxis
-                        dataKey="shortLabel"
-                        tickLine={false}
-                        axisLine={{ stroke: "var(--border)" }}
-                        tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
-                      />
-                      <YAxis
-                        tickLine={false}
-                        axisLine={false}
-                        width={36}
-                        tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
-                        allowDecimals={false}
-                      />
-                      <RechartsTooltip
-                        content={({ active, payload }) => {
-                          if (!active || !payload || !payload.length) return null
-                          const d = payload[0].payload
-                          return (
-                            <div className="rounded-lg border border-border bg-card p-2.5 text-[12px] leading-[16px] shadow-md space-y-1 min-w-[150px]">
-                              <div className="font-medium text-foreground border-b border-border pb-1">
-                                {d.label}
-                              </div>
-                              <div className="flex items-center justify-between text-muted-foreground">
-                                <span className="inline-flex items-center gap-1">
-                                  <span className="size-2 rounded-xs bg-[var(--chart-11)]" />
-                                  4xx 错误
-                                </span>
-                                <span className="font-mono tabular-nums text-foreground font-semibold">
-                                  {d.s4xx} 次
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between text-muted-foreground">
-                                <span className="inline-flex items-center gap-1">
-                                  <span className="size-2 rounded-xs bg-[var(--chart-5)]" />
-                                  5xx 错误
-                                </span>
-                                <span className="font-mono tabular-nums text-foreground font-semibold">
-                                  {d.s5xx} 次
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between text-muted-foreground border-t border-border/60 pt-1">
-                                <span>合计错误</span>
-                                <span className="font-mono tabular-nums text-foreground font-semibold">
-                                  {d.total} 次
-                                </span>
-                              </div>
-                            </div>
-                          )
-                        }}
-                      />
-                      <Bar
-                        dataKey="s4xx"
-                        name="4xx"
-                        stackId="a"
-                        fill="var(--chart-11)"
-                        radius={[0, 0, 0, 0]}
-                      />
-                      <Bar
-                        dataKey="s5xx"
-                        name="5xx"
-                        stackId="a"
-                        fill="var(--chart-5)"
-                        radius={[2, 2, 0, 0]}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* 右侧：两小块表（Top 状态码与按路径前缀） */}
-              <div className="lg:col-span-5 xl:col-span-4 flex flex-col justify-between gap-2 min-h-0 pr-0.5">
-                {/* 小块 1: Top 状态码 */}
-                <div className="rounded-lg border border-border bg-card p-2 flex flex-col gap-1 shrink-0">
-                  <span className="text-[12px] leading-[16px] font-medium text-muted-foreground">
-                    Top 状态码
-                  </span>
-                  <Table className="w-full table-fixed text-sm">
-                    <colgroup>
-                      <col style={{ width: "36%" }} />
-                      <col style={{ width: "32%" }} />
-                      <col style={{ width: "32%" }} />
-                    </colgroup>
-                    <TableHeader className="bg-muted/40">
-                      <TableRow className="border-b border-border hover:bg-transparent">
-                        <TableHead className="h-5 px-1.5 text-[12px] leading-[16px] font-medium text-muted-foreground text-left">
-                          状态
-                        </TableHead>
-                        <TableHead className="h-5 px-1.5 text-[12px] leading-[16px] font-medium text-muted-foreground text-right">
-                          次数
-                        </TableHead>
-                        <TableHead className="h-5 px-1.5 text-[12px] leading-[16px] font-medium text-muted-foreground text-right">
-                          占比
-                        </TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(errorsData.top_status || []).slice(0, 4).map((s) => (
-                        <TableRow
-                          key={s.status}
-                          className="h-[28px] hover:bg-muted/30 border-b border-border/40"
+          <div className="rounded-lg border border-border bg-card flex-1 min-h-0 overflow-auto">
+            <Table className="w-full table-fixed text-sm min-w-[700px]">
+              <colgroup>
+                <col style={{ width: "24%" }} />
+                <col style={{ width: "22%" }} />
+                <col style={{ width: "16%" }} />
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "24%" }} />
+              </colgroup>
+              <TableHeader className="bg-muted/50 sticky top-0 z-20 backdrop-blur-xs">
+                <TableRow className="hover:bg-transparent border-b border-border">
+                  <TableHead className="h-8 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-left whitespace-nowrap">
+                    任务名称
+                  </TableHead>
+                  <TableHead className="h-8 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-left whitespace-nowrap">
+                    触发时间
+                  </TableHead>
+                  <TableHead className="h-8 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-right whitespace-nowrap">
+                    耗时
+                  </TableHead>
+                  <TableHead className="h-8 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-right whitespace-nowrap">
+                    执行状态
+                  </TableHead>
+                  <TableHead className="h-8 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-left whitespace-nowrap">
+                    详细备注
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {allRuns.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-32 text-center text-muted-foreground text-[13px]">
+                      暂无采集任务记录
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  allRuns.map((run, idx) => {
+                    const durationSec =
+                      run.finished_at && run.started_at
+                        ? ((run.finished_at - run.started_at) / 1000).toFixed(1)
+                        : null
+                    return (
+                      <TableRow
+                        key={idx}
+                        className="h-[40px] hover:bg-muted/40 transition-colors border-b border-border/60"
+                      >
+                        <TableCell
+                          className="px-3 py-1 font-mono text-[13px] leading-[18px] text-foreground truncate"
+                          title={run.job}
                         >
-                          <TableCell className="px-1.5 py-0">
+                          {run.job}
+                        </TableCell>
+                        <TableCell
+                          className="px-3 py-1 font-mono tabular-nums text-[12px] leading-[16px] text-muted-foreground whitespace-nowrap"
+                          title={formatTimestamp(run.started_at)}
+                        >
+                          {formatTimestamp(run.started_at)}
+                        </TableCell>
+                        <TableCell className="px-3 py-1 text-right font-mono tabular-nums text-[13px] leading-[18px] text-foreground whitespace-nowrap">
+                          {durationSec != null ? `${durationSec}s` : "—"}
+                        </TableCell>
+                        <TableCell className="px-3 py-1 text-right whitespace-nowrap">
+                          {run.status === "complete" || run.status === "ok" ? (
                             <Badge
                               variant="outline"
-                              className={cn(
-                                "text-[12px] leading-[16px] h-4.5 px-1 font-mono font-medium",
-                                s.status >= 500
-                                  ? "text-rose-600 dark:text-rose-400 border-rose-500/30 bg-rose-500/10"
-                                  : "text-sky-600 dark:text-sky-400 border-sky-500/30 bg-sky-500/10"
-                              )}
+                              className="text-[12px] leading-[16px] h-5 px-1.5 font-medium text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
                             >
-                              {s.status}
+                              完成
                             </Badge>
-                          </TableCell>
-                          <TableCell className="px-1.5 py-0 text-right font-mono tabular-nums text-[12px] leading-[16px] text-foreground">
-                            {formatNumber(s.count)}
-                          </TableCell>
-                          <TableCell className="px-1.5 py-0 text-right font-mono tabular-nums text-[12px] leading-[16px] text-muted-foreground">
-                            {formatPercent(s.share)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-
-                {/* 小块 2: 按路径前缀 */}
-                <div className="rounded-lg border border-border bg-card p-2 flex flex-col gap-1 shrink-0">
-                  <span className="text-[12px] leading-[16px] font-medium text-muted-foreground">
-                    按路径前缀
-                  </span>
-                  <Table className="w-full table-fixed text-sm">
-                    <colgroup>
-                      <col style={{ width: "36%" }} />
-                      <col style={{ width: "32%" }} />
-                      <col style={{ width: "32%" }} />
-                    </colgroup>
-                    <TableHeader className="bg-muted/40">
-                      <TableRow className="border-b border-border hover:bg-transparent">
-                        <TableHead className="h-5 px-1.5 text-[12px] leading-[16px] font-medium text-muted-foreground text-left">
-                          前缀
-                        </TableHead>
-                        <TableHead className="h-5 px-1.5 text-[12px] leading-[16px] font-medium text-muted-foreground text-right">
-                          次数
-                        </TableHead>
-                        <TableHead className="h-5 px-1.5 text-[12px] leading-[16px] font-medium text-muted-foreground text-right">
-                          占比
-                        </TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(errorsData.by_path_group || []).slice(0, 3).map((p) => (
-                        <TableRow
-                          key={p.path_group}
-                          className="h-[28px] hover:bg-muted/30 border-b border-border/40"
+                          ) : run.status === "partial" ? (
+                            <Badge
+                              variant="outline"
+                              className="text-[12px] leading-[16px] h-5 px-1.5 font-medium text-amber-600 dark:text-amber-400 border-amber-500/30 bg-amber-500/10"
+                            >
+                              部分
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="destructive"
+                              className="text-[12px] leading-[16px] h-5 px-1.5 font-medium"
+                            >
+                              失败
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell
+                          className="px-3 py-1 text-[12px] leading-[16px] text-muted-foreground truncate"
+                          title={run.detail || undefined}
                         >
-                          <TableCell className="px-1.5 py-0 font-mono text-[12px] leading-[16px] text-foreground truncate">
-                            {p.path_group}
-                          </TableCell>
-                          <TableCell className="px-1.5 py-0 text-right font-mono tabular-nums text-[12px] leading-[16px] text-foreground">
-                            {formatNumber(p.count)}
-                          </TableCell>
-                          <TableCell className="px-1.5 py-0 text-right font-mono tabular-nums text-[12px] leading-[16px] text-muted-foreground">
-                            {formatPercent(p.share)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-            </div>
-          )}
+                          {run.detail || "—"}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>

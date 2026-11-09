@@ -126,12 +126,16 @@ export function openSourceDb(file) {
   return db;
 }
 
-function sendJson(res, status, body, { head = false } = {}) {
-  const payload = JSON.stringify(body);
+function sendJson(res, status, body, options = {}) {
+  sendPayload(res, status, JSON.stringify(body), options);
+}
+
+function sendPayload(res, status, payload, { head = false, headers = {} } = {}) {
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(payload),
     'Cache-Control': 'no-store',
+    ...headers,
   });
   res.end(head ? undefined : payload);
 }
@@ -244,8 +248,79 @@ const API_ROUTES = {
 };
 
 /**
- * 首屏预热：默认 7 天区间的 overview/trend/profit 各跑一次，把首屏要读的页读进 page cache。
- * 后台执行、不阻塞监听；失败只告警不影响服务；WARMUP=0 关闭。
+ * GET /api/* 的进程内缓存。
+ *
+ * 动机：冷缓存下 /api/channels 要 8 s 左右（单线程同步 sqlite，期间整个服务不可用），
+ * 前端每 15 分钟整点后才刷新一次，数据延迟 60 s 对看板没有可见影响。
+ *
+ * - key = 完整 path + query string，value 是已经序列化好的响应体，命中时省掉查库和 JSON.stringify。
+ * - 只由调用方缓存成功的 200；抛错的请求（400/500）到不了 set，4xx（未知接口）走 404 分支也不进缓存。
+ * - 条目上限 maxEntries，超了按插入顺序删最早的（Map 天然按插入顺序迭代，够用，不做精确 LRU）。
+ * - TTL 固定窗口、命中不续期：数据最多落后 ttlMs，不会因为持续访问一直不更新。
+ * - API_CACHE_TTL_MS=0 关闭缓存（调试用）。
+ */
+export function createApiCache({ ttlMs = cacheTtlFromEnv(), maxEntries = 200, now = Date.now } = {}) {
+  const entries = new Map();
+  const enabled = Number.isFinite(ttlMs) && ttlMs > 0;
+  return {
+    enabled,
+    ttlMs,
+    maxEntries,
+    get(key) {
+      if (!enabled) return null;
+      const hit = entries.get(key);
+      if (!hit) return null;
+      if (now() - hit.at >= ttlMs) {
+        entries.delete(key);
+        return null;
+      }
+      return hit.payload;
+    },
+    set(key, payload) {
+      if (!enabled) return;
+      entries.set(key, { payload, at: now() });
+      while (entries.size > maxEntries) {
+        entries.delete(entries.keys().next().value);
+      }
+    },
+    get size() {
+      return entries.size;
+    },
+    clear() {
+      entries.clear();
+    },
+  };
+}
+
+/** API_CACHE_TTL_MS：缺省 60 s，0 关闭；非法值退回默认，避免一个笔误把缓存变成永久 */
+function cacheTtlFromEnv(raw = process.env.API_CACHE_TTL_MS) {
+  if (raw == null || raw === '') return 60_000;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : 60_000;
+}
+
+/**
+ * 跑一个 /api/* 请求并处理缓存。未知接口返回 null，由调用方回 404。
+ * 返回的 payload 是 JSON 字符串，cache 是 'HIT' / 'MISS'（不缓存的接口为 null）。
+ */
+export function respondApi({ api, cache, pathname, url }) {
+  const handler = API_ROUTES[pathname];
+  if (!handler) return null;
+  const cacheable = pathname !== '/api/healthz';
+  const key = pathname + url.search;
+  if (cacheable) {
+    const hit = cache.get(key);
+    if (hit !== null) return { payload: hit, cache: 'HIT' };
+  }
+  const payload = JSON.stringify(handler(api, url));
+  if (cacheable) cache.set(key, payload);
+  return { payload, cache: cacheable && cache.enabled ? 'MISS' : null };
+}
+
+/**
+ * 首屏预热：默认 7 天区间的 overview/trend/profit/channels/capital 各跑一次，
+ * 把首屏要读的页读进 page cache（索引由写入侧的 openLogsDb 补齐，服务端只读）。
+ * 后台执行、不阻塞监听；单项失败只告警、不影响其余接口；WARMUP=0 关闭。
  */
 function warmup(api) {
   if (process.env.WARMUP === '0') {
@@ -254,16 +329,25 @@ function warmup(api) {
   }
   setImmediate(() => {
     const startedAt = Date.now();
-    try {
-      const params = new URLSearchParams();
-      api.overview(params);
-      params.set('granularity', 'day');
-      api.trend(params);
-      api.profit(params);
-      console.log(`[warmup] ok ${Date.now() - startedAt}ms`);
-    } catch (err) {
-      console.warn(`[warmup] 预热失败: ${err.message}`);
+    const jobs = [
+      ['overview', (params) => api.overview(params)],
+      ['trend', (params) => api.trend(params)],
+      ['profit', (params) => api.profit(params)],
+      ['channels', (params) => api.channels(params)],
+      ['capital', (params) => api.capital(params)],
+    ];
+    let failed = 0;
+    for (const [name, run] of jobs) {
+      try {
+        const params = new URLSearchParams();
+        if (name === 'trend' || name === 'profit') params.set('granularity', 'day');
+        run(params);
+      } catch (err) {
+        failed += 1;
+        console.warn(`[warmup] ${name} 预热失败: ${err.message}`);
+      }
     }
+    console.log(`[warmup] ${failed === 0 ? 'ok' : `完成，失败 ${failed} 项`} ${Date.now() - startedAt}ms`);
   });
 }
 
@@ -321,6 +405,7 @@ function main() {
     siteName: opts.site,
     sourceLabel,
   });
+  const cache = createApiCache();
 
   const server = http.createServer((req, res) => {
     const head = req.method === 'HEAD';
@@ -333,12 +418,15 @@ function main() {
       const pathname = url.pathname;
 
       if (pathname.startsWith('/api/')) {
-        const handler = API_ROUTES[pathname];
-        if (!handler) {
+        const result = respondApi({ api, cache, pathname, url });
+        if (!result) {
           sendError(res, 404, 'not_found', `未知接口 ${pathname}`, { head });
           return;
         }
-        sendJson(res, 200, handler(api, url), { head });
+        sendPayload(res, 200, result.payload, {
+          head,
+          headers: result.cache ? { 'X-Cache': result.cache } : {},
+        });
         return;
       }
 

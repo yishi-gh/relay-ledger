@@ -97,6 +97,14 @@ export const LOGS_SCHEMA = `CREATE TABLE logs (
  * 看板聚合用的覆盖索引。堆表每行约 3.2 KB（raw_json 占一半），7 天区间的聚合
  * 若走表扫描，冷缓存下在 7 MB/s 的磁盘上要上百秒；改成 index-only scan 后
  * 冷启 /api/profit 约 0.1 s、/api/overview 约 3 s。索引只加不改表结构。
+ *
+ * `idx_logs_channels` 供 /api/channels 的三条聚合共用（`v2/lib/api.mjs` 的
+ * channels()）：渠道汇总、渠道×模型（top_model）、渠道延迟分位数。三条都只要
+ * t_ms/log_type/token_name 做过滤，读 channel_id、cost、quota_raw、input_total、
+ * output、cache_read、input_uncached、latency_ms、channel_name、model，
+ * 全在这一个索引里，没有回表；GROUP BY / ORDER BY 仍走临时 B 树，只碰内存。
+ * 故意不含 group_name：它在旧的站点库里可能不存在（见 api.mjs 的 hasGroupName），
+ * 加进索引会让 openLogsDb 在那种库上直接报错。
  */
 const AGG_INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_logs_agg
@@ -104,6 +112,10 @@ const AGG_INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_logs_overview
      ON logs(t_ms, log_type, token_name, cost, quota_raw, input_total,
               input_uncached, cache_read, cache_write, output, latency_ms)`,
+  `CREATE INDEX IF NOT EXISTS idx_logs_channels
+     ON logs(t_ms, log_type, token_name, channel_id, cost, quota_raw,
+              input_total, output, cache_read, input_uncached, latency_ms,
+              channel_name, model)`,
 ];
 
 export function ensureAggIndexes(db) {

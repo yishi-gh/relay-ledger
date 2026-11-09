@@ -1,8 +1,7 @@
-import * as React from "react"
 import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { formatCurrency, formatNumber } from "@/lib/formatters"
+import { formatCurrency } from "@/lib/formatters"
+import { FreshnessCard } from "@/components/freshness-card"
 import type { CapitalPayload } from "@/lib/api"
 
 interface UpstreamLike {
@@ -14,13 +13,7 @@ interface FundingStripProps {
   capital?: CapitalPayload | null
   accounts?: UpstreamLike[]
   now?: number
-}
-
-/** 小时后按陈旧程度分档：30 分钟内正常，2 小时内告警，超过即失效 */
-function freshnessTone(hours: number): "muted" | "warn" | "bad" {
-  if (hours <= 0.5) return "muted"
-  if (hours <= 2) return "warn"
-  return "bad"
+  className?: string
 }
 
 function Metric({
@@ -65,7 +58,7 @@ function Metric({
   )
 }
 
-export function FundingStrip({ capital, accounts = [], now }: FundingStripProps) {
+export function FundingStrip({ capital, accounts = [], now, className }: FundingStripProps) {
   const total = capital?.total
   // 续航看最短：哪个上游账户最先耗尽，就报它——平均值会掩盖单点风险。
   // 防御性过滤：channels_live === 0 的账户不参与最短续航计算。
@@ -83,24 +76,8 @@ export function FundingStrip({ capital, accounts = [], now }: FundingStripProps)
   const runwayTone =
     runway != null && runway < 3 ? "bad" : runway != null && runway < 7 ? "warn" : undefined
 
-  const [clockFallback] = React.useState(() => Date.now())
-  const clock = now ?? clockFallback
-  const stale = accounts
-    .map((a) => {
-      const last = typeof a.last_sync === "number" ? a.last_sync : null
-      const hours = last ? (clock - last) / 36e5 : null
-      return { name: a.name || "未知账户", hours }
-    })
-    .filter((a) => a.hours != null && a.hours > 0.5)
-    .sort((a, b) => (b.hours ?? 0) - (a.hours ?? 0))
-
-  const latest = accounts.reduce<number | null>((acc, a) => {
-    const last = typeof a.last_sync === "number" ? a.last_sync : null
-    return last != null && (acc == null || last > acc) ? last : acc
-  }, null)
-
   return (
-    <section className="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-4 shrink-0">
+    <section className={cn("grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-4 shrink-0", className)}>
       <Card className="shadow-xs">
         <CardContent className="p-4 grid grid-cols-2 xl:grid-cols-4 gap-3 items-start">
           <Metric
@@ -138,70 +115,7 @@ export function FundingStrip({ capital, accounts = [], now }: FundingStripProps)
         </CardContent>
       </Card>
 
-      <Card className="shadow-xs">
-        <CardContent className="p-4 flex flex-col gap-1.5 min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[12px] leading-[16px] text-muted-foreground">
-              数据新鲜度
-            </span>
-            {stale.length === 0 ? (
-              <Badge variant="outline" className="text-[12px] leading-[16px]">
-                正常
-              </Badge>
-            ) : (
-              <Badge variant="destructive" className="text-[12px] leading-[16px]">
-                {stale.length} 个陈旧
-              </Badge>
-            )}
-          </div>
-          {stale.length === 0 ? (
-            <span className="text-[14px] leading-[20px] text-foreground">
-              全部账户同步正常
-              <span className="text-muted-foreground">
-                {" "}
-                · 最近{" "}
-                {latest
-                  ? new Date(latest).toLocaleTimeString("zh-CN", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hour12: false,
-                    })
-                  : "—"}
-              </span>
-            </span>
-          ) : (
-            <ul className="flex flex-col gap-1 min-w-0">
-              {stale.slice(0, 3).map((a) => (
-                <li
-                  key={a.name}
-                  className="flex items-center justify-between gap-2 text-[12px] leading-[16px] min-w-0"
-                >
-                  <span className="truncate text-muted-foreground" title={a.name}>
-                    {a.name}
-                  </span>
-                  <span
-                    className={cn(
-                      "font-mono tabular-nums shrink-0",
-                      freshnessTone(a.hours ?? 0) === "bad"
-                        ? "text-destructive font-semibold"
-                        : freshnessTone(a.hours ?? 0) === "warn"
-                          ? "text-[var(--chart-3)]"
-                          : "text-muted-foreground"
-                    )}
-                  >
-                    陈旧 {formatNumber(Math.round(a.hours ?? 0))} 小时
-                  </span>
-                </li>
-              ))}
-              {stale.length > 3 ? (
-                <li className="text-[12px] leading-[16px] text-muted-foreground">
-                  另有 {stale.length - 3} 个
-                </li>
-              ) : null}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+      <FreshnessCard accounts={accounts} now={now} />
     </section>
   )
 }

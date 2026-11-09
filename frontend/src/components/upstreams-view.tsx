@@ -287,7 +287,7 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
   }, [visibleCols])
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col space-y-4">
+    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
       {/* 顶部 4 张 KPI 卡（等高） */}
       <section className="grid grid-cols-2 md:grid-cols-4 gap-3.5 shrink-0">
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">

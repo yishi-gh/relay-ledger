@@ -9,7 +9,6 @@ import { AppSidebar, type ViewKey } from "@/components/app-sidebar"
 import { TopBar } from "@/components/top-bar"
 import { OverviewView, type KpiData } from "@/components/overview-view"
 import { ProfitView } from "@/components/profit-view"
-import { PlaceholderView, type PlaceholderKey } from "@/components/placeholder-view"
 import { DetailsView } from "@/components/details-view"
 import { RankView } from "@/components/rank-view"
 import { ModelsView } from "@/components/models-view"
@@ -17,6 +16,7 @@ import { UpstreamsView } from "@/components/upstreams-view"
 import { CapitalView } from "@/components/capital-view"
 import { HealthView } from "@/components/health-view"
 import { QualityView } from "@/components/quality-view"
+import { SystemView } from "@/components/system-view"
 import { SettingsView } from "@/components/settings-view"
 import {
   loadDashboard,
@@ -120,11 +120,11 @@ const VALID_VIEWS: ViewKey[] = [
   "models",
   "channels_detail",
   "groups_detail",
-  "details",
   "upstreams",
   "capital",
   "health",
   "quality",
+  "system",
   "settings",
 ]
 
@@ -133,13 +133,13 @@ const VIEW_TITLES: Record<ViewKey, string> = {
   profit: "盈利",
   rank: "排行",
   models: "模型经营",
-  channels_detail: "经营明细",
-  groups_detail: "经营明细",
-  details: "经营明细",
+  channels_detail: "渠道明细",
+  groups_detail: "分组明细",
   upstreams: "上游账户",
   capital: "资金与续航",
   health: "渠道健康",
   quality: "数据质量",
+  system: "系统状态",
   settings: "系统设置",
 }
 
@@ -156,40 +156,138 @@ function nextRefreshDelay(now: number): number {
   )
 }
 
-function normalizeView(v: string | null): ViewKey {
-  if (!v) return "overview"
-  const normalized = v.replace(/-/g, "_")
-  if (
-    normalized === "channels_rank" ||
-    normalized === "groups_rank" ||
-    normalized === "rank"
-  ) {
-    return "rank"
-  }
-  if (normalized === "channels_table") return "channels_detail"
-  if (normalized === "groups_table") return "groups_detail"
-  if (VALID_VIEWS.includes(normalized as ViewKey)) {
-    return normalized as ViewKey
-  }
-  return "overview"
+type DetailLevel = "channel" | "group"
+
+interface RouteState {
+  view: ViewKey
+  level: DetailLevel
 }
 
-function getInitialView(): ViewKey {
-  if (typeof window === "undefined") return "overview"
+function normalizeLevel(value: string | null): DetailLevel {
+  return value === "group" ? "group" : "channel"
+}
+
+/**
+ * 纯函数：只读 URL，不写 history，渲染期可安全调用。
+ * 规范化（把老别名写回规范 view）统一放在挂载后的 effect 里做。
+ * 旧的 tab=biz/perf/all 不再参与路由，只保留 tab=availability 转健康页的兼容。
+ */
+function parseRouteState(): RouteState {
+  if (typeof window === "undefined") {
+    return { view: "overview", level: "channel" }
+  }
+
   const params = new URLSearchParams(window.location.search)
-  return normalizeView(params.get("view"))
+  const rawView = params.get("view")?.replace(/-/g, "_")
+  const level = normalizeLevel(params.get("level"))
+
+  if (!rawView) {
+    return { view: "overview", level }
+  }
+
+  if (rawView === "health") {
+    return { view: "health", level }
+  }
+
+  if (rawView === "quality") {
+    return { view: "quality", level }
+  }
+
+  if (rawView === "ops") {
+    return { view: "system", level }
+  }
+
+  // 老详情页的 availability 档已独立为渠道健康页
+  const legacyAvailability = params.get("tab") === "availability"
+
+  if (rawView === "details") {
+    if (legacyAvailability) return { view: "health", level }
+    return {
+      view: level === "group" ? "groups_detail" : "channels_detail",
+      level,
+    }
+  }
+
+  if (rawView === "channels_detail" || rawView === "channels_table") {
+    if (legacyAvailability) return { view: "health", level: "channel" }
+    return { view: "channels_detail", level: "channel" }
+  }
+
+  if (rawView === "groups_detail" || rawView === "groups_table") {
+    if (legacyAvailability) return { view: "health", level: "group" }
+    return { view: "groups_detail", level: "group" }
+  }
+
+  if (
+    rawView === "rank" ||
+    rawView === "channels_rank" ||
+    rawView === "groups_rank"
+  ) {
+    return { view: "rank", level }
+  }
+
+  if (VALID_VIEWS.includes(rawView as ViewKey)) {
+    return { view: rawView as ViewKey, level }
+  }
+
+  return { view: "overview", level }
+}
+
+/** 生成规范 URL：保留 preview 等既有参数，level 只留给健康页；废弃的 tab 一律清除。 */
+function buildViewUrl(
+  href: string,
+  view: ViewKey,
+  level: DetailLevel
+): string {
+  const url = new URL(href)
+  url.searchParams.set("view", view)
+
+  if (view === "health" && level === "group") {
+    url.searchParams.set("level", "group")
+  } else {
+    url.searchParams.delete("level")
+  }
+
+  url.searchParams.delete("tab")
+
+  return `${url.pathname}${url.search}${url.hash}`
+}
+
+function pushRoute(url: string) {
+  if (typeof window === "undefined") return
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  if (url === current) return
+  window.history.pushState({}, "", url)
 }
 
 export function App() {
+  const initialRoute = React.useMemo(() => parseRouteState(), [])
   const [timeRange, setTimeRange] = React.useState<RangeType>("24h")
-  const [currentView, setCurrentView] = React.useState<ViewKey>(getInitialView)
+  const [currentView, setCurrentView] = React.useState<ViewKey>(initialRoute.view)
+  const [detailLevel, setDetailLevel] = React.useState<DetailLevel>(initialRoute.level)
+  const [lastLoadedAt, setLastLoadedAt] = React.useState<number>(0)
   const [data, setData] = React.useState<DashboardData | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [loadFailure, setLoadFailure] = React.useState<string | null>(null)
 
+  // 首次挂载把老别名 URL 规范化为新 view key；state 已由 parseRouteState 解析好
+  React.useEffect(() => {
+    // 无 view 参数的裸 URL 保持干净，不额外写默认视图
+    if (!new URLSearchParams(window.location.search).has("view")) return
+
+    const canonical = buildViewUrl(
+      window.location.href,
+      initialRoute.view,
+      initialRoute.level
+    )
+    const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
+    if (canonical !== current) {
+      window.history.replaceState({}, "", canonical)
+    }
+  }, [initialRoute])
+
   const timeRangeRef = React.useRef(timeRange)
   const loadingRef = React.useRef(false)
-  const lastLoadedAtRef = React.useRef(0)
   const requestSeqRef = React.useRef(0)
   const requestedRangeRef = React.useRef<RangeType | null>(null)
 
@@ -222,7 +320,7 @@ export function App() {
         if (seq === requestSeqRef.current) {
           loadingRef.current = false
           setLoading(false)
-          lastLoadedAtRef.current = Date.now()
+          setLastLoadedAt(Date.now())
         }
       }
     },
@@ -261,7 +359,7 @@ export function App() {
 
     function handleVisibilityChange() {
       if (document.hidden || loadingRef.current) return
-      if (Date.now() - lastLoadedAtRef.current > REFRESH_INTERVAL_MS) {
+      if (Date.now() - lastLoadedAt > REFRESH_INTERVAL_MS) {
         void performLoad(timeRangeRef.current)
       }
     }
@@ -274,22 +372,31 @@ export function App() {
       if (timer !== undefined) window.clearTimeout(timer)
       document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
-  }, [performLoad])
+  }, [performLoad, lastLoadedAt])
 
-  // 路由/视图同步 URL 查询参数
-  const navigate = React.useCallback((view: ViewKey) => {
-    setCurrentView(view)
-    if (typeof window !== "undefined") {
-      const url = new URL(window.location.href)
-      url.searchParams.set("view", view)
-      window.history.replaceState({}, "", url.toString())
-    }
-  }, [])
+  // 路由/视图同步 URL 查询参数：导航用 pushState，同 URL 不重复入栈
+  const navigate = React.useCallback(
+    (view: ViewKey, extra?: { level?: DetailLevel }) => {
+      // 侧栏重复点击当前视图不再压栈
+      if (view === currentView && !extra?.level) return
+
+      const level = extra?.level ?? (view === "groups_detail" ? "group" : "channel")
+
+      setCurrentView(view)
+      setDetailLevel(level)
+
+      if (typeof window !== "undefined") {
+        pushRoute(buildViewUrl(window.location.href, view, level))
+      }
+    },
+    [currentView]
+  )
 
   React.useEffect(() => {
     const handlePopState = () => {
-      const params = new URLSearchParams(window.location.search)
-      setCurrentView(normalizeView(params.get("view")))
+      const route = parseRouteState()
+      setCurrentView(route.view)
+      setDetailLevel(route.level)
     }
 
     window.addEventListener("popstate", handlePopState)
@@ -423,7 +530,7 @@ export function App() {
 
         <SidebarInset className="min-w-0 min-h-screen lg:h-screen lg:max-h-screen lg:overflow-hidden flex flex-col flex-1">
           <TopBar
-            title={VIEW_TITLES[currentView]}
+            title={VIEW_TITLES[currentView] || "Relay Ledger"}
             maxT={meta?.max_t ?? undefined}
             rows={meta?.rows}
             timeRange={timeRange}
@@ -432,7 +539,7 @@ export function App() {
             refreshing={loading}
           />
 
-          <main className="flex-1 min-h-0 lg:overflow-hidden flex flex-col p-3.5 md:p-4 xl:p-4.5 min-w-0">
+          <main className="flex-1 min-h-0 lg:overflow-y-auto flex flex-col p-3.5 md:p-4 xl:p-4.5 min-w-0">
             {errorNames.length > 0 && (
               <Alert variant="destructive" className="mb-4 shrink-0">
                 <AlertTriangle />
@@ -507,16 +614,16 @@ export function App() {
                   />
                 )}
 
-                {(currentView === "details" ||
-                  currentView === "channels_detail" ||
+                {(currentView === "channels_detail" ||
                   currentView === "groups_detail") && (
                   <DetailsView
+                    key={currentView}
                     timeRange={timeRange}
+                    dateRange={data?.range ?? null}
                     channels={currentChannels?.rows || []}
                     groups={currentGroups?.groups || []}
-                    initialLevel={
-                      currentView === "groups_detail" ? "group" : "channel"
-                    }
+                    initialLevel={detailLevel}
+                    fixedLevel={currentView === "groups_detail" ? "group" : "channel"}
                   />
                 )}
 
@@ -539,6 +646,13 @@ export function App() {
                   <HealthView
                     timeRange={timeRange}
                     dateRange={data?.range ?? null}
+                    initialLevel={detailLevel}
+                    onLevelChange={(level) => {
+                      setDetailLevel(level)
+                      if (typeof window !== "undefined") {
+                        pushRoute(buildViewUrl(window.location.href, "health", level))
+                      }
+                    }}
                   />
                 )}
 
@@ -552,26 +666,23 @@ export function App() {
                   />
                 )}
 
-                {currentView === "settings" && (
-                  <SettingsView
-                    meta={meta}
-                    lastRefreshTime={lastLoadedAtRef.current}
+                {currentView === "system" && (
+                  <SystemView
+                    quality={data?.quality || {}}
+                    accounts={currentUpstreams?.accounts || []}
+                    dateRange={data?.range ?? null}
+                    timeRange={timeRange}
+                    previewMode={import.meta.env.DEV && Boolean(meta?.preview)}
+                    lastRefreshTime={lastLoadedAt}
                   />
                 )}
 
-                {currentView !== "overview" &&
-                  currentView !== "profit" &&
-                  currentView !== "rank" &&
-                  currentView !== "models" &&
-                  currentView !== "channels_detail" &&
-                  currentView !== "groups_detail" &&
-                  currentView !== "upstreams" &&
-                  currentView !== "capital" &&
-                  currentView !== "health" &&
-                  currentView !== "quality" &&
-                  currentView !== "settings" && (
-                    <PlaceholderView viewKey={currentView as PlaceholderKey} />
-                  )}
+                {currentView === "settings" && (
+                  <SettingsView
+                    meta={meta}
+                    lastRefreshTime={lastLoadedAt}
+                  />
+                )}
               </>
             )}
           </main>
