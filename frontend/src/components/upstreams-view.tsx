@@ -253,10 +253,10 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
         <CardContent className="p-0 flex flex-col flex-1 min-h-0">
           <div
             data-slot="table-container"
-            className="rounded-lg border border-border bg-card flex-1 min-h-0 overflow-auto"
+            className="rounded-lg border border-border bg-card overflow-x-auto flex-1 min-h-[300px] lg:min-h-0"
           >
-            <Table className="w-full table-fixed text-sm">
-              <colgroup>
+            <Table className="min-w-[860px] lg:min-w-full table-auto lg:table-fixed text-sm">
+              <colgroup className="hidden lg:table-column-group">
                 <col style={{ width: `${COL_WIDTH_PCT.account}%` }} />
                 <col style={{ width: `${COL_WIDTH_PCT.enabled}%` }} />
                 <col style={{ width: `${COL_WIDTH_PCT.balance}%` }} />
@@ -270,7 +270,7 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
               <TableHeader className="bg-muted/50 sticky top-0 z-20 backdrop-blur-xs">
                 <TableRow className="hover:bg-transparent border-b border-border">
                   {/* 1. 账户（首列 sticky） */}
-                  <TableHead className="h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-left sticky left-0 bg-muted/95 z-30 border-r border-border min-w-[160px]">
+                  <TableHead className="h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-left sticky left-0 bg-muted/95 z-30 border-r border-border min-w-[140px] sm:min-w-[160px]">
                     账户
                   </TableHead>
 
@@ -419,7 +419,7 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
                     className="h-[38px] hover:bg-muted/40 transition-colors border-b border-border/60"
                   >
                     {/* 1. 账户：名称（可折行 2 行）+ 小字 kind */}
-                    <TableCell className="sticky left-0 bg-card z-10 border-r border-border/50 px-3 py-1 min-w-[160px]">
+                    <TableCell className="sticky left-0 bg-card z-10 border-r border-border/50 px-3 py-1 min-w-[140px] sm:min-w-[160px]">
                       <div className="flex flex-col justify-center min-w-0 leading-tight">
                         <span
                           className="font-medium text-foreground text-[14px] leading-[18px] line-clamp-2"
@@ -427,7 +427,7 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
                         >
                           {row.name || row.id}
                         </span>
-                        <span className="font-mono text-[11px] leading-[14px] text-muted-foreground">
+                        <span className="font-mono text-[12px] leading-[16px] text-muted-foreground">
                           {row.kind}
                         </span>
                       </div>

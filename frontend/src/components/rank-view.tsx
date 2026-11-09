@@ -7,7 +7,7 @@ import {
   Cell,
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
-} from "recharts"
+} from "@/lib/recharts-sized"
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/formatters"
 import {
   getDeterministicChartColor,
@@ -202,10 +202,10 @@ export function RankView({
   return (
     <div className="flex-1 min-h-0 flex flex-col space-y-3.5">
       {/* 三张卡竖向排列：渠道排行 / 分组排行 / 用户排行，各占约 1/3 高度 (grid-rows-3) */}
-      <div className="grid grid-rows-3 gap-3.5 h-full min-h-0 flex-1">
+      <div className="grid grid-rows-3 gap-3.5 h-full min-h-0 flex-1 max-md:flex max-md:flex-col max-md:gap-3 max-md:h-auto">
         {/* 卡 1：渠道售出排行 */}
-        <Card className="h-full min-h-0 shadow-xs overflow-hidden flex flex-col p-3.5">
-          <CardHeader className="p-0 pb-2 flex flex-row items-center justify-between space-y-0 shrink-0">
+        <Card className="h-auto md:h-full md:min-h-0 shadow-xs overflow-hidden flex flex-col p-3.5">
+          <CardHeader className="p-0 pb-2 flex flex-wrap items-center justify-between gap-1.5 shrink-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               渠道售出排行
             </CardTitle>
@@ -275,11 +275,11 @@ export function RankView({
                         </span>
 
                         {/* 渠道名称与 ID */}
-                        <div className="w-40 sm:w-48 shrink-0 truncate flex items-center gap-2 text-[14px] leading-[20px]">
+                        <div className="w-28 sm:w-40 md:w-48 shrink-0 flex items-center gap-1.5 text-[14px] leading-[20px] min-w-0">
                           <span className="font-mono text-[12px] leading-[16px] text-muted-foreground shrink-0">
                             #{item.id}
                           </span>
-                          <span className="truncate text-foreground font-normal" title={item.name}>
+                          <span className="line-clamp-2 text-foreground font-normal" title={item.name}>
                             {item.name}
                           </span>
                         </div>
@@ -300,7 +300,7 @@ export function RankView({
 
                         {/* 金额与占比 */}
                         <div className="shrink-0 flex items-center gap-2 text-right">
-                          <span className="font-mono tabular-nums text-[16px] leading-[24px] font-semibold text-foreground w-20">
+                          <span className="font-mono tabular-nums text-[14px] sm:text-[16px] leading-[20px] sm:leading-[24px] font-semibold text-foreground w-16 sm:w-20">
                             {formatCurrency(item.revenue)}
                           </span>
                           <span className="font-mono tabular-nums text-[12px] leading-[16px] text-muted-foreground w-11 hidden sm:inline-block">
@@ -316,7 +316,7 @@ export function RankView({
                 {/* 右侧：环形饼图 (Donut) 固定宽 120px、垂直居中、环心放 Top1 占比 */}
                 <div
                   data-slot="donut-container"
-                  className="relative size-[150px] xl:size-[168px] shrink-0 flex items-center justify-center"
+                  className="relative size-[110px] min-[480px]:size-[140px] md:size-[150px] xl:size-[168px] shrink-0 self-center mx-auto flex items-center justify-center my-1 md:my-0"
                 >
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -363,7 +363,7 @@ export function RankView({
                   </ResponsiveContainer>
                   {/* 环心一行小字：Top1 占比 (14px/20px/600 mono) */}
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none">
-                    <span className="text-[18px] leading-[24px] font-semibold font-mono tabular-nums text-foreground">
+                    <span className="text-[14px] sm:text-[18px] leading-[20px] sm:leading-[24px] font-semibold font-mono tabular-nums text-foreground">
                       {formatPercent(top1ChannelShare)}
                     </span>
                   </div>
@@ -374,8 +374,8 @@ export function RankView({
         </Card>
 
         {/* 卡 2：业务分组售出排行 */}
-        <Card className="h-full min-h-0 shadow-xs overflow-hidden flex flex-col p-3.5">
-          <CardHeader className="p-0 pb-2 flex flex-row items-center justify-between space-y-0 shrink-0">
+        <Card className="h-auto md:h-full md:min-h-0 shadow-xs overflow-hidden flex flex-col p-3.5">
+          <CardHeader className="p-0 pb-2 flex flex-wrap items-center justify-between gap-1.5 shrink-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               业务分组售出排行
             </CardTitle>
@@ -443,8 +443,8 @@ export function RankView({
                         </span>
 
                         {/* 分组名称 */}
-                        <div className="w-40 sm:w-48 shrink-0 truncate flex items-center gap-1.5 text-[14px] leading-[20px]">
-                          <span className="truncate text-foreground font-normal" title={item.name}>
+                        <div className="w-28 sm:w-40 md:w-48 shrink-0 flex items-center gap-1.5 text-[14px] leading-[20px] min-w-0">
+                          <span className="line-clamp-2 text-foreground font-normal" title={item.name}>
                             {item.name}
                           </span>
                         </div>
@@ -465,7 +465,7 @@ export function RankView({
 
                         {/* 金额与占比 */}
                         <div className="shrink-0 flex items-center gap-2 text-right">
-                          <span className="font-mono tabular-nums text-[16px] leading-[24px] font-semibold text-foreground w-20">
+                          <span className="font-mono tabular-nums text-[14px] sm:text-[16px] leading-[20px] sm:leading-[24px] font-semibold text-foreground w-16 sm:w-20">
                             {formatCurrency(item.revenue)}
                           </span>
                           <span className="font-mono tabular-nums text-[12px] leading-[16px] text-muted-foreground w-11 hidden sm:inline-block">
@@ -481,7 +481,7 @@ export function RankView({
                 {/* 右侧：环形饼图 (Donut) 固定宽 120px、垂直居中、环心放 Top1 占比 */}
                 <div
                   data-slot="donut-container"
-                  className="relative size-[150px] xl:size-[168px] shrink-0 flex items-center justify-center"
+                  className="relative size-[110px] min-[480px]:size-[140px] md:size-[150px] xl:size-[168px] shrink-0 self-center mx-auto flex items-center justify-center my-1 md:my-0"
                 >
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -528,7 +528,7 @@ export function RankView({
                   </ResponsiveContainer>
                   {/* 环心一行小字：Top1 占比 (14px/20px/600 mono) */}
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none">
-                    <span className="text-[18px] leading-[24px] font-semibold font-mono tabular-nums text-foreground">
+                    <span className="text-[14px] sm:text-[18px] leading-[20px] sm:leading-[24px] font-semibold font-mono tabular-nums text-foreground">
                       {formatPercent(top1GroupShare)}
                     </span>
                   </div>
@@ -539,8 +539,8 @@ export function RankView({
         </Card>
 
         {/* 卡 3：用户排行 */}
-        <Card className="h-full min-h-0 shadow-xs overflow-hidden flex flex-col p-3.5">
-          <CardHeader className="p-0 pb-2 flex flex-row items-center justify-between space-y-0 shrink-0">
+        <Card className="h-auto md:h-full md:min-h-0 shadow-xs overflow-hidden flex flex-col p-3.5">
+          <CardHeader className="p-0 pb-2 flex flex-wrap items-center justify-between gap-1.5 shrink-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               用户售出排行
             </CardTitle>
@@ -601,8 +601,8 @@ export function RankView({
                         </span>
 
                         {/* 用户名 */}
-                        <div className="w-40 sm:w-48 shrink-0 truncate flex items-center gap-1.5 text-[14px] leading-[20px]">
-                          <span className="truncate text-foreground font-normal" title={item.name}>
+                        <div className="w-28 sm:w-40 md:w-48 shrink-0 flex items-center gap-1.5 text-[14px] leading-[20px] min-w-0">
+                          <span className="line-clamp-2 text-foreground font-normal" title={item.name}>
                             {item.name}
                           </span>
                         </div>
@@ -623,7 +623,7 @@ export function RankView({
 
                         {/* 金额与占比 */}
                         <div className="shrink-0 flex items-center gap-2 text-right">
-                          <span className="font-mono tabular-nums text-[16px] leading-[24px] font-semibold text-foreground w-20">
+                          <span className="font-mono tabular-nums text-[14px] sm:text-[16px] leading-[20px] sm:leading-[24px] font-semibold text-foreground w-16 sm:w-20">
                             {formatCurrency(item.revenue)}
                           </span>
                           <span className="font-mono tabular-nums text-[12px] leading-[16px] text-muted-foreground w-11 hidden sm:inline-block">
@@ -639,7 +639,7 @@ export function RankView({
                 {/* 右侧：环形饼图 (Donut) 固定宽 120px、垂直居中、环心放 Top1 占比 */}
                 <div
                   data-slot="donut-container"
-                  className="relative size-[150px] xl:size-[168px] shrink-0 flex items-center justify-center"
+                  className="relative size-[110px] min-[480px]:size-[140px] md:size-[150px] xl:size-[168px] shrink-0 self-center mx-auto flex items-center justify-center my-1 md:my-0"
                 >
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -686,7 +686,7 @@ export function RankView({
                   </ResponsiveContainer>
                   {/* 环心一行小字：Top1 占比 (14px/20px/600 mono) */}
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none">
-                    <span className="text-[18px] leading-[24px] font-semibold font-mono tabular-nums text-foreground">
+                    <span className="text-[14px] sm:text-[18px] leading-[20px] sm:leading-[24px] font-semibold font-mono tabular-nums text-foreground">
                       {formatPercent(top1UserShare)}
                     </span>
                   </div>

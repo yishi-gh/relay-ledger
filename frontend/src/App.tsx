@@ -13,10 +13,12 @@ import { PlaceholderView, type PlaceholderKey } from "@/components/placeholder-v
 import { ChannelsDetailView } from "@/components/channels-detail-view"
 import { GroupsDetailView } from "@/components/groups-detail-view"
 import { RankView } from "@/components/rank-view"
+import { ModelsView } from "@/components/models-view"
 import { UpstreamsView } from "@/components/upstreams-view"
+import { CapitalView } from "@/components/capital-view"
 import { QualityView } from "@/components/quality-view"
+import { SettingsView } from "@/components/settings-view"
 import {
-  emptyDashboard,
   loadDashboard,
   type DashboardData,
   type ProfitData,
@@ -115,9 +117,11 @@ const VALID_VIEWS: ViewKey[] = [
   "overview",
   "profit",
   "rank",
+  "models",
   "channels_detail",
   "groups_detail",
   "upstreams",
+  "capital",
   "quality",
   "settings",
 ]
@@ -126,9 +130,11 @@ const VIEW_TITLES: Record<ViewKey, string> = {
   overview: "总览",
   profit: "盈利",
   rank: "排行",
+  models: "模型经营",
   channels_detail: "渠道明细",
   groups_detail: "分组明细",
   upstreams: "上游账户",
+  capital: "资金与续航",
   quality: "数据质量",
   settings: "系统设置",
 }
@@ -175,6 +181,7 @@ export function App() {
   const [currentView, setCurrentView] = React.useState<ViewKey>(getInitialView)
   const [data, setData] = React.useState<DashboardData | null>(null)
   const [loading, setLoading] = React.useState(false)
+  const [loadFailure, setLoadFailure] = React.useState<string | null>(null)
 
   const timeRangeRef = React.useRef(timeRange)
   const loadingRef = React.useRef(false)
@@ -196,11 +203,17 @@ export function App() {
       try {
         const result = await loadDashboard(range)
         if (seq !== requestSeqRef.current) return
+        if (!result.meta || result.errors.includes("meta")) {
+          // 后端不可用时不伪造数据：有旧数据就留住，没有就走致命错误卡。
+          setLoadFailure("后端接口不可用（meta）")
+          return
+        }
         registerSiteColors(result.profit?.sites.map((site) => site.account_id) ?? [])
+        setLoadFailure(null)
         setData(result)
-      } catch {
+      } catch (err) {
         if (seq !== requestSeqRef.current) return
-        setData(emptyDashboard(["meta"]))
+        setLoadFailure(err instanceof Error ? err.message : String(err))
       } finally {
         if (seq === requestSeqRef.current) {
           loadingRef.current = false
@@ -390,7 +403,7 @@ export function App() {
   return (
     <TooltipProvider>
       <SidebarProvider
-        className="h-screen max-h-screen overflow-hidden"
+        className="min-h-screen lg:h-screen lg:max-h-screen lg:overflow-hidden"
         style={
           {
             "--sidebar-width": "15rem", // 240px
@@ -404,7 +417,7 @@ export function App() {
           onSelectView={navigate}
         />
 
-        <SidebarInset className="min-w-0 h-screen max-h-screen overflow-hidden flex flex-col flex-1">
+        <SidebarInset className="min-w-0 min-h-screen lg:h-screen lg:max-h-screen lg:overflow-hidden flex flex-col flex-1">
           <TopBar
             title={VIEW_TITLES[currentView]}
             maxT={meta?.max_t ?? undefined}
@@ -415,21 +428,30 @@ export function App() {
             refreshing={loading}
           />
 
-          <main className="flex-1 min-h-0 overflow-y-auto md:overflow-hidden flex flex-col p-3.5 md:p-4 xl:p-4.5 min-w-0">
+          <main className="flex-1 min-h-0 lg:overflow-hidden flex flex-col p-3.5 md:p-4 xl:p-4.5 min-w-0">
             {errorNames.length > 0 && (
               <Alert variant="destructive" className="mb-4 shrink-0">
                 <AlertTriangle />
                 <AlertTitle>部分数据加载失败</AlertTitle>
                 <AlertDescription>失败接口：{errorNames.join("、")}</AlertDescription>
                 <AlertAction>
-                  <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading}>
+                  <Button variant="outline" size="sm" className="text-[12px] leading-[16px] h-7" onClick={handleRefresh} disabled={loading}>
                     重试
                   </Button>
                 </AlertAction>
               </Alert>
             )}
 
-            {!data && loading ? (
+            {!data && loadFailure ? (
+              <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 text-center">
+                <AlertTriangle className="size-6 text-destructive" />
+                <div className="text-[14px] leading-[20px] font-medium">后端接口不可用</div>
+                <div className="text-[12px] leading-[16px] text-muted-foreground max-w-md">{loadFailure}</div>
+                <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading}>
+                  重试
+                </Button>
+              </div>
+            ) : !data && loading ? (
               <div className="flex-1 min-h-0 flex flex-col gap-4">
                 <div className="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-5 gap-4 shrink-0">
                   {Array.from({ length: 5 }).map((_, index) => (
@@ -471,6 +493,14 @@ export function App() {
                   />
                 )}
 
+                {currentView === "models" && (
+                  <ModelsView
+                    timeRange={timeRange}
+                    dateRange={data?.range ?? null}
+                    previewMode={import.meta.env.DEV && Boolean(meta?.preview)}
+                  />
+                )}
+
                 {currentView === "channels_detail" && (
                   <ChannelsDetailView
                     timeRange={timeRange}
@@ -492,20 +522,41 @@ export function App() {
                   />
                 )}
 
+                {currentView === "capital" && (
+                  <CapitalView
+                    timeRange={timeRange}
+                    dateRange={data?.range ?? null}
+                    previewMode={import.meta.env.DEV && Boolean(meta?.preview)}
+                  />
+                )}
+
                 {currentView === "quality" && (
                   <QualityView
                     quality={data?.quality || {}}
                     accounts={currentUpstreams?.accounts || []}
+                    dateRange={data?.range ?? null}
+                    timeRange={timeRange}
+                    previewMode={import.meta.env.DEV && Boolean(meta?.preview)}
+                  />
+                )}
+
+                {currentView === "settings" && (
+                  <SettingsView
+                    meta={meta}
+                    lastRefreshTime={lastLoadedAtRef.current}
                   />
                 )}
 
                 {currentView !== "overview" &&
                   currentView !== "profit" &&
                   currentView !== "rank" &&
+                  currentView !== "models" &&
                   currentView !== "channels_detail" &&
                   currentView !== "groups_detail" &&
                   currentView !== "upstreams" &&
-                  currentView !== "quality" && (
+                  currentView !== "capital" &&
+                  currentView !== "quality" &&
+                  currentView !== "settings" && (
                     <PlaceholderView viewKey={currentView as PlaceholderKey} />
                   )}
               </>

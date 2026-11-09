@@ -778,3 +778,433 @@ test('/api/quality 的 collect_errors：取最新一轮失败账户，无失败�
     assert.deepEqual(api.quality().collect_errors, []);
   });
 });
+
+// ---------------------------------------------------------------------------
+// /api/models：按模型聚合（模型排行）
+// ---------------------------------------------------------------------------
+
+function makeModelSourceDb(file, rows) {
+  const db = new DatabaseSync(file);
+  db.exec(LOGS_SCHEMA);
+  const ins = db.prepare(
+    `INSERT INTO logs (req_id, site, source_kind, input_format, t_ms, t_local, token_name,
+                       channel_id, channel_name, model, cost, quota_raw,
+                       input_total, input_uncached, cache_read, output, latency_ms, log_type, raw_json)
+     VALUES (?, 'test', 'api', 'openai', ?, '2026-11-02 12:00:00', ?,
+             ?, ?, ?, ?, 0, ?, 0, 0, ?, 1000, ?, '')`,
+  );
+  for (const r of rows) {
+    ins.run(
+      r.req_id,
+      r.t_ms,
+      r.token_name ?? 't1',
+      r.channel_id,
+      r.channel_name,
+      r.model ?? null,
+      r.cost,
+      r.input_total ?? 0,
+      r.output ?? 0,
+      r.log_type ?? 2,
+    );
+  }
+  db.close();
+}
+
+test('模型聚合：售出/token/占比、渠道归属与归档不可用', async (t) => {
+  const dir = makeTempDir('v2-api-models-');
+  const sourceFile = path.join(dir, 'source.db');
+  const detailDay = beijingDayStart(Date.now()) - DAY_MS;
+  const baseT = detailDay + 3600000;
+
+  makeModelSourceDb(sourceFile, [
+    // model-a：同一渠道两笔，合计售出 15、tokens 1.5 亿
+    { req_id: 'a1', t_ms: baseT, channel_id: 21, channel_name: '渠道A', model: 'model-a', cost: 10, input_total: 100000000 },
+    { req_id: 'a2', t_ms: baseT + 1000, channel_id: 21, channel_name: '渠道A', model: 'model-a', cost: 5, input_total: 50000000 },
+    // 与 model-aa 同为 4：并列时按模型名升序
+    { req_id: 'aa1', t_ms: baseT + 2000, channel_id: 21, channel_name: '渠道A', model: 'model-aa', cost: 4, input_total: 0 },
+    // model-b：token 为 0，per_1e8 必须是 null；渠道 22 被两个账户配置
+    { req_id: 'b1', t_ms: baseT + 3000, channel_id: 22, channel_name: '渠道B', model: 'model-b', cost: 4, input_total: 0 },
+    // model-c：渠道 99 已从配置删除，不该归属任何账户
+    { req_id: 'c1', t_ms: baseT + 4000, channel_id: 99, channel_name: '已删渠道', model: 'model-c', cost: 1, input_total: 10000000 },
+    // 模型名 NULL 与空串归并成 (未知模型)
+    { req_id: 'n1', t_ms: baseT + 5000, channel_id: 21, channel_name: '渠道A', model: null, cost: 2, input_total: 20000000 },
+    { req_id: 'n2', t_ms: baseT + 6000, channel_id: 22, channel_name: '渠道B', model: '', cost: 3, input_total: 30000000, output: 5000000 },
+    // 必须排除：Model test 与非计费日志
+    { req_id: 'x1', t_ms: baseT + 7000, channel_id: 21, channel_name: '渠道A', model: 'model-a', cost: 999, input_total: 1000, token_name: 'Model test' },
+    { req_id: 'x2', t_ms: baseT + 8000, channel_id: 21, channel_name: '渠道A', model: 'model-a', cost: 888, input_total: 1000, log_type: 1 },
+  ]);
+
+  const source = new DatabaseSync(sourceFile, { readOnly: true });
+  const dashboard = openTempDashboard(dir);
+  const api = createApi({
+    source,
+    dashboard,
+    config: {
+      currency: 'USD',
+      quota_per_unit: 500000,
+      accounts: [
+        { id: 'eula', name: 'Eula', kind: 'newapi', base_url: 'https://example.test', unit: 'USD', enabled: true, channels: [21, 22] },
+        { id: 'zacc', name: 'Zacc', kind: 'newapi', base_url: 'https://example.test', unit: 'USD', enabled: true, channels: [22] },
+      ],
+    },
+    siteName: 'test',
+    sourceLabel: 'db/sites/test.db',
+  });
+
+  t.after(() => {
+    source.close();
+    dashboard.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const range = params({ from: detailDay, to: detailDay + DAY_MS - 1 });
+
+  await t.test('按模型聚合：revenue/requests/tokens/share/per_1e8 与排序', () => {
+    const data = api.models(range);
+    assert.equal(data.total_revenue, 29);
+    // 售出降序；model-aa 与 model-b 同为 4，按模型名升序
+    assert.deepEqual(
+      data.models.map((m) => [m.model, m.revenue]),
+      [
+        ['model-a', 15],
+        ['(未知模型)', 5],
+        ['model-aa', 4],
+        ['model-b', 4],
+        ['model-c', 1],
+      ],
+    );
+
+    const byName = Object.fromEntries(data.models.map((m) => [m.model, m]));
+    const modelA = byName['model-a'];
+    assert.equal(modelA.requests, 2);
+    assert.equal(modelA.tokens, 150000000);
+    assert.equal(modelA.share, 0.517241);
+    assert.equal(modelA.per_1e8, 10);
+    assert.deepEqual(modelA.upstream_accounts, ['eula']);
+
+    assert.equal(byName['(未知模型)'].requests, 2);
+    assert.equal(byName['(未知模型)'].tokens, 55000000);
+    assert.equal(byName['(未知模型)'].share, 0.172414);
+    assert.equal(byName['(未知模型)'].per_1e8, 9.090909);
+
+    assert.equal(byName['model-aa'].tokens, 0);
+    assert.equal(byName['model-aa'].per_1e8, null);
+    assert.equal(byName['model-b'].per_1e8, null);
+    assert.equal(byName['model-c'].per_1e8, 10);
+  });
+
+  await t.test('渠道已删忽略、多渠道归属去重排序、NULL/空串模型归并', () => {
+    const data = api.models(range);
+    const byName = Object.fromEntries(data.models.map((m) => [m.model, m]));
+
+    // 渠道 22 同时配置给 eula 与 zacc：去重并按 id 排序
+    assert.deepEqual(byName['model-b'].upstream_accounts, ['eula', 'zacc']);
+    assert.deepEqual(byName['(未知模型)'].upstream_accounts, ['eula', 'zacc']);
+    // 渠道 99 不在任何账户的 channels 里：无名渠道不产生归属
+    assert.deepEqual(byName['model-c'].upstream_accounts, []);
+
+    // logs_daily 没有 model 维度，归档固定不可用并说明原因
+    assert.deepEqual(data.archive, {
+      from_day: '',
+      to_day: '',
+      days: 0,
+      available: false,
+      partial_fields: [],
+      reason: 'logs_daily has no model dimension',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /api/capital：余额、区间成本、固定 7 日日均与续航
+// ---------------------------------------------------------------------------
+
+test('资本：最新余额、区间成本、固定 7 日日均与续航', async (t) => {
+  const dir = makeTempDir('v2-api-capital-');
+  const sourceFile = path.join(dir, 'source.db');
+  makeSourceDb(sourceFile);
+  const source = new DatabaseSync(sourceFile, { readOnly: true });
+  const dashboard = openTempDashboard(dir);
+
+  const now = Date.now();
+  const dayStart = beijingDayStart(now);
+  const avgFrom = dayStart - 6 * DAY_MS;
+
+  // 7 个日桶：前 6 个完整日每天成本 1，当天按最新快照消耗 0.5
+  for (let i = 0; i <= 6; i += 1) {
+    insertBalance(dashboard, 'eula', avgFrom + i * DAY_MS, 1000 - i);
+  }
+  insertBalance(dashboard, 'eula', now - 60000, 993.5);
+
+  const api = createApi({
+    source,
+    dashboard,
+    config: {
+      currency: 'USD',
+      quota_per_unit: 500000,
+      accounts: [
+        { id: 'eula', name: 'Eula', kind: 'newapi', base_url: 'https://example.test', unit: 'USD', enabled: true, channels: [21] },
+      ],
+    },
+    siteName: 'test',
+    sourceLabel: 'db/sites/test.db',
+  });
+
+  t.after(() => {
+    source.close();
+    dashboard.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const range = { from: dayStart - DAY_MS, to: dayStart - 1 };
+  const data = api.capital(params(range));
+
+  await t.test('余额取最新快照，区间成本按账本公式', () => {
+    assert.deepEqual(data.range, range);
+    assert.equal(typeof data.generated_at, 'number');
+    const [acc] = data.accounts;
+    assert.equal(acc.account_id, 'eula');
+    assert.equal(acc.name, 'Eula');
+    // 余额不限窗口：最新一条是 now - 60s 的 993.5
+    assert.equal(acc.balance, 993.5);
+    // 昨天整日：995 + 0 - 994
+    assert.equal(acc.cost_range, 1);
+    assert.equal(acc.credits_range, 0);
+    assert.equal(acc.status, 'ok');
+  });
+
+  await t.test('固定 7 日日均与续航', () => {
+    const [acc] = data.accounts;
+    // (6 × 1 + 当天 0.5) / 7，固定 7 天，不随请求区间变化
+    assert.equal(acc.daily_avg_7d, 0.928571);
+    assert.equal(acc.runway_days, 1069.9);
+    assert.deepEqual(data.total, {
+      balance: 993.5,
+      cost_range: 1,
+      credits_range: 0,
+      daily_avg_7d: 0.928571,
+      runway_days: 1069.9,
+    });
+  });
+});
+
+test('资本：缺快照的账户成本为 null，不填 0', async (t) => {
+  const dir = makeTempDir('v2-api-capital-missing-');
+  const sourceFile = path.join(dir, 'source.db');
+  makeSourceDb(sourceFile);
+  const source = new DatabaseSync(sourceFile, { readOnly: true });
+  const dashboard = openTempDashboard(dir);
+
+  const now = Date.now();
+  const dayStart = beijingDayStart(now);
+
+  // nosnap 只有「最新余额」，没有区间两端快照；empty 完全没有快照
+  insertBalance(dashboard, 'nosnap', now - 60000, 50);
+
+  const api = createApi({
+    source,
+    dashboard,
+    config: {
+      currency: 'USD',
+      quota_per_unit: 500000,
+      accounts: [
+        { id: 'nosnap', name: 'NoSnap', kind: 'newapi', base_url: 'https://example.test', unit: 'USD', enabled: true, channels: [] },
+        { id: 'empty', name: 'Empty', kind: 'newapi', base_url: 'https://example.test', unit: 'USD', enabled: true, channels: [] },
+      ],
+    },
+    siteName: 'test',
+    sourceLabel: 'db/sites/test.db',
+  });
+
+  t.after(() => {
+    source.close();
+    dashboard.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const data = api.capital(params({ from: dayStart - DAY_MS, to: dayStart - 1 }));
+  const byId = Object.fromEntries(data.accounts.map((a) => [a.account_id, a]));
+
+  await t.test('有余额但区间缺快照：cost_range 与日均/续航为 null', () => {
+    const no = byId.nosnap;
+    assert.equal(no.balance, 50);
+    assert.equal(no.cost_range, null);
+    assert.notEqual(no.cost_range, 0);
+    assert.equal(no.credits_range, 0);
+    assert.equal(no.daily_avg_7d, null);
+    assert.equal(no.runway_days, null);
+    assert.equal(no.status, 'partial');
+  });
+
+  await t.test('完全没有快照：余额 null，status=missing_balance', () => {
+    const empty = byId.empty;
+    assert.equal(empty.balance, null);
+    assert.equal(empty.cost_range, null);
+    assert.equal(empty.daily_avg_7d, null);
+    assert.equal(empty.runway_days, null);
+    assert.equal(empty.status, 'missing_balance');
+  });
+
+  await t.test('total 只汇总可算账户，并给出 accounts_counted', () => {
+    assert.equal(data.total.balance, 50);
+    assert.equal(data.total.cost_range, null);
+    assert.equal(data.total.daily_avg_7d, null);
+    assert.equal(data.total.runway_days, null);
+    assert.equal(data.total.accounts_counted, 0);
+  });
+});
+
+test('资本：external 与停用账户不参与统计', async (t) => {
+  const dir = makeTempDir('v2-api-capital-filter-');
+  const sourceFile = path.join(dir, 'source.db');
+  makeSourceDb(sourceFile);
+  const source = new DatabaseSync(sourceFile, { readOnly: true });
+  const dashboard = openTempDashboard(dir);
+
+  const now = Date.now();
+  const dayStart = beijingDayStart(now);
+  const yesterday = dayStart - DAY_MS;
+
+  insertBalance(dashboard, 'on', yesterday, 100);
+  insertBalance(dashboard, 'on', dayStart, 90);
+  insertBalance(dashboard, 'on', now - 60000, 89);
+  insertBalance(dashboard, 'ext', yesterday, 50);
+  insertBalance(dashboard, 'ext', dayStart, 40);
+  insertBalance(dashboard, 'ext', now - 60000, 39);
+  insertBalance(dashboard, 'off', yesterday, 30);
+  insertBalance(dashboard, 'off', dayStart, 20);
+  insertBalance(dashboard, 'off', now - 60000, 19);
+
+  const api = createApi({
+    source,
+    dashboard,
+    config: {
+      currency: 'USD',
+      quota_per_unit: 500000,
+      accounts: [
+        { id: 'on', name: 'On', kind: 'newapi', base_url: 'https://example.test', unit: 'USD', enabled: true, channels: [21] },
+        { id: 'ext', name: 'Ext', kind: 'external', base_url: null, unit: 'USD', enabled: true, channels: [22] },
+        { id: 'off', name: 'Off', kind: 'newapi', base_url: 'https://example.test', unit: 'USD', enabled: false, channels: [23] },
+      ],
+    },
+    siteName: 'test',
+    sourceLabel: 'db/sites/test.db',
+  });
+
+  t.after(() => {
+    source.close();
+    dashboard.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const data = api.capital(params({ from: yesterday, to: dayStart - 1 }));
+
+  await t.test('只返回启用且非 external 的账户', () => {
+    assert.deepEqual(data.accounts.map((a) => a.account_id), ['on']);
+    const [on] = data.accounts;
+    assert.equal(on.balance, 89);
+    assert.equal(on.cost_range, 10);
+    assert.equal(on.daily_avg_7d, 1.571429);
+    assert.equal(on.runway_days, 56.6);
+    assert.equal(on.status, 'ok');
+  });
+
+  await t.test('total 不含外部/停用账户的余额与成本', () => {
+    assert.equal(data.total.balance, 89);
+    assert.equal(data.total.cost_range, 10);
+    assert.equal(data.total.credits_range, 0);
+    assert.equal(data.total.daily_avg_7d, 1.571429);
+    assert.equal(data.total.runway_days, 56.6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /api/errors：nginx 4xx/5xx 按北京整点分桶
+// ---------------------------------------------------------------------------
+
+test('/api/errors：分桶、Top 状态码/路径组、空表与 31 天上限', async (t) => {
+  const dir = makeTempDir('v2-api-errors-');
+  const sourceFile = path.join(dir, 'source.db');
+  makeSourceDb(sourceFile);
+  const source = new DatabaseSync(sourceFile, { readOnly: true });
+  const dashboard = openTempDashboard(dir);
+
+  // 北京时间 2026-11-08 12:00 整点（UTC 04:00）
+  const base = Date.UTC(2026, 10, 8, 4, 0, 0);
+  const hour = 3600000;
+  const insert = dashboard.prepare(
+    `INSERT INTO http_errors_hourly (hour_ms, status, path_group, count, updated_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  );
+  const seeded = [
+    [base, 404, '/v1', 6],
+    [base, 429, '/v1', 3],
+    [base + hour, 500, '/api', 4],
+    [base + hour, 502, '/v1', 2],
+    [base + 3 * hour, 499, 'other', 1],
+  ];
+  for (const [hourMs, status, pathGroup, count] of seeded) {
+    insert.run(hourMs, status, pathGroup, count, 1000);
+  }
+
+  const api = createApi({
+    source,
+    dashboard,
+    config: { currency: 'USD', quota_per_unit: 500000, accounts: [] },
+    siteName: 'test',
+    sourceLabel: 'db/sites/test.db',
+  });
+
+  t.after(() => {
+    source.close();
+    dashboard.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  await t.test('正常区间：空桶补 0，s4xx/s5xx 之和等于 total 且 share 正确', () => {
+    const data = api.errors(params({ from: base, to: base + 5 * hour - 1 }));
+    assert.equal(data.from, base);
+    assert.equal(data.to, base + 5 * hour - 1);
+    assert.equal(data.available, true);
+    assert.equal(data.total, 16);
+    assert.deepEqual(data.buckets, [
+      { t_ms: base, label: '2026-11-08 12:00', total: 9, s4xx: 9, s5xx: 0 },
+      { t_ms: base + hour, label: '2026-11-08 13:00', total: 6, s4xx: 0, s5xx: 6 },
+      { t_ms: base + 2 * hour, label: '2026-11-08 14:00', total: 0, s4xx: 0, s5xx: 0 },
+      { t_ms: base + 3 * hour, label: '2026-11-08 15:00', total: 1, s4xx: 1, s5xx: 0 },
+      { t_ms: base + 4 * hour, label: '2026-11-08 16:00', total: 0, s4xx: 0, s5xx: 0 },
+    ]);
+    assert.deepEqual(data.top_status, [
+      { status: 404, count: 6, share: 0.375 },
+      { status: 500, count: 4, share: 0.25 },
+      { status: 429, count: 3, share: 0.1875 },
+      { status: 502, count: 2, share: 0.125 },
+      { status: 499, count: 1, share: 0.0625 },
+    ]);
+    assert.deepEqual(data.by_path_group, [
+      { path_group: '/v1', count: 11, share: 0.6875 },
+      { path_group: '/api', count: 4, share: 0.25 },
+      { path_group: 'other', count: 1, share: 0.0625 },
+    ]);
+  });
+
+  await t.test('空表：available=false，total=0，buckets 仍按区间生成全 0', () => {
+    dashboard.exec('DELETE FROM http_errors_hourly');
+    const data = api.errors(params({ from: base, to: base + 2 * hour - 1 }));
+    assert.equal(data.available, false);
+    assert.equal(data.total, 0);
+    assert.deepEqual(data.buckets, [
+      { t_ms: base, label: '2026-11-08 12:00', total: 0, s4xx: 0, s5xx: 0 },
+      { t_ms: base + hour, label: '2026-11-08 13:00', total: 0, s4xx: 0, s5xx: 0 },
+    ]);
+    assert.deepEqual(data.top_status, []);
+    assert.deepEqual(data.by_path_group, []);
+  });
+
+  await t.test('超过 31 天：RangeError（服务端映射 400）', () => {
+    assert.throws(
+      () => api.errors(params({ from: base, to: base + 31 * DAY_MS + 1 })),
+      (err) => err instanceof RangeError && /31 天/.test(err.message),
+    );
+  });
+});

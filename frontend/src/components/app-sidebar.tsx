@@ -15,9 +15,11 @@ import {
   LayoutDashboard,
   TrendingUp,
   BarChart3,
+  Cpu,
   Radio,
   Layers,
   Server,
+  Wallet,
   ShieldCheck,
   Settings,
   type LucideIcon,
@@ -27,9 +29,11 @@ export type ViewKey =
   | "overview"
   | "profit"
   | "rank"
+  | "models"
   | "channels_detail"
   | "groups_detail"
   | "upstreams"
+  | "capital"
   | "quality"
   | "settings"
 
@@ -56,6 +60,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "明细",
     items: [
       { key: "rank", title: "排行", icon: BarChart3 },
+      { key: "models", title: "模型经营", icon: Cpu },
       { key: "channels_detail", title: "渠道明细", icon: Radio },
       { key: "groups_detail", title: "分组明细", icon: Layers },
       { key: "upstreams", title: "上游账户", icon: Server },
@@ -64,6 +69,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "运维",
     items: [
+      { key: "capital", title: "资金与续航", icon: Wallet },
       { key: "quality", title: "数据质量", icon: ShieldCheck },
     ],
   },
@@ -132,7 +138,7 @@ export function AppSidebar({
                         isActive={isActive}
                         tooltip={item.title}
                         onClick={() => handleSelect(item.key)}
-                        className={`cursor-pointer transition-colors ${
+                        className={`cursor-pointer transition-colors min-h-[44px] h-11 ${
                           isActive
                             ? "font-medium text-sidebar-accent-foreground bg-sidebar-accent"
                             : "text-sidebar-foreground/80 hover:text-sidebar-foreground"
@@ -158,7 +164,7 @@ export function AppSidebar({
               isActive={currentView === SETTINGS_ITEM.key}
               tooltip={SETTINGS_ITEM.title}
               onClick={() => handleSelect(SETTINGS_ITEM.key)}
-              className={`cursor-pointer transition-colors ${
+              className={`cursor-pointer transition-colors min-h-[44px] h-11 ${
                 currentView === SETTINGS_ITEM.key
                   ? "font-medium text-sidebar-accent-foreground bg-sidebar-accent"
                   : "text-sidebar-foreground/80 hover:text-sidebar-foreground"

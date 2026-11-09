@@ -33,6 +33,9 @@ export const LOCAL_FILTER = "log_type = 2 AND (token_name IS NULL OR token_name 
 const MAX_PAGE_SIZE = 200;
 const DEFAULT_PAGE_SIZE = 50;
 
+/** /api/errors 的区间上限：nginx 聚合按小时存，超过 31 天分桶过密且多半没人看 */
+const MAX_ERROR_RANGE_MS = 31 * DAY_MS;
+
 const TREND_BUCKET_SQL = {
   day: "strftime('%Y-%m-%d', t_ms / 1000, 'unixepoch', '+8 hours')",
   hour: "strftime('%Y-%m-%d %H:00', t_ms / 1000, 'unixepoch', '+8 hours')",
@@ -750,7 +753,6 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
       rows: row?.rows ?? 0,
       currency: config.currency,
       quota_per_unit: config.quota_per_unit,
-      preview: true,
     };
   }
 
@@ -902,6 +904,56 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
     return { upstream_cost: cost, margin: margin.margin, margin_status: marginStatus };
   }
 
+  /**
+   * 预载账户快照与充值事件并交给 buildProfit：profit 与 capital 共用同一套账本口径
+   * （边界容差、credits 事件流、缺快照为 null），避免两处各写一遍。
+   */
+  function ledgerSeries(accounts, { from, to, granularity, revenueRows = [] }) {
+    // 快照需覆盖「区间起点 − 最大容差」到「区间终点 + 桶边界容差」：
+    // 更旧的值一律视为缺失，末桶的期末快照可能落在 to 之后几秒
+    const preloadTolerance = balanceToleranceMs('day');
+    const snapshotStmt = dashboard.prepare(
+      `SELECT t_ms, balance, total_recharged
+         FROM balance_snapshot
+        WHERE account_id = ? AND t_ms >= ? AND t_ms <= ?
+        ORDER BY t_ms ASC`,
+    );
+    const creditStmt = dashboard.prepare(
+      `SELECT t_ms, amount
+         FROM credit_event
+        WHERE account_id = ? AND t_ms >= ? AND t_ms <= ?
+        ORDER BY t_ms ASC`,
+    );
+
+    const snapshotsByAccount = {};
+    const creditEventsByAccount = {};
+    for (const account of accounts) {
+      snapshotsByAccount[account.id] = snapshotStmt
+        .all(account.id, from - preloadTolerance, to + SNAPSHOT_BOUNDARY_TOLERANCE_MS)
+        .filter((r) => typeof r.balance === 'number' && Number.isFinite(r.balance))
+        .map((r) => ({
+          t_ms: r.t_ms,
+          balance: r.balance,
+          total_recharged: typeof r.total_recharged === 'number' ? r.total_recharged : null,
+        }));
+      creditEventsByAccount[account.id] = creditStmt
+        .all(account.id, from, to + 1)
+        .filter((r) => typeof r.amount === 'number' && Number.isFinite(r.amount))
+        .map((r) => ({ t_ms: r.t_ms, amount: r.amount }));
+    }
+
+    return buildProfit({
+      granularity,
+      from,
+      to,
+      accounts,
+      buckets: profitBuckets(from, to, granularity),
+      revenueRows,
+      snapshotsByAccount,
+      creditEventsByAccount,
+    });
+  }
+
   function overview(searchParams) {
     const range = resolveRange(searchParams);
     const agg = source.prepare(
@@ -1023,7 +1075,6 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
       throw new RangeError('granularity 只能是 day 或 hour');
     }
     const range = resolveRange(searchParams);
-    const buckets = profitBuckets(range.from, range.to, granularity);
     const accounts = config.accounts
       .map((a) => ({
         id: a.id,
@@ -1048,49 +1099,12 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
     const archive = granularity === 'day' ? archiveByDay(range, { withChannel: true }) : null;
     const allRevenueRows = archive ? [...revenueRows, ...archive.rows] : revenueRows;
 
-    // 快照需覆盖「区间起点 − 最大容差」到「区间终点 + 桶边界容差」：
-    // 更旧的值一律视为缺失，末桶的期末快照可能落在 to 之后几秒
-    const preloadTolerance = balanceToleranceMs('day');
-    const snapshotStmt = dashboard.prepare(
-      `SELECT t_ms, balance, total_recharged
-         FROM balance_snapshot
-        WHERE account_id = ? AND t_ms >= ? AND t_ms <= ?
-        ORDER BY t_ms ASC`,
-    );
-    const creditStmt = dashboard.prepare(
-      `SELECT t_ms, amount
-         FROM credit_event
-        WHERE account_id = ? AND t_ms >= ? AND t_ms <= ?
-        ORDER BY t_ms ASC`,
-    );
-
-    const snapshotsByAccount = {};
-    const creditEventsByAccount = {};
-    for (const account of accounts) {
-      snapshotsByAccount[account.id] = snapshotStmt
-        .all(account.id, range.from - preloadTolerance, range.to + SNAPSHOT_BOUNDARY_TOLERANCE_MS)
-        .filter((r) => typeof r.balance === 'number' && Number.isFinite(r.balance))
-        .map((r) => ({
-          t_ms: r.t_ms,
-          balance: r.balance,
-          total_recharged: typeof r.total_recharged === 'number' ? r.total_recharged : null,
-        }));
-      creditEventsByAccount[account.id] = creditStmt
-        .all(account.id, range.from, range.to + 1)
-        .filter((r) => typeof r.amount === 'number' && Number.isFinite(r.amount))
-        .map((r) => ({ t_ms: r.t_ms, amount: r.amount }));
-    }
-
     return {
-      ...buildProfit({
-        granularity,
+      ...ledgerSeries(accounts, {
         from: range.from,
         to: range.to,
-        accounts,
-        buckets,
+        granularity,
         revenueRows: allRevenueRows,
-        snapshotsByAccount,
-        creditEventsByAccount,
       }),
       archive: archiveInfo(archive),
     };
@@ -1398,6 +1412,184 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
     };
   }
 
+  /**
+   * 按 model 聚合（NULL / 空串统一为 `(未知模型)`）。归档 logs_daily 只有渠道维度、
+   * 没有 model 维度，金额无法按模型归属：不并入归档，archive 固定不可用。
+   * 上游账户由渠道反查配置得到：一个模型可跨多个渠道，渠道已删（无归属）忽略。
+   */
+  function models(searchParams) {
+    const range = resolveRange(searchParams);
+    const agg = source.prepare(
+      `SELECT model,
+              channel_id,
+              COUNT(*) AS requests,
+              COALESCE(SUM(cost), 0) AS revenue,
+              COALESCE(SUM(input_total), 0) AS input_total,
+              COALESCE(SUM(output), 0) AS output
+         FROM logs
+        WHERE ${LOCAL_FILTER} AND t_ms BETWEEN ? AND ?
+        GROUP BY model, channel_id`,
+    ).all(range.from, range.to);
+
+    const byModel = new Map();
+    for (const r of agg) {
+      const name = r.model == null || String(r.model) === '' ? '(未知模型)' : String(r.model);
+      let hit = byModel.get(name);
+      if (!hit) {
+        hit = { model: name, revenue: 0, requests: 0, tokens: 0, channels: new Set() };
+        byModel.set(name, hit);
+      }
+      hit.revenue += Number(r.revenue ?? 0);
+      hit.requests += Number(r.requests ?? 0);
+      hit.tokens += Number(r.input_total ?? 0) + Number(r.output ?? 0);
+      if (r.channel_id != null) hit.channels.add(r.channel_id);
+    }
+
+    const rows = [...byModel.values()].map((m) => {
+      const revenue = round6(m.revenue) ?? 0;
+      // 配置的渠道 → 账户 id；一条渠道可能被多个账户配置，去重后排序
+      const accountIds = new Set();
+      for (const channelId of m.channels) {
+        for (const accountId of owners.get(channelId) ?? []) accountIds.add(accountId);
+      }
+      return {
+        model: m.model,
+        revenue,
+        requests: m.requests,
+        tokens: m.tokens,
+        share: 0,
+        // 与 pickTopModels 同口径：用未取整的 SUM(cost) 计算，避免先舍入再放大
+        per_1e8: m.tokens > 0 ? round6(m.revenue / (m.tokens / 1e8)) : null,
+        upstream_accounts: [...accountIds].sort(),
+      };
+    });
+
+    // 先取整再求和：total 与逐行 revenue 展示一致（与 /api/users 同口径）
+    const totalRevenue = round6(rows.reduce((sum, r) => sum + r.revenue, 0)) ?? 0;
+    for (const r of rows) {
+      r.share = totalRevenue > 0 ? round6(r.revenue / totalRevenue) ?? 0 : 0;
+    }
+
+    rows.sort((a, b) => (b.revenue - a.revenue)
+      || (a.model < b.model ? -1 : a.model > b.model ? 1 : 0));
+
+    return {
+      models: rows,
+      total_revenue: totalRevenue,
+      archive: {
+        from_day: '',
+        to_day: '',
+        days: 0,
+        available: false,
+        partial_fields: [],
+        reason: 'logs_daily has no model dimension',
+      },
+    };
+  }
+
+  /**
+   * 财务视角：每个上游账户的最新余额、区间成本/充值、最近 7 天日均与续航。
+   * 只统计启用且非 external 的账户；停用/无上游账户既没有余额也不该参与续航。
+   */
+  function capital(searchParams) {
+    const range = resolveRange(searchParams);
+    const now = Date.now();
+    const eligible = config.accounts.filter(
+      (a) => a.enabled !== false && a.kind !== 'external',
+    );
+    const ledgerById = new Map(buildAccounts(range).map((a) => [a.id, a]));
+
+    // 日均固定看最近 7 个北京自然日（含当天），与 /api/profit 同一账本函数按日桶算；
+    // 区间合计（cost_range）仍按请求的 from/to 给值，两者互不影响。
+    const avgFrom = beijingDayStart(now) - 6 * DAY_MS;
+    const accountList = eligible.map((a) => ({
+      id: a.id,
+      name: a.name,
+      kind: a.kind,
+      channels: a.channels,
+      enabled: a.enabled !== false,
+    }));
+    const costByAccount = ledgerSeries(accountList, {
+      from: avgFrom,
+      to: now,
+      granularity: 'day',
+    }).series.cost_by_site;
+    // 请求区间内的日桶成本：账本口径（consumption）取不到时的退路
+    const rangeCostByAccount = ledgerSeries(accountList, {
+      from: range.from,
+      to: range.to,
+      granularity: 'day',
+    }).series.cost_by_site;
+
+    const rows = eligible.map((a) => {
+      const ledger = ledgerById.get(a.id) ?? null;
+      const latest = readLatestSnapshot(dashboard, a.id);
+      const balance = latest
+        && typeof latest.balance === 'number' && Number.isFinite(latest.balance)
+        ? latest.balance
+        : null;
+      const creditsRange = ledger ? ledger.credits : null;
+
+      const dailyCosts = costByAccount[a.id] ?? [];
+      // 只有区间终点落在当天日中时，最后一个桶才是未走完的当天（profitBuckets
+      // 在整点边界上不生成零宽空桶）；它之前的「完整日」才能证明账本有数据。
+      const liveBucket = dailyCosts.length === 7 && now < avgFrom + 7 * DAY_MS;
+      const countedDays = liveBucket ? dailyCosts.slice(0, -1) : dailyCosts;
+      const hasCost = countedDays.some((v) => typeof v === 'number');
+      // 区间成本优先用账本口径；账本要求区间首尾都有边界快照，长窗口期初必然缺失，
+      // 这时退回到请求区间内的日桶求和（只累加算得出来的桶），既不编零也不整列 null。
+      const rangeBuckets = rangeCostByAccount[a.id] ?? [];
+      const bucketSum = rangeBuckets.some((v) => typeof v === 'number')
+        ? round6(rangeBuckets.reduce((sum, v) => sum + (v ?? 0), 0))
+        : null;
+      const costRange = ledger?.consumption ?? bucketSum;
+      const dailyAvg = hasCost
+        ? round6(dailyCosts.reduce((sum, v) => sum + (v ?? 0), 0) / 7)
+        : null;
+
+      const runway = dailyAvg !== null && dailyAvg > 0 && balance !== null
+        ? Math.round((balance / dailyAvg) * 10) / 10
+        : null;
+
+      return {
+        account_id: a.id,
+        name: a.name ?? a.id,
+        balance,
+        cost_range: costRange,
+        credits_range: creditsRange,
+        daily_avg_7d: dailyAvg,
+        runway_days: runway,
+        status: balance === null ? 'missing_balance' : costRange === null ? 'partial' : 'ok',
+      };
+    });
+
+    /** 可算值求和：跳过 null，一个可算值都没有时返回 null（不填 0） */
+    const sumOrNull = (values) => {
+      const nums = values.filter((v) => typeof v === 'number' && Number.isFinite(v));
+      return nums.length ? round6(nums.reduce((sum, v) => sum + v, 0)) : null;
+    };
+
+    // 续航只计入「余额与日均都有值」的账户：有余额无消耗的账户会把续航拉成无穷
+    const counted = rows.filter((r) => r.balance !== null && r.daily_avg_7d !== null);
+    const countedBalance = sumOrNull(counted.map((r) => r.balance));
+    const countedAvg = sumOrNull(counted.map((r) => r.daily_avg_7d));
+    const total = {
+      balance: sumOrNull(rows.map((r) => r.balance)),
+      cost_range: sumOrNull(rows.map((r) => r.cost_range)),
+      credits_range: sumOrNull(rows.map((r) => r.credits_range)),
+      daily_avg_7d: sumOrNull(rows.map((r) => r.daily_avg_7d)),
+      runway_days: countedAvg !== null && countedAvg > 0 && countedBalance !== null
+        ? Math.round((countedBalance / countedAvg) * 10) / 10
+        : null,
+    };
+    // 有账户缺少余额/成本/日均时，total 是部分账户之和：显式给出参与续航计算的账户数
+    if (rows.some((r) => r.balance === null || r.cost_range === null || r.daily_avg_7d === null)) {
+      total.accounts_counted = counted.length;
+    }
+
+    return { accounts: rows, total, range, generated_at: now };
+  }
+
   function upstreams(searchParams) {
     const range = resolveRange(searchParams);
     return {
@@ -1471,6 +1663,74 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
     };
   }
 
+  /**
+   * nginx 4xx/5xx 聚合（看板库 http_errors_hourly）：按北京整点补齐空桶。
+   * 表里 hour_ms 已是整点毫秒，直接复用 profitBuckets 生成桶，不再做时区换算。
+   * 读取范围取首末桶的起点：区间从半小时开始时，该整点桶仍整体计入（聚合表无法拆小时）。
+   */
+  function errors(searchParams) {
+    const range = resolveRange(searchParams);
+    if (range.to - range.from > MAX_ERROR_RANGE_MS) {
+      throw new RangeError('区间不能超过 31 天');
+    }
+    const buckets = profitBuckets(range.from, range.to, 'hour').map((b) => ({
+      t_ms: b.t_ms,
+      label: b.label,
+      total: 0,
+      s4xx: 0,
+      s5xx: 0,
+    }));
+    const bucketByStart = new Map(buckets.map((b, i) => [b.t_ms, i]));
+    const rows = buckets.length === 0
+      ? []
+      : dashboard.prepare(
+        `SELECT hour_ms, status, path_group, count
+           FROM http_errors_hourly
+          WHERE hour_ms BETWEEN ? AND ?`,
+      ).all(buckets[0].t_ms, buckets[buckets.length - 1].t_ms);
+
+    let total = 0;
+    const byStatus = new Map();
+    const byGroup = new Map();
+    for (const row of rows) {
+      const count = Number(row.count);
+      if (!Number.isFinite(count) || count <= 0) continue;
+      const status = Number(row.status);
+      const group = String(row.path_group);
+      total += count;
+      byStatus.set(status, (byStatus.get(status) ?? 0) + count);
+      byGroup.set(group, (byGroup.get(group) ?? 0) + count);
+
+      const idx = bucketByStart.get(Number(row.hour_ms));
+      if (idx !== undefined) {
+        const bucket = buckets[idx];
+        bucket.total += count;
+        if (status >= 400 && status <= 499) bucket.s4xx += count;
+        else if (status >= 500 && status <= 599) bucket.s5xx += count;
+      }
+    }
+
+    const share = (count) => (total > 0 ? round6(count / total) ?? 0 : 0);
+    const topStatus = [...byStatus.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+      .slice(0, 8)
+      .map(([status, count]) => ({ status, count, share: share(count) }));
+    const byPathGroup = [...byGroup.entries()]
+      .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+      .slice(0, 6)
+      .map(([path_group, count]) => ({ path_group, count, share: share(count) }));
+
+    return {
+      from: range.from,
+      to: range.to,
+      available: rows.length > 0,
+      total,
+      buckets,
+      top_status: topStatus,
+      by_path_group: byPathGroup,
+    };
+  }
+
   function rows(searchParams) {
     const range = resolveRange(searchParams);
     const page = intParam(searchParams, 'page', 1, { min: 1 });
@@ -1501,5 +1761,5 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
     };
   }
 
-  return { meta, overview, trend, profit, channels, groups, users, upstreams, quality, rows };
+  return { meta, overview, trend, profit, channels, groups, users, models, capital, upstreams, quality, errors, rows };
 }

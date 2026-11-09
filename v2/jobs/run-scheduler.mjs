@@ -7,6 +7,7 @@
  *   node v2/jobs/run-scheduler.mjs --no-logs       # 只采余额
  *   node v2/jobs/run-scheduler.mjs --spend-interval-ms=1800000
  *   node v2/jobs/run-scheduler.mjs --no-prune      # 不跑每日日志清理
+ *   node v2/jobs/run-scheduler.mjs --no-http-errors # 不聚合 nginx 错误码
  *
  * 定时链、防重入、退出处理都在本文件，timer 不 unref，进程靠定时器存活。
  * 首轮对齐的是「采集间隔网格 + 偏移」，不是下一个整点，重启不会造成长时间盲窗。
@@ -25,6 +26,10 @@ import { ensureDataDirs, INSTANCE } from '../lib/instance.mjs';
 import { openDashboardDb, syncAccounts } from '../store/dashboard.mjs';
 import { openLogsDb } from '../store/site-logs.mjs';
 import { runCollectSpend } from './collect-spend.mjs';
+import {
+  DEFAULT_LOG_FILE as HTTP_ERRORS_LOG_FILE,
+  runCollectHttpErrors,
+} from './collect-http-errors.mjs';
 import { DEFAULT_JOBS_DAYS, DEFAULT_RAW_DAYS, runPrune } from './prune-logs.mjs';
 import { DEFAULT_KEEP_DAYS, runRollup } from './rollup-logs.mjs';
 import {
@@ -45,6 +50,8 @@ export const TASK_LOGS = SITE_LOGS_JOB_NAME;
 export const TASK_PRUNE = 'prune';
 /** 归档任务（rollup-logs）：把超过保留期的明细按天聚合进 logs_daily 后删除。 */
 export const TASK_ROLLUP = 'rollup';
+/** nginx 访问日志错误码聚合任务。 */
+export const TASK_HTTP_ERRORS = 'http-errors';
 
 /** 余额采集间隔：默认取实例配置，15 分钟 */
 export const DEFAULT_SPEND_INTERVAL_MS = INSTANCE.collect.spendIntervalMs;
@@ -61,12 +68,16 @@ export const DEFAULT_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /** 归档排在清理之后，避开同一个时间窗抢写锁。 */
 export const ROLLUP_INITIAL_DELAY_MS = PRUNE_INITIAL_DELAY_MS + 5 * 60 * 1000;
 export const DEFAULT_ROLLUP_INTERVAL_MS = DEFAULT_PRUNE_INTERVAL_MS;
+/** nginx 错误码聚合：启动 5 分钟后首轮，之后每 15 分钟。 */
+export const HTTP_ERRORS_INITIAL_DELAY_MS = 5 * 60 * 1000;
+export const DEFAULT_HTTP_ERRORS_INTERVAL_MS = 15 * 60 * 1000;
 /** setTimeout 的毫秒上限（超过会被 Node 截断成 1ms） */
 const MAX_INTERVAL_MS = 2_147_483_647;
 
 export const USAGE = `用法：
   node v2/jobs/run-scheduler.mjs [--once] [--spend-interval-ms=<n>] [--logs-interval-ms=<n>] [--no-logs]
-                                 [--prune-days-raw=<n>] [--prune-days-jobs=<n>] [--no-prune] [--help]
+                                 [--prune-days-raw=<n>] [--prune-days-jobs=<n>] [--no-prune]
+                                 [--no-http-errors] [--help]
 
   --once                     立即各跑一次（collect-spend、collect-site-logs）后退出，退出码 0/1
   --spend-interval-ms=<n>    余额采集间隔毫秒（默认 ${DEFAULT_SPEND_INTERVAL_MS}，取自实例配置）
@@ -75,11 +86,13 @@ export const USAGE = `用法：
   --prune-days-raw=<n>       raw_json 保留天数（默认 ${DEFAULT_RAW_DAYS}）
   --prune-days-jobs=<n>      job_runs 保留天数（默认 ${DEFAULT_JOBS_DAYS}）
   --no-prune                 不跑每日日志清理
+  --no-http-errors           不聚合 nginx 访问日志的 4xx/5xx
   --help                     显示本说明
 
   常驻时：余额首轮对齐「下一个采集间隔槽位 + 10 秒」，站点日志对齐「下一个间隔槽位 + 45 秒」，
-  之后按各自间隔循环；日志清理首轮在 ${PRUNE_INITIAL_DELAY_MS}ms 后（每天一次）。--once 不跑清理，
-  手动清理用 node v2/jobs/prune-logs.mjs。
+  之后按各自间隔循环；日志清理首轮在 ${PRUNE_INITIAL_DELAY_MS}ms 后（每天一次），nginx 错误码聚合
+  首轮在 ${HTTP_ERRORS_INITIAL_DELAY_MS}ms 后（之后每 ${DEFAULT_HTTP_ERRORS_INTERVAL_MS}ms）。--once 不跑清理与错误码聚合，
+  手动清理用 node v2/jobs/prune-logs.mjs，错误码聚合用 node v2/jobs/collect-http-errors.mjs。
   SIGINT / SIGTERM 会清掉定时器并正常退出。`;
 
 export class OptionsError extends Error {
@@ -189,6 +202,19 @@ export function splitPruneArgs(argv = []) {
     } else rest.push(arg);
   }
   return { prune, rest };
+}
+
+/**
+ * 先摘出 `--no-http-errors` 再交给 resolveOptions：同样保持 resolveOptions 的返回形状不变。
+ */
+export function splitHttpErrorsArgs(argv = []) {
+  const httpErrors = { enabled: true };
+  const rest = [];
+  for (const arg of argv) {
+    if (arg === '--no-http-errors') httpErrors.enabled = false;
+    else rest.push(arg);
+  }
+  return { httpErrors, rest };
 }
 
 /** 错误信息脱敏 + 截断：凭据类字段一律替换，绝不透出原文 */
@@ -365,6 +391,57 @@ function recordLogsJob(db, { startedAt, finishedAt, status, detail }) {
   ).run(TASK_LOGS, startedAt, finishedAt, status, JSON.stringify(detail));
 }
 
+/** 通用 job_runs 记录：prune / rollup / http-errors 以前只在 journal 留痕，面板看不见 */
+function recordTaskJob(db, job, { startedAt, finishedAt, status, detail }) {
+  db.prepare(
+    `INSERT INTO job_runs (job, started_at, finished_at, status, detail)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(job, startedAt, finishedAt, status, JSON.stringify(detail));
+}
+
+/** 只落计数与布尔，避免把路径、日志原文等非必要信息写进 detail */
+function summarizeJobDetail(summary) {
+  if (!summary || typeof summary !== 'object') return {};
+  const out = {};
+  for (const [key, value] of Object.entries(summary)) {
+    if (typeof value === 'number' || typeof value === 'boolean') out[key] = value;
+  }
+  return out;
+}
+
+async function withJobRun(job, run) {
+  const startedAt = Date.now();
+  let db = null;
+  try {
+    ensureDataDirs(INSTANCE);
+    db = openDashboardDb(INSTANCE.paths.dashboardFile);
+    const summary = await run();
+    recordTaskJob(db, job, {
+      startedAt,
+      finishedAt: Date.now(),
+      status: 'ok',
+      detail: summarizeJobDetail(summary),
+    });
+    return summary;
+  } catch (err) {
+    if (db) {
+      try {
+        recordTaskJob(db, job, {
+          startedAt,
+          finishedAt: Date.now(),
+          status: 'error',
+          detail: { message: redactMessage(err?.message ?? err) },
+        });
+      } catch {
+        // 记录失败不能盖住原始错误
+      }
+    }
+    throw err;
+  } finally {
+    db?.close();
+  }
+}
+
 async function runLogsRound() {
   const startedAt = Date.now();
   let jobDb = null;
@@ -417,27 +494,41 @@ export function createDefaultTasks({
   v2Dir = V2_DIR,
   pruneDaysRaw = DEFAULT_RAW_DAYS,
   pruneDaysJobs = DEFAULT_JOBS_DAYS,
+  httpErrorsFile = HTTP_ERRORS_LOG_FILE,
 } = {}) {
   return {
     spend: () => runSpendRound({ v2Dir }),
     logs: () => runLogsRound(),
+    // 聚合自己会打一行汇总；常驻日志只保留 [run-scheduler] http-errors ok Xms
+    httpErrors: () =>
+      withJobRun(TASK_HTTP_ERRORS, () =>
+        runCollectHttpErrors({
+          file: httpErrorsFile,
+          dbFile: INSTANCE.paths.dashboardFile,
+          log: () => {},
+        }),
+      ),
     // 清理自己会打一行汇总；常驻日志只保留 [run-scheduler] prune ok Xms
     prune: () =>
-      runPrune({
-        dbFile: SITE_DB_FILE,
-        jobsDbFile: INSTANCE.paths.dashboardFile,
-        rawDays: pruneDaysRaw,
-        jobsDays: pruneDaysJobs,
-        log: () => {},
-      }),
+      withJobRun(TASK_PRUNE, () =>
+        runPrune({
+          dbFile: SITE_DB_FILE,
+          jobsDbFile: INSTANCE.paths.dashboardFile,
+          rawDays: pruneDaysRaw,
+          jobsDays: pruneDaysJobs,
+          log: () => {},
+        }),
+      ),
     // 90 天以前的明细聚合成「站点×日×渠道」后删除，避免日志表无限增长
     rollup: () =>
-      runRollup({
-        dbFile: SITE_DB_FILE,
-        dashboardDbFile: INSTANCE.paths.dashboardFile,
-        keepDays: DEFAULT_KEEP_DAYS,
-        log: () => {},
-      }),
+      withJobRun(TASK_ROLLUP, () =>
+        runRollup({
+          dbFile: SITE_DB_FILE,
+          dashboardDbFile: INSTANCE.paths.dashboardFile,
+          keepDays: DEFAULT_KEEP_DAYS,
+          log: () => {},
+        }),
+      ),
   };
 }
 
@@ -448,10 +539,13 @@ export function createDefaultTasks({
 async function main(argv, { tasks, now = Date.now, log = console.log, errorLog = console.error } = {}) {
   let options;
   let prune;
+  let httpErrors;
   try {
     const split = splitPruneArgs(argv);
     prune = split.prune;
-    options = resolveOptions(split.rest);
+    const rest = splitHttpErrorsArgs(split.rest);
+    httpErrors = rest.httpErrors;
+    options = resolveOptions(rest.rest);
   } catch (err) {
     errorLog(`[run-scheduler] ${redactMessage(err?.message ?? err)}`);
     errorLog(USAGE);
@@ -550,6 +644,22 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
     }).start();
   }
 
+  let httpErrorsLoop = null;
+  if (httpErrors.enabled && typeof jobTasks.httpErrors === 'function') {
+    const httpErrorsRunner = createTaskRunner({
+      name: TASK_HTTP_ERRORS,
+      run: jobTasks.httpErrors,
+      now,
+      log,
+      errorLog,
+    });
+    httpErrorsLoop = createLoop({
+      delayMs: HTTP_ERRORS_INITIAL_DELAY_MS,
+      intervalMs: DEFAULT_HTTP_ERRORS_INTERVAL_MS,
+      task: httpErrorsRunner,
+    }).start();
+  }
+
   log(
     `[run-scheduler] 常驻启动：${TASK_SPEND} 首轮 ${spendDelayMs}ms 后，之后每 ${options.spendIntervalMs}ms；` +
       (logsLoop
@@ -562,7 +672,11 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
       '；' +
       (rollupLoop
         ? `${TASK_ROLLUP} 首轮 ${ROLLUP_INITIAL_DELAY_MS}ms 后，之后每 ${DEFAULT_ROLLUP_INTERVAL_MS}ms`
-        : `${TASK_ROLLUP} 已关闭`),
+        : `${TASK_ROLLUP} 已关闭`) +
+      '；' +
+      (httpErrorsLoop
+        ? `${TASK_HTTP_ERRORS} 首轮 ${HTTP_ERRORS_INITIAL_DELAY_MS}ms 后，之后每 ${DEFAULT_HTTP_ERRORS_INTERVAL_MS}ms`
+        : `${TASK_HTTP_ERRORS} 已关闭`),
   );
 
   let stopping = false;
@@ -573,6 +687,7 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
     logsLoop?.stop();
     pruneLoop?.stop();
     rollupLoop?.stop();
+    httpErrorsLoop?.stop();
     log(`[run-scheduler] 收到 ${signal}，定时器已清理，退出`);
     process.exitCode = 0;
     // 先让 stdout/stderr 刷出去；若还有在跑的请求，最多再等 1 秒强制退出

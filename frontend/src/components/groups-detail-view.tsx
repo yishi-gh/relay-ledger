@@ -225,7 +225,7 @@ export function GroupsDetailView({
         data-slot="detail-card"
         className={cn(
           "shadow-xs overflow-hidden flex flex-col min-w-0 p-4",
-          isScrollable ? "flex-1 min-h-0" : "h-fit"
+          isScrollable ? "lg:flex-1 lg:min-h-0" : "h-fit"
         )}
       >
         <CardHeader className="p-0 pb-2.5 flex flex-row items-center justify-between space-y-0 shrink-0">
@@ -247,16 +247,16 @@ export function GroupsDetailView({
           </div>
         </CardHeader>
 
-        <CardContent className={cn("p-0 flex flex-col", isScrollable ? "flex-1 min-h-0" : "")}>
+        <CardContent className={cn("p-0 flex flex-col", isScrollable ? "lg:flex-1 lg:min-h-0" : "")}>
           <div
             data-slot="table-container"
             className={cn(
-              "rounded-lg border border-border bg-card",
-              isScrollable ? "flex-1 min-h-0 overflow-auto" : "overflow-hidden"
+              "rounded-lg border border-border bg-card overflow-x-auto",
+              isScrollable ? "lg:flex-1 lg:min-h-0 lg:overflow-auto" : ""
             )}
           >
-            <Table className="w-full table-fixed text-sm">
-              <colgroup>
+            <Table className="min-w-[860px] lg:min-w-full table-auto lg:table-fixed text-sm">
+              <colgroup className="hidden lg:table-column-group">
                 {visibleCols.map((col) => (
                   <col key={col.key} style={{ width: `${COL_WIDTH_PCT[col.key] ?? 8}%` }} />
                 ))}
@@ -286,7 +286,7 @@ export function GroupsDetailView({
                         className={cn(
                           "h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground whitespace-nowrap select-none cursor-pointer transition-colors group/th hover:bg-muted/80",
                           isNum ? "text-right" : "text-left",
-                          isLocked && "sticky left-0 bg-muted/95 z-30 border-r border-border min-w-[180px]",
+                          isLocked && "sticky left-0 bg-muted/95 z-30 border-r border-border min-w-[160px] sm:min-w-[180px]",
                           sortAttrs.isActive && "text-foreground font-semibold"
                         )}
                         title={
@@ -354,11 +354,11 @@ export function GroupsDetailView({
                               return (
                                 <TableCell
                                   key={col.key}
-                                  className="sticky left-0 bg-card z-10 border-r border-border/50 px-3 py-1 whitespace-nowrap min-w-[180px]"
+                                  className="sticky left-0 bg-card z-10 border-r border-border/50 px-3 py-1 whitespace-nowrap min-w-[160px] sm:min-w-[180px]"
                                 >
                                   <span
                                     className={cn(
-                                      "text-[14px] leading-[20px] truncate block max-w-[200px]",
+                                      "text-[14px] leading-[20px] line-clamp-2 block max-w-[200px]",
                                       group.group_name ? "font-normal text-foreground" : "text-muted-foreground italic"
                                     )}
                                     title={group.group_name || "未分组"}

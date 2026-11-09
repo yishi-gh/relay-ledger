@@ -114,6 +114,17 @@ export const DASHBOARD_SCHEMA = [
      PRIMARY KEY (site, day, channel_id)
    )`,
 
+  // nginx 访问日志的 4xx/5xx 按「北京整点 × 状态码 × 路径组」聚合。
+  // 站点库 logs 没有状态码，错误率只能从 nginx 日志补；增量位点存 schema_meta.http_errors_offset。
+  `CREATE TABLE IF NOT EXISTS http_errors_hourly (
+     hour_ms    INTEGER NOT NULL,
+     status     INTEGER NOT NULL,
+     path_group TEXT NOT NULL,
+     count      INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL,
+     PRIMARY KEY (hour_ms, status, path_group)
+   )`,
+
   // 结构元信息：只记一次，不覆盖已有值
   `CREATE TABLE IF NOT EXISTS schema_meta (
      key        TEXT PRIMARY KEY,

@@ -233,8 +233,11 @@ const API_ROUTES = {
   '/api/channels': (api, url) => api.channels(url.searchParams),
   '/api/groups': (api, url) => api.groups(url.searchParams),
   '/api/users': (api, url) => api.users(url.searchParams),
+  '/api/models': (api, url) => api.models(url.searchParams),
+  '/api/capital': (api, url) => api.capital(url.searchParams),
   '/api/upstreams': (api, url) => api.upstreams(url.searchParams),
   '/api/quality': (api) => api.quality(),
+  '/api/errors': (api, url) => api.errors(url.searchParams),
   '/api/rows': (api, url) => api.rows(url.searchParams),
   '/api/healthz': () => ({ ok: true }),
 };

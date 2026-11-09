@@ -33,6 +33,7 @@ export interface Meta {
   quota_per_unit?: number
   preview?: boolean
   site_name?: string
+  base_url?: string
 }
 
 export interface TokenStats {
@@ -325,5 +326,272 @@ export async function loadDashboard(rangeType: RangeType): Promise<DashboardData
     upstreams: settledValue(upstreamsResult),
     quality: settledValue(qualityResult),
     errors,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 新增接口模型定义与请求函数
+// ---------------------------------------------------------------------------
+
+export interface ModelItem {
+  model: string
+  revenue: number
+  requests: number
+  tokens: number
+  share: number
+  per_1e8: number | null
+  upstream_accounts: string[]
+}
+
+export interface ModelsPayload {
+  models: ModelItem[]
+  total_revenue: number
+  archive?: ArchiveInfo
+}
+
+export interface CapitalAccount {
+  account_id: string
+  name: string
+  balance: number | null
+  cost_range: number | null
+  credits_range: number | null
+  daily_avg_7d: number | null
+  runway_days: number | null
+  status: string
+}
+
+export interface CapitalTotal {
+  balance: number | null
+  cost_range: number | null
+  credits_range: number | null
+  daily_avg_7d: number | null
+  runway_days: number | null
+  accounts_counted?: number
+}
+
+export interface CapitalPayload {
+  accounts: CapitalAccount[]
+  total: CapitalTotal
+  range: DateRange
+  generated_at: number
+}
+
+export interface ErrorBucket {
+  t_ms: number
+  label: string
+  total: number
+  s4xx: number
+  s5xx: number
+}
+
+export interface ErrorTopStatus {
+  status: number
+  count: number
+  share: number
+}
+
+export interface ErrorPathGroup {
+  path_group: string
+  count: number
+  share: number
+}
+
+export interface ErrorsPayload {
+  from: number
+  to: number
+  available: boolean
+  total: number
+  buckets: ErrorBucket[]
+  top_status: ErrorTopStatus[]
+  by_path_group: ErrorPathGroup[]
+}
+
+export interface HealthzPayload {
+  ok: boolean
+}
+
+export async function fetchModels(range: DateRange): Promise<ModelsPayload> {
+  return fetchJson<ModelsPayload>("/api/models", { from: range.from, to: range.to })
+}
+
+export async function fetchCapital(range: DateRange): Promise<CapitalPayload> {
+  return fetchJson<CapitalPayload>("/api/capital", { from: range.from, to: range.to })
+}
+
+export async function fetchErrors(range: DateRange): Promise<ErrorsPayload> {
+  return fetchJson<ErrorsPayload>("/api/errors", { from: range.from, to: range.to })
+}
+
+export async function fetchHealthz(): Promise<HealthzPayload> {
+  return fetchJson<HealthzPayload>("/api/healthz")
+}
+
+export function getMockModels(): ModelsPayload {
+  const models: ModelItem[] = [
+    {
+      model: "claude-3-7-sonnet-20250219",
+      revenue: 142.5,
+      requests: 12450,
+      tokens: 2850000000,
+      share: 0.457,
+      per_1e8: 5.0,
+      upstream_accounts: ["acc-anthropic", "acc-aws"],
+    },
+    {
+      model: "gpt-4o",
+      revenue: 86.2,
+      requests: 9820,
+      tokens: 1724000000,
+      share: 0.276,
+      per_1e8: 5.0,
+      upstream_accounts: ["acc-openai"],
+    },
+    {
+      model: "deepseek-ai/DeepSeek-V3",
+      revenue: 45.1,
+      requests: 8430,
+      tokens: 902000000,
+      share: 0.145,
+      per_1e8: 5.0,
+      upstream_accounts: ["acc-deepseek"],
+    },
+    {
+      model: "claude-3-5-haiku-20241022",
+      revenue: 25.8,
+      requests: 4320,
+      tokens: 516000000,
+      share: 0.083,
+      per_1e8: 5.0,
+      upstream_accounts: ["acc-anthropic"],
+    },
+    {
+      model: "gpt-4o-mini",
+      revenue: 12.3,
+      requests: 1496,
+      tokens: 246000000,
+      share: 0.039,
+      per_1e8: 5.0,
+      upstream_accounts: ["acc-openai"],
+    },
+  ]
+  return {
+    models,
+    total_revenue: 311.9,
+    archive: {
+      from_day: "",
+      to_day: "",
+      days: 0,
+      available: false,
+      partial_fields: [],
+    },
+  }
+}
+
+export function getMockCapital(range: DateRange): CapitalPayload {
+  const accounts: CapitalAccount[] = [
+    {
+      account_id: "acc-anthropic",
+      name: "Anthropic Direct",
+      balance: 1250.0,
+      cost_range: 168.3,
+      credits_range: 500.0,
+      daily_avg_7d: 24.04,
+      runway_days: 52.0,
+      status: "ok",
+    },
+    {
+      account_id: "acc-openai",
+      name: "OpenAI Platform",
+      balance: 84.5,
+      cost_range: 98.5,
+      credits_range: 0,
+      daily_avg_7d: 14.07,
+      runway_days: 6.0,
+      status: "ok",
+    },
+    {
+      account_id: "acc-aws",
+      name: "AWS Bedrock",
+      balance: 18.2,
+      cost_range: 42.1,
+      credits_range: 0,
+      daily_avg_7d: 6.01,
+      runway_days: 3.0,
+      status: "ok",
+    },
+    {
+      account_id: "acc-deepseek",
+      name: "DeepSeek API",
+      balance: 4.8,
+      cost_range: 45.1,
+      credits_range: 100.0,
+      daily_avg_7d: 6.44,
+      runway_days: 0.7,
+      status: "ok",
+    },
+    {
+      account_id: "acc-openrouter",
+      name: "OpenRouter Backup",
+      balance: null,
+      cost_range: null,
+      credits_range: null,
+      daily_avg_7d: null,
+      runway_days: null,
+      status: "missing_balance",
+    },
+  ]
+  return {
+    accounts,
+    total: {
+      balance: 1357.5,
+      cost_range: 354.0,
+      credits_range: 600.0,
+      daily_avg_7d: 50.56,
+      runway_days: 26.8,
+      accounts_counted: 4,
+    },
+    range,
+    generated_at: Date.now(),
+  }
+}
+
+export function getMockErrors(range: DateRange): ErrorsPayload {
+  const buckets: ErrorBucket[] = []
+  const count = 24
+  const start = range.from
+  const step = Math.max(3600000, Math.floor((range.to - range.from) / count))
+
+  for (let i = 0; i < count; i++) {
+    const t = start + i * step
+    const d = new Date(t)
+    const label = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:00`
+    const s4xx = i % 4 === 1 ? 3 : i % 5 === 0 ? 2 : 0
+    const s5xx = i % 7 === 2 ? 2 : 0
+    buckets.push({
+      t_ms: t,
+      label,
+      total: s4xx + s5xx,
+      s4xx,
+      s5xx,
+    })
+  }
+
+  return {
+    from: range.from,
+    to: range.to,
+    available: true,
+    total: 35,
+    buckets,
+    top_status: [
+      { status: 429, count: 18, share: 0.514 },
+      { status: 502, count: 8, share: 0.229 },
+      { status: 400, count: 5, share: 0.143 },
+      { status: 500, count: 4, share: 0.114 },
+    ],
+    by_path_group: [
+      { path_group: "/v1", count: 26, share: 0.743 },
+      { path_group: "/api", count: 6, share: 0.171 },
+      { path_group: "other", count: 3, share: 0.086 },
+    ],
   }
 }

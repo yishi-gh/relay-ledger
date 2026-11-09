@@ -148,11 +148,9 @@
     @apply border-border outline-ring/50;
     text-rendering: optimizeLegibility;
   }
-  body {
-    @apply bg-background text-foreground font-sans;
+  html, body {
+    @apply font-sans bg-background text-foreground;
     text-rendering: optimizeLegibility;
-  }
-  html {
-    @apply font-sans;
+    overflow-x: hidden;
   }
 }

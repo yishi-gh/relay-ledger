@@ -121,8 +121,11 @@ v2/
 | `GET /api/channels?from=&to=` | 按 `channel_id, channel_name` 聚合，含延迟分位、上游归属与 `top_model` |
 | `GET /api/groups?from=&to=` | 按 `group_name` 聚合渠道数、售出、token、请求、缓存率、延迟、TPS 与 `top_model` |
 | `GET /api/users?from=&to=` | 按 `user_name` 聚合售出、token、请求与占比；归档无 user 维度，不并入 |
+| `GET /api/models?from=&to=` | 按 `model` 聚合售出、请求、token、占比、额度/亿Token 与上游账户；归档无模型维度 |
+| `GET /api/capital?from=&to=` | 账户余额、区间成本/充值、固定 7 日日均与续航，并给可算账户的合计 |
 | `GET /api/upstreams?from=&to=` | 账户级账本：期初期末余额、credits、consumption、毛利 |
 | `GET /api/quality` | 源库最后时间、行数、error_logs 行数、job_runs、collect_errors、schema_ok |
+| `GET /api/errors?from=&to=` | nginx 4xx/5xx 按北京整点分桶（含空桶）、状态码 Top 8、路径组 Top 6；区间上限 31 天 |
 | `GET /api/rows?from=&to=&page=&page_size=` | 逐条明细，`t_ms DESC`；`page_size` 上限 200（超限收敛到 200） |
 | `GET /api/healthz` | `{ "ok": true }` |
 
@@ -142,6 +145,21 @@ v2/
 `cache_rate`、`p50`、`p95`、`tps`、`last_t`、`top_model`（口径同渠道行）。按 `revenue` 降序。
 过滤与归档并入规则和 `/api/channels` 一致；归档没有 `group_name`，归档渠道沿用明细窗口里同渠道的分组，
 找不到归属时归入 `''`，只有归档数据的分组其 `p50` / `p95` / `tps` / `top_model` 为 `null`。
+
+`/api/models` 的口径与 `/api/users` 一致：`LOCAL_FILTER`、`SUM(cost)`、`COUNT(*)`、`tokens = input_total + output`，
+模型名为 NULL / 空串统一为 `(未知模型)`，按 `revenue` 降序（并列按模型名）。`per_1e8 = revenue / (tokens / 1e8)`，
+`tokens = 0` 时为 `null`；`share = revenue / total_revenue`，总额为 0 时为 0。`upstream_accounts` 由该模型出现过的
+`channel_id` 反查配置里的 `channels` 得到，去重排序，配置里已删除（无归属）的渠道忽略。`logs_daily` 没有模型维度，
+归档不并入，`archive.available` 恒为 `false`，`reason` 为 `logs_daily has no model dimension`。
+
+`/api/capital` 只统计 `enabled !== false && kind !== 'external'` 的账户：`balance` 取该账户最新一条
+`balance_snapshot`（不限窗口，无快照为 `null`）；`cost_range` 复用账本口径 `期初 + 充值 − 期末`，缺期初/期末快照
+为 `null`（不填 0），`credits_range` 与盈利接口同源（`total_recharged` 差值或 `credit_event`）。
+`daily_avg_7d` 固定取最近 7 个北京自然日（含当天，与请求区间无关，当天按最新快照计到当前），逐日成本用与
+`/api/profit` 相同的账本函数计算后 `SUM / 7`；7 天里一个完整日的成本都算不出来时为 `null`。
+`runway_days = balance / daily_avg_7d`（保留 1 位小数），余额为 `null` 或日均 `null` / `<= 0` 时为 `null`。
+`total` 对各账户的可算值求和；有账户缺余额/成本/日均时，续航按「余额与日均都有值的账户」合计计算，
+并返回 `accounts_counted` 说明参与计算的账户数。
 
 `/api/quality` 额外返回 `jobs`：`{ job, last_run_at, last_status, age_ms, threshold_ms, stalled, never_run }`，
 阈值取配置的 `upstream.job_stale_ms`（默认 30 分钟）。`job_runs` 只含状态与原因，不含 token。
@@ -381,6 +399,44 @@ node v2/jobs/rollup-logs.mjs --keep-days=180 --vacuum    # 放宽保留期并回
   这些字段仍只覆盖明细窗口，整段只有归档的渠道行带 `archive_only: true`。
 - 归档只并入「完整落在查询区间内」且「早于明细最早一天」的整天：边界日无法按日折算到小时，
   宁可少算也不与明细重复计数。
+
+## nginx 访问日志错误码聚合
+
+站点库 `logs` 没有 HTTP 状态码，4xx/5xx 只能从 nginx 访问日志补。采集任务把错误按
+「北京整点 × 状态码 × 路径组」累加进看板库 `http_errors_hourly`，用于回答
+「哪一小时、哪类接口、哪个状态码、多少次」。表结构（`IF NOT EXISTS`，`SCHEMA_VERSION` 不变）：
+
+```sql
+CREATE TABLE IF NOT EXISTS http_errors_hourly (
+  hour_ms    INTEGER NOT NULL,   -- 北京时区整点毫秒
+  status     INTEGER NOT NULL,   -- 400..599
+  path_group TEXT NOT NULL,      -- '/v1' | '/api' | 'other'
+  count      INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (hour_ms, status, path_group)
+);
+```
+
+```bash
+node v2/jobs/collect-http-errors.mjs --file=/var/log/nginx/access.log   # 增量采集
+node v2/jobs/collect-http-errors.mjs --file=./access.log --db=./dashboard.db
+node v2/jobs/collect-http-errors.mjs --dry-run    # 只解析统计，不写库、不写位点
+node v2/jobs/collect-http-errors.mjs --from-start # 忽略位点从头读（仅调试）
+```
+
+- 常驻调度任务名 `http-errors`：启动 5 分钟后首轮，之后每 15 分钟；`--no-http-errors` 关闭，
+  与其它任务同样防重入、异常不退出进程。`--once` 不跑它，手动执行用上面的命令。
+- 增量位点存 `schema_meta.http_errors_offset`（已处理字节偏移）。只消费以换行结尾的完整行，
+  文件末尾的半行留到下一轮；文件变小（轮转/截断）时位点归零重读。
+- 只统计状态码 400..599，按 nginx combined 格式解析；时间取 `$time_local` 自带的偏移换算成
+  北京时间整点。路径去掉 query 后：`/v1` 或 `/v1/...` → `/v1`，`/api` 或 `/api/...` → `/api`，
+  其余（含请求行 `-`）→ `other`。
+- 解析失败的行跳过并计数，不影响其它行；输出只有行数、桶数与位点，不含日志原文（可能有 IP / UA）。
+  日志文件不存在时打一行 warn 并以退出码 0 结束，不阻塞调度。
+- 汇总读取用 `v2/store/http-errors.mjs` 的 `readErrorBuckets(db, from, to)` 与纯函数
+  `summarizeBuckets(rows)`（返回 `total`、`by_status`、`by_group`、`by_hour`）；`/api/errors` 直接读同一张表。
+- 已知限制：只认 nginx combined 格式；轮转检测只看文件大小，新文件不小于旧位点时会漏读一轮；
+  先写桶再写位点，两步之间崩溃会重复计数（下次采集叠加）；聚合表不做保留期清理（每行很小）。
 
 ## 部署到服务器
 

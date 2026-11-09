@@ -282,7 +282,7 @@ export function ChannelsDetailView({
         data-slot="detail-card"
         className={cn(
           "shadow-xs overflow-hidden flex flex-col min-w-0 p-4",
-          isScrollable ? "flex-1 min-h-0" : "h-fit"
+          isScrollable ? "lg:flex-1 lg:min-h-0" : "h-fit"
         )}
       >
         <CardHeader className="p-0 pb-2.5 flex flex-row items-center justify-between space-y-0 shrink-0">
@@ -304,16 +304,16 @@ export function ChannelsDetailView({
           </div>
         </CardHeader>
 
-        <CardContent className={cn("p-0 flex flex-col", isScrollable ? "flex-1 min-h-0" : "")}>
+        <CardContent className={cn("p-0 flex flex-col", isScrollable ? "lg:flex-1 lg:min-h-0" : "")}>
           <div
             data-slot="table-container"
             className={cn(
-              "rounded-lg border border-border bg-card",
-              isScrollable ? "flex-1 min-h-0 overflow-auto" : "overflow-hidden"
+              "rounded-lg border border-border bg-card overflow-x-auto",
+              isScrollable ? "lg:flex-1 lg:min-h-0 lg:overflow-auto" : ""
             )}
           >
-            <Table className="w-full table-fixed text-sm">
-              <colgroup>
+            <Table className="min-w-[860px] lg:min-w-full table-auto lg:table-fixed text-sm">
+              <colgroup className="hidden lg:table-column-group">
                 {visibleCols.map((col) => (
                   <col key={col.key} style={{ width: `${COL_WIDTH_PCT[col.key] ?? 8}%` }} />
                 ))}
@@ -342,7 +342,7 @@ export function ChannelsDetailView({
                         className={cn(
                           "h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground whitespace-nowrap select-none cursor-pointer transition-colors group/th hover:bg-muted/80",
                           isNum ? "text-right" : "text-left",
-                          isLocked && "sticky left-0 bg-muted/95 z-30 border-r border-border min-w-[180px]",
+                          isLocked && "sticky left-0 bg-muted/95 z-30 border-r border-border min-w-[160px] sm:min-w-[180px]",
                           sortAttrs.isActive && "text-foreground font-semibold"
                         )}
                         title={
@@ -408,13 +408,13 @@ export function ChannelsDetailView({
                               return (
                                 <TableCell
                                   key={col.key}
-                                  className="sticky left-0 bg-card z-10 border-r border-border/50 px-3 py-1 whitespace-nowrap min-w-[180px]"
+                                  className="sticky left-0 bg-card z-10 border-r border-border/50 px-3 py-1 whitespace-nowrap min-w-[160px] sm:min-w-[180px]"
                                 >
                                   <div className="flex items-center gap-1.5 min-w-0">
                                     <span className="font-mono text-[12px] leading-[16px] text-muted-foreground shrink-0">
                                       #{row.channel_id}
                                     </span>
-                                    <span className="font-normal text-foreground text-[14px] leading-[20px] truncate" title={row.channel_name}>
+                                    <span className="font-normal text-foreground text-[14px] leading-[20px] line-clamp-2 max-w-[200px]" title={row.channel_name}>
                                       {row.channel_name || "未命名渠道"}
                                     </span>
                                   </div>
@@ -507,10 +507,10 @@ export function ChannelsDetailView({
 
                             case "upstream":
                               return (
-                                <TableCell key={col.key} className="text-left px-3 py-1 min-w-[168px]">
+                                <TableCell key={col.key} className="text-left px-3 py-1 min-w-[140px] sm:min-w-[168px]">
                                   <div className="flex flex-col items-start gap-0.5">
                                     <span
-                                      className="font-normal text-foreground text-[14px] leading-[20px] truncate min-w-0"
+                                      className="font-normal text-foreground text-[14px] leading-[20px] line-clamp-2 min-w-0"
                                       title={`${row.upstream_account || "未映射"} · ${row.margin_status ?? ""}`}
                                     >
                                       {row.upstream_account || "未映射"}

@@ -14,7 +14,7 @@ import {
   Tooltip as RechartsTooltip,
   XAxis,
   YAxis,
-} from "recharts"
+} from "@/lib/recharts-sized"
 import {
   DollarSign,
   Activity,
@@ -73,9 +73,9 @@ export function OverviewView({
   return (
     <div className="flex-1 min-h-0 flex flex-col space-y-4">
       {/* 1. KPI 分层：主卡 + 3 张辅卡 (紧凑行, shrink-0) */}
-      <section className="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-5 gap-4 items-stretch shrink-0">
+      <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4 items-stretch shrink-0">
         {/* 主卡：本站售出 */}
-        <Card className="col-span-1 sm:col-span-3 xl:col-span-2 h-full shadow-xs flex flex-col justify-between">
+        <Card className="col-span-1 sm:col-span-2 xl:col-span-2 h-auto xl:h-full shadow-xs flex flex-col justify-between">
           <CardHeader className="p-4 pb-1 flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-[14px] leading-[20px] font-normal text-muted-foreground">
               本站售出 (Revenue)
@@ -84,7 +84,7 @@ export function OverviewView({
           </CardHeader>
           <CardContent className="px-4 pb-4 pt-0 flex-1 flex flex-col justify-between">
             <div>
-              <div className="text-[28px] leading-[36px] font-semibold font-mono tracking-tight text-foreground tabular-nums">
+              <div className="text-[28px] leading-[36px] font-semibold font-mono tracking-tight text-foreground tabular-nums whitespace-nowrap">
                 {formatCurrency(kpiData.revenue)}
               </div>
               <p className="text-[12px] leading-[16px] text-muted-foreground mt-1.5">
@@ -98,13 +98,13 @@ export function OverviewView({
                 <div className="space-y-0.5 min-w-0">
                   <div className="text-[12px] leading-[16px] text-muted-foreground truncate">上游成本</div>
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[16px] leading-[24px] font-semibold font-mono tabular-nums text-foreground">
+                    <span className="text-[16px] leading-[24px] font-semibold font-mono tabular-nums text-foreground whitespace-nowrap">
                       {formatCurrency(kpiData.upstreamCost)}
                     </span>
                     {kpiData.upstreamCost == null && (
                       <Badge
                         variant="outline"
-                        className="text-[12px] leading-[16px] h-5 px-1.5 py-0 font-medium text-muted-foreground inline-flex items-center"
+                        className="text-[12px] leading-[16px] h-5 px-1.5 py-0 font-medium text-muted-foreground inline-flex items-center shrink-0"
                       >
                         缺快照
                       </Badge>
@@ -115,13 +115,13 @@ export function OverviewView({
                 <div className="space-y-0.5 min-w-0">
                   <div className="text-[12px] leading-[16px] text-muted-foreground truncate">经营利润</div>
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[16px] leading-[24px] font-semibold font-mono tabular-nums text-foreground">
+                    <span className="text-[16px] leading-[24px] font-semibold font-mono tabular-nums text-foreground whitespace-nowrap">
                       {formatCurrency(kpiData.profit)}
                     </span>
                     {kpiData.profit == null && (
                       <Badge
                         variant="outline"
-                        className="text-[12px] leading-[16px] h-5 px-1.5 py-0 font-medium text-muted-foreground inline-flex items-center"
+                        className="text-[12px] leading-[16px] h-5 px-1.5 py-0 font-medium text-muted-foreground inline-flex items-center shrink-0"
                       >
                         缺快照
                       </Badge>
@@ -138,7 +138,7 @@ export function OverviewView({
                   </div>
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span
-                      className="text-[16px] leading-[24px] font-semibold font-mono tabular-nums text-foreground cursor-help"
+                      className="text-[16px] leading-[24px] font-semibold font-mono tabular-nums text-foreground cursor-help whitespace-nowrap"
                       title="按可核算售出计算，不含缺快照或外部账户"
                     >
                       {formatPercent(kpiData.margin)}
@@ -146,7 +146,7 @@ export function OverviewView({
                     {kpiData.margin == null && (
                       <Badge
                         variant="outline"
-                        className="text-[12px] leading-[16px] h-5 px-1.5 py-0 font-medium text-muted-foreground inline-flex items-center"
+                        className="text-[12px] leading-[16px] h-5 px-1.5 py-0 font-medium text-muted-foreground inline-flex items-center shrink-0"
                       >
                         缺快照
                       </Badge>
@@ -166,7 +166,7 @@ export function OverviewView({
         </Card>
 
         {/* 辅卡 1: 请求数 */}
-        <Card data-slot="kpi-aux-card" className="col-span-1 sm:col-span-1 xl:col-span-1 h-full shadow-xs flex flex-col justify-between">
+        <Card data-slot="kpi-aux-card" className="col-span-1 sm:col-span-1 xl:col-span-1 h-auto xl:h-full shadow-xs flex flex-col justify-between">
           <CardHeader className="p-4 pb-1 flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-[14px] leading-[20px] font-normal text-muted-foreground">
               请求数 (Requests)
@@ -175,7 +175,7 @@ export function OverviewView({
           </CardHeader>
           <CardContent className="px-4 pb-4 pt-0 flex-1 flex flex-col justify-between">
             <div className="pt-1">
-              <div className="text-[24px] leading-[28px] font-semibold font-mono tracking-tight text-foreground tabular-nums">
+              <div className="text-[24px] leading-[28px] font-semibold font-mono tracking-tight text-foreground tabular-nums whitespace-nowrap">
                 {formatNumber(kpiData.requests)}
               </div>
             </div>
@@ -186,7 +186,7 @@ export function OverviewView({
         </Card>
 
         {/* 辅卡 2: Token */}
-        <Card data-slot="kpi-aux-card" className="col-span-1 sm:col-span-1 xl:col-span-1 h-full shadow-xs flex flex-col justify-between">
+        <Card data-slot="kpi-aux-card" className="col-span-1 sm:col-span-1 xl:col-span-1 h-auto xl:h-full shadow-xs flex flex-col justify-between">
           <CardHeader className="p-4 pb-1 flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-[14px] leading-[20px] font-normal text-muted-foreground">
               Token 消耗
@@ -195,7 +195,7 @@ export function OverviewView({
           </CardHeader>
           <CardContent className="px-4 pb-4 pt-0 flex-1 flex flex-col justify-between">
             <div className="pt-1">
-              <div className="text-[24px] leading-[28px] font-semibold font-mono tracking-tight text-foreground tabular-nums">
+              <div className="text-[24px] leading-[28px] font-semibold font-mono tracking-tight text-foreground tabular-nums whitespace-nowrap">
                 {formatTokens(kpiData.tokens)}
               </div>
             </div>
@@ -206,7 +206,7 @@ export function OverviewView({
         </Card>
 
         {/* 辅卡 3: 缓存率 */}
-        <Card data-slot="kpi-aux-card" className="col-span-1 sm:col-span-1 xl:col-span-1 h-full shadow-xs flex flex-col justify-between">
+        <Card data-slot="kpi-aux-card" className="col-span-1 sm:col-span-2 xl:col-span-1 h-auto xl:h-full shadow-xs flex flex-col justify-between">
           <CardHeader className="p-4 pb-1 flex flex-row items-center justify-between space-y-0">
             <div className="flex items-center gap-1">
               <CardTitle className="text-[14px] leading-[20px] font-normal text-muted-foreground">
@@ -223,7 +223,7 @@ export function OverviewView({
           </CardHeader>
           <CardContent className="px-4 pb-4 pt-0 flex-1 flex flex-col justify-between">
             <div className="pt-1">
-              <div className="text-[24px] leading-[28px] font-semibold font-mono tracking-tight text-foreground tabular-nums">
+              <div className="text-[24px] leading-[28px] font-semibold font-mono tracking-tight text-foreground tabular-nums whitespace-nowrap">
                 {formatPercent(kpiData.cacheRate)}
               </div>
             </div>
@@ -235,9 +235,9 @@ export function OverviewView({
       </section>
 
       {/* 2. 趋势拆两张：按内容密度 1.6 : 1 并排，填满一屏剩余高度 (flex-1 min-h-0) */}
-      <section className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4 items-stretch flex-1 min-h-0">
+      <section className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4 items-stretch lg:flex-1 lg:min-h-0">
         {/* 左卡：售出结构 (1.6fr) */}
-        <Card className="col-span-1 h-full shadow-xs overflow-hidden flex flex-col justify-between min-w-0 p-4">
+        <Card className="col-span-1 h-auto lg:h-full shadow-xs overflow-hidden flex flex-col justify-between min-w-0 p-4">
           <CardHeader className="p-0 pb-2 shrink-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               售出结构
@@ -248,11 +248,11 @@ export function OverviewView({
           </CardHeader>
 
           <CardContent className="p-0 pb-2 flex-1 flex flex-col min-h-0 w-full">
-            <div className="flex-1 min-h-[250px] w-full min-w-0">
+            <div className="h-[220px] lg:h-auto lg:flex-1 lg:min-h-[250px] w-full min-w-0">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart
                   data={trendChartData}
-                  margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
+                  margin={{ top: 10, right: 10, left: 4, bottom: 0 }}
                 >
                   <CartesianGrid
                     strokeDasharray="3 3"
@@ -270,6 +270,7 @@ export function OverviewView({
                     yAxisId="left"
                     tickLine={false}
                     axisLine={false}
+                    width={44}
                     tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
                     tickFormatter={(val) => `$${val}`}
                   />
@@ -350,10 +351,10 @@ export function OverviewView({
                     className="size-2.5 rounded-xs shrink-0"
                     style={{ backgroundColor: getSiteColor(site.account_id) }}
                   />
-                  <span className="max-w-[130px] truncate" title={site.name}>
+                  <span className="max-w-[110px] sm:max-w-[130px] line-clamp-2" title={site.name}>
                     {site.name}
                   </span>
-                  <span className="font-mono tabular-nums text-foreground/90 font-semibold text-[14px]">
+                  <span className="font-mono tabular-nums text-foreground/90 font-semibold text-[14px] whitespace-nowrap">
                     {formatCurrency(site.revenue)}
                   </span>
                 </div>
@@ -363,7 +364,7 @@ export function OverviewView({
         </Card>
 
         {/* 右卡：调用流量 (1fr) */}
-        <Card className="col-span-1 h-full shadow-xs overflow-hidden flex flex-col justify-between min-w-0 p-4">
+        <Card className="col-span-1 h-auto lg:h-full shadow-xs overflow-hidden flex flex-col justify-between min-w-0 p-4">
           <CardHeader className="p-0 pb-2 shrink-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               调用流量
@@ -374,11 +375,11 @@ export function OverviewView({
           </CardHeader>
 
           <CardContent className="p-0 pb-2 flex-1 flex flex-col min-h-0 w-full">
-            <div className="flex-1 min-h-[250px] w-full min-w-0">
+            <div className="h-[220px] lg:h-auto lg:flex-1 lg:min-h-[250px] w-full min-w-0">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart
                   data={trendChartData}
-                  margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
+                  margin={{ top: 10, right: 10, left: 4, bottom: 0 }}
                 >
                   <CartesianGrid
                     strokeDasharray="3 3"
@@ -395,6 +396,7 @@ export function OverviewView({
                   <YAxis
                     tickLine={false}
                     axisLine={false}
+                    width={40}
                     tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
                     tickFormatter={(val) =>
                       val >= 1000
@@ -440,7 +442,7 @@ export function OverviewView({
 
           {/* 卡底指标说明 */}
           <div className="pt-2 border-t border-border/60 shrink-0 mt-auto">
-            <div className="flex items-center justify-between text-[12px] leading-[16px] text-muted-foreground">
+            <div className="flex items-center justify-between text-[12px] leading-[16px] text-muted-foreground flex-wrap gap-1">
               <span className="flex items-center gap-2">
                 <span className="size-2.5 rounded-xs bg-[var(--chart-1)] shrink-0" />
                 <span>请求总量汇总</span>

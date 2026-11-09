@@ -3,13 +3,17 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { openDashboardDb } from '../../store/dashboard.mjs';
 
 export function makeTempDir(prefix = 'v2-test-') {
-  return fs.mkdtempSync(path.join(process.env.TEMP ?? process.env.TMP ?? '.', prefix));
+  // Linux 上 TEMP/TMP 通常不存在，回落到 '.' 会让临时目录变成相对路径，
+  // 而 CLI 解析会把路径 resolve 成绝对路径，断言与日志都会对不上。
+  const base = process.env.TEMP ?? process.env.TMP ?? os.tmpdir();
+  return fs.mkdtempSync(path.join(base, prefix));
 }
 
 export function makeSourceDb(file, { rows = [] } = {}) {

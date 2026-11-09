@@ -47,22 +47,22 @@ export function TopBar({
   const { theme, setTheme } = useTheme()
 
   return (
-    <header className="sticky top-0 z-20 flex min-h-12 w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/80 bg-background/95 px-4 py-2.5 backdrop-blur-xs">
+    <header className="sticky top-0 z-20 flex min-h-12 w-full items-center justify-between gap-x-2 sm:gap-x-4 border-b border-border/80 bg-background/95 px-3 sm:px-4 py-2 backdrop-blur-xs">
       {/* 左侧：SidebarTrigger + 当前页标题 */}
-      <div className="flex items-center gap-2.5 min-w-0">
-        <SidebarTrigger className="size-8 shrink-0 text-muted-foreground hover:text-foreground" />
-        <h1 className="text-[18px] leading-[24px] font-semibold text-foreground tracking-tight truncate">
+      <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+        <SidebarTrigger className="size-9 sm:size-8 shrink-0 text-muted-foreground hover:text-foreground" />
+        <h1 className="text-[16px] sm:text-[18px] leading-[24px] font-semibold text-foreground tracking-tight truncate">
           {title}
         </h1>
       </div>
 
       {/* 右侧：数据截止时间 + 24h/7d + 主题切换 */}
-      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-        <span className="text-[12px] leading-[16px] text-muted-foreground font-mono whitespace-nowrap">
+      <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+        <span className="hidden md:inline text-[12px] leading-[16px] text-muted-foreground font-mono whitespace-nowrap">
           数据截止 {formatBeijingTime(maxT)} · {formatNumber(rows)} 条记录
         </span>
 
-        <div className="hidden sm:block h-3.5 w-px bg-border/70 mx-0.5" />
+        <div className="hidden md:block h-3.5 w-px bg-border/70 mx-0.5" />
 
         <ToggleGroup
           value={[timeRange]}
@@ -75,10 +75,10 @@ export function TopBar({
           size="sm"
           className="shrink-0"
         >
-          <ToggleGroupItem value="24h" className="text-[12px] leading-[16px] px-3 h-7.5">
+          <ToggleGroupItem value="24h" className="text-[12px] leading-[16px] px-2.5 sm:px-3 h-8 sm:h-7.5">
             近 24 小时
           </ToggleGroupItem>
-          <ToggleGroupItem value="7d" className="text-[12px] leading-[16px] px-3 h-7.5">
+          <ToggleGroupItem value="7d" className="text-[12px] leading-[16px] px-2.5 sm:px-3 h-8 sm:h-7.5">
             近 7 天
           </ToggleGroupItem>
         </ToggleGroup>
@@ -87,7 +87,7 @@ export function TopBar({
           <Button
             variant="ghost"
             size="icon"
-            className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+            className="size-8 sm:size-7 shrink-0 text-muted-foreground hover:text-foreground"
             onClick={onRefresh}
             disabled={refreshing}
             aria-label="刷新数据"
@@ -99,7 +99,7 @@ export function TopBar({
         <Button
           variant="ghost"
           size="icon"
-          className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+          className="size-8 sm:size-7 shrink-0 text-muted-foreground hover:text-foreground"
           onClick={() => {
             const isDark = document.documentElement.classList.contains("dark")
             setTheme(isDark ? "light" : "dark")

@@ -18,7 +18,7 @@ import {
   Tooltip as RechartsTooltip,
   XAxis,
   YAxis,
-} from "recharts"
+} from "@/lib/recharts-sized"
 import { AlertCircle } from "lucide-react"
 import {
   formatCurrency,
@@ -178,9 +178,9 @@ export function ProfitView({
   return (
     <div className="flex-1 min-h-0 flex flex-col space-y-4">
       {/* 图表与表：内容密度比例 1 : 1.15，等高对齐，<1280 上下堆叠 */}
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_1.15fr] gap-4 items-stretch flex-1 min-h-0">
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_1.15fr] gap-4 items-stretch xl:flex-1 xl:min-h-0">
         {/* 左卡：账户盈利 (1fr, p-4) */}
-        <Card className="col-span-1 h-full shadow-xs overflow-hidden flex flex-col justify-between min-w-0 p-4">
+        <Card className="col-span-1 h-full max-xl:h-auto shadow-xs overflow-hidden flex flex-col justify-between min-w-0 p-4">
           <CardHeader className="p-0 pb-2.5 shrink-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               账户盈利
@@ -191,11 +191,11 @@ export function ProfitView({
           </CardHeader>
 
           <CardContent className="p-0 flex-1 flex flex-col min-h-0 w-full py-1.5">
-            <div className="flex-1 min-h-[250px] w-full min-w-0">
+            <div className="h-[220px] xl:h-auto xl:flex-1 xl:min-h-[250px] w-full min-w-0">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart
                   data={profitChartData}
-                  margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
+                  margin={{ top: 10, right: 8, left: 4, bottom: 0 }}
                 >
                   <CartesianGrid
                     strokeDasharray="3 3"
@@ -213,6 +213,7 @@ export function ProfitView({
                     yAxisId="left"
                     tickLine={false}
                     axisLine={false}
+                    width={44}
                     tickCount={6}
                     tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
                     tickFormatter={(val) => (val < 0 ? `-$${Math.abs(val)}` : `$${val}`)}
@@ -222,6 +223,7 @@ export function ProfitView({
                     orientation="right"
                     tickLine={false}
                     axisLine={false}
+                    width={38}
                     tickCount={6}
                     tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
                     tickFormatter={(val) => `${(val * 100).toFixed(0)}%`}
@@ -326,7 +328,7 @@ export function ProfitView({
         </Card>
 
         {/* 右卡：账户汇总 (1.15fr, px-4 py-3, 等高内滚) */}
-        <Card className="col-span-1 h-full shadow-xs overflow-hidden flex flex-col min-w-0 p-4">
+        <Card className="col-span-1 h-full max-xl:h-auto shadow-xs overflow-hidden flex flex-col min-w-0 p-4">
           <CardHeader className="p-0 pb-2.5 flex flex-row items-center justify-between space-y-0">
             <div>
               <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
@@ -342,8 +344,8 @@ export function ProfitView({
           </CardHeader>
 
           <CardContent className="p-0 flex-1 flex flex-col min-h-0">
-            <div className="flex-1 min-h-0 overflow-auto rounded-lg border border-border">
-              <Table data-slot="profit-table" className="w-full">
+            <div className="flex-1 min-h-[280px] xl:min-h-0 overflow-auto rounded-lg border border-border">
+              <Table data-slot="profit-table" className="w-full min-w-[500px] xl:min-w-full">
                 <TableHeader className="bg-muted/40">
                   <TableRow>
                     {[
@@ -400,7 +402,7 @@ export function ProfitView({
                         className="sticky left-0 bg-card z-10 border-r border-border/50 py-[9px] px-2.5 w-[110px] min-w-[95px] max-w-[120px]"
                         title={`${site.name} (${site.account_id})`}
                       >
-                        <span className="font-normal text-foreground text-[14px] leading-[20px] truncate block" title={site.name}>
+                        <span className="font-normal text-foreground text-[14px] leading-[20px] line-clamp-2 block" title={site.name}>
                           {site.name}
                         </span>
                       </TableCell>
