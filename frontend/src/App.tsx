@@ -329,7 +329,7 @@ export function App() {
 
       return {
         revenue,
-        tokens: null,
+        tokens: overview?.tokens?.total ?? null,
         requests,
         cacheRate: overview?.cache_rate ?? null,
         upstreamCost,
@@ -337,7 +337,7 @@ export function App() {
         margin,
         coveredBuckets,
         bucketCount,
-        isCache7d: true,
+        isCache7d: false,
         accountableRevenue,
       }
     }

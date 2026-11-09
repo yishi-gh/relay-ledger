@@ -200,7 +200,7 @@ export function OverviewView({
               </div>
             </div>
             <p className="text-[12px] leading-[16px] text-muted-foreground mt-1.5">
-              {timeRange === "24h" ? "当前数据源未提供 Token 统计" : "全站近 7 天消耗总计"}
+              {timeRange === "24h" ? "近 24 小时窗口" : "全站近 7 天消耗总计"}
             </p>
           </CardContent>
         </Card>
@@ -228,7 +228,7 @@ export function OverviewView({
               </div>
             </div>
             <p className="text-[12px] leading-[16px] text-muted-foreground mt-1.5">
-              {kpiData.isCache7d ? "近 7 天基准" : "近 7 天 Prompt Cache"}
+              {kpiData.isCache7d ? "近 7 天窗口" : "当前窗口"}
             </p>
           </CardContent>
         </Card>
