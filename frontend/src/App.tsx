@@ -10,8 +10,7 @@ import { TopBar } from "@/components/top-bar"
 import { OverviewView, type KpiData } from "@/components/overview-view"
 import { ProfitView } from "@/components/profit-view"
 import { PlaceholderView, type PlaceholderKey } from "@/components/placeholder-view"
-import { ChannelsDetailView } from "@/components/channels-detail-view"
-import { GroupsDetailView } from "@/components/groups-detail-view"
+import { DetailsView } from "@/components/details-view"
 import { RankView } from "@/components/rank-view"
 import { ModelsView } from "@/components/models-view"
 import { UpstreamsView } from "@/components/upstreams-view"
@@ -121,6 +120,7 @@ const VALID_VIEWS: ViewKey[] = [
   "models",
   "channels_detail",
   "groups_detail",
+  "details",
   "upstreams",
   "capital",
   "health",
@@ -133,8 +133,9 @@ const VIEW_TITLES: Record<ViewKey, string> = {
   profit: "盈利",
   rank: "排行",
   models: "模型经营",
-  channels_detail: "渠道明细",
-  groups_detail: "分组明细",
+  channels_detail: "经营明细",
+  groups_detail: "经营明细",
+  details: "经营明细",
   upstreams: "上游账户",
   capital: "资金与续航",
   health: "渠道健康",
@@ -472,6 +473,8 @@ export function App() {
                     activeSites={activeSites}
                     trendChartData={trendChartData}
                     getSiteColor={getSiteColor}
+                    capital={data?.capital ?? null}
+                    accounts={currentUpstreams?.accounts || []}
                   />
                 )}
 
@@ -504,17 +507,16 @@ export function App() {
                   />
                 )}
 
-                {currentView === "channels_detail" && (
-                  <ChannelsDetailView
+                {(currentView === "details" ||
+                  currentView === "channels_detail" ||
+                  currentView === "groups_detail") && (
+                  <DetailsView
                     timeRange={timeRange}
-                    rows={currentChannels?.rows || []}
-                  />
-                )}
-
-                {currentView === "groups_detail" && (
-                  <GroupsDetailView
-                    timeRange={timeRange}
+                    channels={currentChannels?.rows || []}
                     groups={currentGroups?.groups || []}
+                    initialLevel={
+                      currentView === "groups_detail" ? "group" : "channel"
+                    }
                   />
                 )}
 

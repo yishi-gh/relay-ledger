@@ -1,3 +1,4 @@
+import { FundingStrip } from "@/components/funding-strip"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -55,6 +56,8 @@ interface OverviewViewProps {
   activeSites: ActiveSite[]
   trendChartData: Record<string, string | number>[]
   getSiteColor: (accountId: string) => string
+  capital?: import("@/lib/api").CapitalPayload | null
+  accounts?: { name?: string; last_sync?: number | null }[]
 }
 
 export function OverviewView({
@@ -63,6 +66,8 @@ export function OverviewView({
   activeSites,
   trendChartData,
   getSiteColor,
+  capital,
+  accounts,
 }: OverviewViewProps) {
   // 判断是否需要显示可核算售出差异说明
   const showRevenueClarification =
@@ -454,6 +459,8 @@ export function OverviewView({
           </div>
         </Card>
       </section>
+
+      <FundingStrip capital={capital} accounts={accounts} />
     </div>
   )
 }

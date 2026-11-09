@@ -13,83 +13,39 @@ import {
 import { Activity, AlertTriangle, HeartPulse, Inbox } from "lucide-react"
 import { formatNumber } from "@/lib/formatters"
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import {
   fetchStatus,
   type DateRange,
   type RangeType,
-  type StatusBucket,
+  type StatusBucketSize,
   type StatusLevel,
   type StatusPayload,
   type StatusState,
 } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-/** 状态条只用现有 --chart-* 语义色：正常绿、告警黄、故障红、无请求灰 */
+/** 状态条颜色：正常绿、告警黄、故障红、样本不足中性灰、无请求深灰 */
 const STATE_COLOR: Record<StatusState, string> = {
   ok: "var(--chart-2)",
   warn: "var(--chart-3)",
   fail: "var(--chart-5)",
-  none: "var(--muted)",
+  unknown: "#64748b",
+  none: "#334155",
 }
 
 const STATE_LABEL: Record<StatusState, string> = {
   ok: "正常",
   warn: "告警",
   fail: "故障",
+  unknown: "样本不足",
   none: "无请求",
 }
 
-const LEGEND: StatusState[] = ["ok", "warn", "fail", "none"]
-
-interface StripCell {
-  key: number
-  label: string
-  total: number
-  errors: number
-  state: StatusState
-}
-
-/** 与后端同一阈值：只有该格有请求时才判状态 */
-function stateOf(total: number, errors: number): StatusState {
-  if (total <= 0) return "none"
-  const rate = errors / total
-  if (rate <= 0) return "ok"
-  if (rate < 0.02) return "warn"
-  return "fail"
-}
-
-/** 24h 每格 1 小时；7d 按 6 小时合并成 28 格，避免 168 格挤成一条线 */
-function buildCells(buckets: StatusBucket[], groupSize: number): StripCell[] {
-  if (groupSize <= 1) {
-    return buckets.map((b) => ({
-      key: b.t_ms,
-      label: b.label,
-      total: b.total,
-      errors: b.errors,
-      state: b.state,
-    }))
-  }
-
-  const cells: StripCell[] = []
-  for (let i = 0; i < buckets.length; i += groupSize) {
-    const chunk = buckets.slice(i, i + groupSize)
-    let total = 0
-    let errors = 0
-    for (const bucket of chunk) {
-      total += bucket.total
-      errors += bucket.errors
-    }
-    const first = chunk[0]
-    const last = chunk[chunk.length - 1]
-    cells.push({
-      key: first.t_ms,
-      label: first.t_ms === last.t_ms ? first.label : `${first.label} – ${last.label}`,
-      total,
-      errors,
-      state: stateOf(total, errors),
-    })
-  }
-  return cells
-}
+const LEGEND: StatusState[] = ["ok", "warn", "fail", "unknown", "none"]
 
 /** 北京时间的 MM-DD HH:mm；coverage 只用于「错误数据自 X 起」的小字 */
 function formatBeijingShort(ms: number): string {
@@ -114,25 +70,28 @@ export function HealthView({ timeRange, dateRange }: HealthViewProps) {
   const [data, setData] = React.useState<StatusPayload | null>(null)
   const [notReady, setNotReady] = React.useState(false)
 
-  // 健康页用固定整窗：24h = 24 个整点，7d = 168 小时（28 格 × 6 小时）。
-  // 不用看板默认的自然日窗口，避免 7d 末端只走了几小时导致格子数不足 28。
-  // 起点按整点对齐、终点保留数据截止时刻，所以首尾各含一个未走完的小时槽。
+  const bucketSize: StatusBucketSize = timeRange === "24h" ? "15m" : "1h"
+
+  // 健康页窗口对齐桶粒度：24h = 96 个 15 分钟桶，7d = 168 个 1 小时桶。
   const range = React.useMemo<DateRange | null>(() => {
     if (!dateRange) return null
     const to = dateRange.to
+    if (timeRange === "24h") {
+      const slotStart = Math.floor(to / (15 * 60_000)) * (15 * 60_000)
+      return { from: slotStart - (96 - 1) * 15 * 60_000, to }
+    }
     const hourStart = Math.floor(to / 3600_000) * 3600_000
-    const slots = timeRange === "7d" ? 24 * 7 : 24
-    return { from: hourStart - (slots - 1) * 3600_000, to }
+    return { from: hourStart - (168 - 1) * 3600_000, to }
   }, [dateRange, timeRange])
 
-  // 按视图懒加载：健康页不参与首屏 loadDashboard，切到本页或切换维度时才请求
+  // 按视图懒加载：健康页不参与首屏 loadDashboard，切到本页或切换维度/跨度时才请求
   React.useEffect(() => {
     let cancelled = false
 
     async function load() {
       if (!range) return
       try {
-        const res = await fetchStatus(range, level)
+        const res = await fetchStatus(range, level, bucketSize)
         if (cancelled) return
         setData(res)
         setNotReady(false)
@@ -148,15 +107,19 @@ export function HealthView({ timeRange, dateRange }: HealthViewProps) {
     return () => {
       cancelled = true
     }
-  }, [range, level])
+  }, [range, level, bucketSize])
 
   const components = data?.components ?? []
   const overall = data?.overall ?? null
   const coverageSince = data?.coverage?.errors_since ?? null
-  const groupSize = timeRange === "7d" ? 6 : 1
   // 维度或窗口切换时旧数据还在路上：显示旧表并标注加载中，避免整页闪空
   const loading =
-    !notReady && (!data || !range || data.from !== range.from || data.level !== level)
+    !notReady &&
+    (!data ||
+      !range ||
+      data.from !== range.from ||
+      data.level !== level ||
+      (data.bucket && data.bucket !== bucketSize))
 
   return (
     <div className="flex-1 min-h-0 flex flex-col space-y-4">
@@ -269,33 +232,35 @@ export function HealthView({ timeRange, dateRange }: HealthViewProps) {
           ) : (
             <>
               <div className="rounded-lg border border-border bg-card overflow-x-auto lg:flex-1 lg:min-h-0 lg:overflow-auto">
-                <Table className="min-w-[740px] lg:min-w-full table-auto lg:table-fixed">
+                <Table className="min-w-[740px] lg:min-w-full table-auto">
                   <colgroup className="hidden lg:table-column-group">
-                    <col style={{ width: "18%" }} />
-                    <col style={{ width: "44%" }} />
-                    <col style={{ width: "10%" }} />
-                    <col style={{ width: "9%" }} />
-                    <col style={{ width: "8%" }} />
-                    <col style={{ width: "11%" }} />
+                    <col style={{ width: "13%" }} />
+                    <col style={{ width: "63%" }} />
+                    <col style={{ width: "7%" }} />
+                    <col style={{ width: "6%" }} />
+                    <col style={{ width: "5%" }} />
+                    <col style={{ width: "6%" }} />
                   </colgroup>
                   <TableHeader className="bg-muted/50 sticky top-0 z-20 backdrop-blur-xs">
                     <TableRow className="hover:bg-transparent border-b border-border">
-                      <TableHead className="h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground">
+                      <TableHead className="h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground whitespace-nowrap">
                         {level === "channel" ? "渠道" : "分组"}
                       </TableHead>
-                      <TableHead className="h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground">
-                        {timeRange === "24h" ? "24 小时状态（每格 1 小时）" : "7 天状态（每格 6 小时）"}
+                      <TableHead className="h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground whitespace-nowrap">
+                        {timeRange === "24h"
+                          ? "24 小时状态（每格 15 分钟）"
+                          : "7 天状态（每格 1 小时）"}
                       </TableHead>
-                      <TableHead className="h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-right">
+                      <TableHead className="h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-right whitespace-nowrap">
                         Uptime
                       </TableHead>
-                      <TableHead className="h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-right">
+                      <TableHead className="h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-right whitespace-nowrap">
                         请求
                       </TableHead>
-                      <TableHead className="h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-right">
+                      <TableHead className="h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-right whitespace-nowrap">
                         错误
                       </TableHead>
-                      <TableHead className="h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground">
+                      <TableHead className="h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground whitespace-nowrap">
                         Top 错误
                       </TableHead>
                     </TableRow>
@@ -303,8 +268,9 @@ export function HealthView({ timeRange, dateRange }: HealthViewProps) {
 
                   <TableBody>
                     {components.map((component) => {
-                      const cells = buildCells(component.buckets, groupSize)
                       const uptime = component.uptime
+                      const buckets = component.buckets ?? []
+                      const topErrorsList = component.top_errors ?? []
                       return (
                         <TableRow
                           key={component.key}
@@ -325,14 +291,69 @@ export function HealthView({ timeRange, dateRange }: HealthViewProps) {
                               role="img"
                               aria-label={`${component.name} 状态分布`}
                             >
-                              {cells.map((cell) => (
-                                <span
-                                  key={cell.key}
-                                  className="flex-1 h-5 min-w-[2px] rounded-[2px] transition-opacity hover:opacity-80"
-                                  style={{ backgroundColor: STATE_COLOR[cell.state] }}
-                                  title={`${cell.label} · 请求 ${formatNumber(cell.total)} · 错误 ${formatNumber(cell.errors)} · ${STATE_LABEL[cell.state]}`}
-                                />
-                              ))}
+                              {buckets.map((bucket, idx) => {
+                                const total = bucket.total ?? 0
+                                const errors = bucket.errors ?? 0
+                                const attempts = total + errors
+                                const successRate =
+                                  attempts > 0
+                                    ? ((total / attempts) * 100).toFixed(1)
+                                    : null
+                                const state: StatusState = bucket.state ?? "none"
+                                const topErrors = bucket.top_errors ?? []
+
+                                return (
+                                  <Tooltip key={bucket.t_ms ?? idx}>
+                                    <TooltipTrigger
+                                      render={
+                                        <span
+                                          className="flex-1 basis-0 min-w-[3px] h-5 rounded-[2px] transition-opacity hover:opacity-80 cursor-pointer"
+                                          style={{
+                                            backgroundColor: STATE_COLOR[state],
+                                          }}
+                                        />
+                                      }
+                                    />
+                                    <TooltipContent
+                                      side="top"
+                                      sideOffset={4}
+                                      className="flex flex-col gap-1 items-start text-left px-2.5 py-2 max-w-xs z-50 pointer-events-none"
+                                    >
+                                      <div className="font-semibold text-[12px] leading-tight">
+                                        {bucket.label}
+                                      </div>
+                                      <div className="text-[12px] opacity-85 leading-tight">
+                                        {attempts === 0
+                                          ? "无请求"
+                                          : `成功 ${total} · 失败 ${errors} · 成功率 ${successRate}%`}
+                                      </div>
+                                      <div className="text-[12px] leading-tight pt-0.5">
+                                        {topErrors.length === 0 ? (
+                                          <span className="opacity-75">
+                                            无错误码记录
+                                          </span>
+                                        ) : (
+                                          <div className="flex flex-col gap-0.5 font-mono">
+                                            {topErrors.map((err) => (
+                                              <div
+                                                key={err.status}
+                                                className="text-rose-400 dark:text-rose-600 font-medium"
+                                              >
+                                                HTTP {err.status} × {err.count}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                      {state === "unknown" && (
+                                        <div className="text-[11px] opacity-75 border-t border-current/20 pt-1 mt-0.5 leading-tight">
+                                          样本不足（&lt; 3 次请求），不判定健康度
+                                        </div>
+                                      )}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                )
+                              })}
                             </div>
                           </TableCell>
 
@@ -356,17 +377,19 @@ export function HealthView({ timeRange, dateRange }: HealthViewProps) {
                               "px-3 py-1 text-right font-mono tabular-nums text-[14px] leading-[20px]",
                               component.errors > 0 ? "" : "text-muted-foreground"
                             )}
-                            style={component.errors > 0 ? { color: "var(--chart-5)" } : undefined}
+                            style={
+                              component.errors > 0 ? { color: "var(--chart-5)" } : undefined
+                            }
                           >
                             {formatNumber(component.errors)}
                           </TableCell>
 
-                          <TableCell className="px-3 py-1">
-                            {component.top_errors.length === 0 ? (
+                          <TableCell className="px-3 py-1 whitespace-nowrap">
+                            {topErrorsList.length === 0 ? (
                               <span className="text-[12px] leading-[16px] text-muted-foreground">—</span>
                             ) : (
                               <div className="flex items-center gap-1 flex-wrap">
-                                {component.top_errors.map((item) => (
+                                {topErrorsList.map((item) => (
                                   <Badge
                                     key={item.status}
                                     variant={item.status >= 500 ? "destructive" : "outline"}
@@ -397,7 +420,7 @@ export function HealthView({ timeRange, dateRange }: HealthViewProps) {
                   </span>
                 ))}
                 <span className="ml-auto hidden sm:inline">
-                  uptime =（请求 − 错误）/ 请求；该小时无请求不参与状态判定
+                  uptime =（请求 − 错误）/ 请求；样本不足或无请求不参与状态判定
                 </span>
               </div>
             </>

@@ -155,6 +155,7 @@ export interface DashboardData {
   users: UsersPayload | null
   upstreams: UpstreamsPayload | null
   quality: QualityData | null
+  capital: CapitalPayload | null
   errors: string[]
 }
 
@@ -168,11 +169,22 @@ export class ApiError extends Error {
   }
 }
 
+export function getApiBaseUrl(): string {
+  if (typeof window !== "undefined") {
+    const port = window.location.port
+    if (port === "5173" || port === "5178") {
+      return "http://127.0.0.1:8788"
+    }
+    return window.location.origin
+  }
+  return "http://127.0.0.1:8788"
+}
+
 export async function fetchJson<T>(
   path: string,
   params?: Record<string, string | number>
 ): Promise<T> {
-  const url = new URL(path, window.location.origin)
+  const url = new URL(path, getApiBaseUrl())
   if (params) {
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined && value !== null) {
@@ -232,6 +244,7 @@ export function emptyDashboard(errors: string[]): DashboardData {
     users: null,
     upstreams: null,
     quality: null,
+    capital: null,
     errors,
   }
 }
@@ -265,6 +278,7 @@ export async function loadDashboard(rangeType: RangeType): Promise<DashboardData
     usersResult,
     upstreamsResult,
     qualityResult,
+    capitalResult,
   ] = await Promise.allSettled([
     fetchJson<Overview>("/api/overview", rangeParams),
     fetchJson<TrendData>("/api/trend", { ...rangeParams, granularity }),
@@ -274,6 +288,7 @@ export async function loadDashboard(rangeType: RangeType): Promise<DashboardData
     fetchJson<UsersPayload>("/api/users", rangeParams),
     fetchJson<UpstreamsPayload>("/api/upstreams", rangeParams),
     fetchJson<QualityData>("/api/quality"),
+    fetchJson<CapitalPayload>("/api/capital", rangeParams),
   ])
 
   const results = [
@@ -325,6 +340,7 @@ export async function loadDashboard(rangeType: RangeType): Promise<DashboardData
     users,
     upstreams: settledValue(upstreamsResult),
     quality: settledValue(qualityResult),
+    capital: settledValue(capitalResult),
     errors,
   }
 }
@@ -357,7 +373,10 @@ export interface CapitalAccount {
   credits_range: number | null
   daily_avg_7d: number | null
   runway_days: number | null
+  top_group?: string | null
   status: string
+  channels_live?: number
+  channels_total?: number
 }
 
 export interface CapitalTotal {
@@ -367,6 +386,9 @@ export interface CapitalTotal {
   daily_avg_7d: number | null
   runway_days: number | null
   accounts_counted?: number
+  avg?: number | null
+  runway?: number | null
+  credits?: number | null
 }
 
 export interface CapitalPayload {
@@ -412,7 +434,14 @@ export interface HealthzPayload {
 
 export type StatusLevel = "channel" | "group"
 
-export type StatusState = "ok" | "warn" | "fail" | "none"
+export type StatusBucketSize = "15m" | "1h"
+
+export type StatusState = "ok" | "warn" | "fail" | "unknown" | "none"
+
+export interface StatusTopError {
+  status: number
+  count: number
+}
 
 export interface StatusBucket {
   t_ms: number
@@ -420,11 +449,7 @@ export interface StatusBucket {
   total: number
   errors: number
   state: StatusState
-}
-
-export interface StatusTopError {
-  status: number
-  count: number
+  top_errors: StatusTopError[]
 }
 
 export interface StatusComponent {
@@ -441,6 +466,7 @@ export interface StatusPayload {
   from: number
   to: number
   level: StatusLevel
+  bucket?: StatusBucketSize
   components: StatusComponent[]
   overall: {
     requests: number
@@ -454,12 +480,14 @@ export interface StatusPayload {
 
 export async function fetchStatus(
   range: DateRange,
-  level: StatusLevel
+  level: StatusLevel,
+  bucket?: StatusBucketSize
 ): Promise<StatusPayload> {
   return fetchJson<StatusPayload>("/api/status", {
     from: range.from,
     to: range.to,
     level,
+    ...(bucket ? { bucket } : {}),
   })
 }
 

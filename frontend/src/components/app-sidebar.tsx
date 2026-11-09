@@ -17,7 +17,6 @@ import {
   BarChart3,
   Cpu,
   Radio,
-  Layers,
   Server,
   Wallet,
   ShieldCheck,
@@ -31,6 +30,7 @@ export type ViewKey =
   | "profit"
   | "rank"
   | "models"
+  | "details"
   | "channels_detail"
   | "groups_detail"
   | "upstreams"
@@ -63,8 +63,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { key: "rank", title: "排行", icon: BarChart3 },
       { key: "models", title: "模型经营", icon: Cpu },
-      { key: "channels_detail", title: "渠道明细", icon: Radio },
-      { key: "groups_detail", title: "分组明细", icon: Layers },
+      { key: "details", title: "经营明细", icon: Radio },
       { key: "upstreams", title: "上游账户", icon: Server },
     ],
   },

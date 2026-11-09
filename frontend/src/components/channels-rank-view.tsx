@@ -30,6 +30,9 @@ export interface ChannelRowData {
   upstream_account?: string | null
   margin_status?: string
   archive_only?: boolean
+  margin?: number | null
+  margin_pct?: number | null
+  status?: string
 }
 
 interface ChannelsRankViewProps {

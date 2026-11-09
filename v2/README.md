@@ -126,6 +126,7 @@ v2/
 | `GET /api/upstreams?from=&to=` | 账户级账本：期初期末余额、credits、consumption、毛利 |
 | `GET /api/quality` | 源库最后时间、行数、error_logs 行数、job_runs、collect_errors、schema_ok |
 | `GET /api/errors?from=&to=` | nginx 4xx/5xx 按北京整点分桶（含空桶）、状态码 Top 8、路径组 Top 6；区间上限 31 天 |
+| `GET /api/status?from=&to=&level=channel\|group&bucket=15m\|1h` | 渠道/分组健康：成功请求、错误、可用率与分桶状态；只统计启用渠道 |
 | `GET /api/rows?from=&to=&page=&page_size=` | 逐条明细，`t_ms DESC`；`page_size` 上限 200（超限收敛到 200） |
 | `GET /api/healthz` | `{ "ok": true }` |
 
@@ -139,6 +140,28 @@ v2/
 `reported_consumption` / `reported_spend_today` / `reported_spend_range`（上游自报消费，USD，
 未采集为 `null`）、`last_sync`（最新余额快照的毫秒时间戳）、`last_sync_balance`（该快照的余额与币种）、
 `last_job`（最近一次 `collect-spend` 的状态）。
+
+### 渠道启用状态过滤
+
+`channel_state`（看板库）是源库 `channels` 的整表镜像，`status=1` 为启用，
+由 `run-scheduler` 在每轮日志采集开始时刷新（源库删除的渠道下一轮同步后自然消失）。
+表不存在或为空（首次部署、首轮采集前）时，以下接口全部回退到改动前的行为，不做过滤：
+
+- `/api/channels`：只返回启用渠道，行内带 `channel_status: 1`。
+- `/api/capital`：账户行带 `channels_total` / `channels_live`（按配置 `channels` 去重计数）；
+  `channels_live === 0` 的账户不进 `accounts`，也不参与 `total` 汇总。
+- `/api/upstreams`：账户行带 `channels_total` / `channels_live`，不排除账户（前端自己标）。
+- `/api/status`：只保留启用渠道；`level=group` 时只保留区间内出现过启用渠道的分组。
+
+### `/api/status` 口径
+
+- `bucket=15m|1h`，缺省按区间跨度：≤ 36 小时用 `15m`，否则 `1h`。`15m` 桶宽 900000ms，
+  对齐北京整点的 0/15/30/45 分；`1h` 为整点桶。响应顶层带实际使用的 `bucket`。
+- 每桶字段 `{ t_ms, label, total, errors, state, top_errors }`：`total` 成功请求数，
+  `errors` 错误数，`top_errors` 按次数降序（并列按状态码升序）取前 5。
+- `state` 按尝试数 `total + errors` 判定：`0 → none`；`< 3 → unknown`（样本不足，前端显示中性）；
+  `errors = 0 → ok`；`errors / attempts < 2% → warn`；否则 `fail`。
+- 组件级 `uptime = requests / (requests + errors)`、`overall` 与 `coverage.errors_since` 口径不变。
 
 `/api/groups` 的 `groups[]` 每行字段：`group_name`（NULL / 空串统一为 `''`，前端显示「未分组」）、
 `channels`（去重渠道数）、`channel_names`（去重渠道名，最多 8 个）、`revenue`、`tokens`、`requests`、
@@ -315,6 +338,9 @@ node v2/jobs/run-scheduler.mjs --once
 - `scheduler.mjs`：只提供 `nextHourDelayMs(nowMs)`，即距「下一个整点 + 10 秒」的毫秒数
   （最小 1000ms，跨日跨月由时间戳自然处理）。`run-scheduler.mjs` 用它算余额采集的首轮延迟，
   常驻定时链在 `run-scheduler.mjs` 的 `createLoop` 里。
+- 每轮站点日志采集开始时，`run-scheduler.mjs` 会把源库 `channels` 整表同步进看板库
+  `channel_state`（`job_runs.detail.channels_synced` 记本轮写入数）；源库读不到时只打一行 warn，
+  不影响日志采集。首次部署时该表为空，接口按「不过滤」回退，跑完一轮日志采集后生效。
 - `newapi.mjs`：`/api/user/self` 的 `quota` 按 `quota_per_unit` 折算 USD；
   `/api/log/self?type=1`（充值）与 `type=4`（赠额）分页求和；`/api/log/self/stat` 取上报消费。
   200 + `success:false` 且 message 是鉴权失败（“无效的令牌”“未登录”等）时判 `auth_failed`，
@@ -603,7 +629,7 @@ curl -i http://127.0.0.1:8790/login        # 200 + 登录页
 
 ## 看板库
 
-`v2/db/dashboard.db` 表：`upstream_account`、`balance_snapshot`、`credit_event`、`credit_window`、
+`v2/db/dashboard.db` 表：`upstream_account`、`channel_state`、`balance_snapshot`、`credit_event`、`credit_window`、
 `upstream_spend_daily`、`job_runs`、`schema_meta`。
 写入前上游卡片显示 `unavailable`，`job_runs` 为空数组；`collect-spend` 跑过一轮后才有余额与入账数据。
 
@@ -620,6 +646,8 @@ curl -i http://127.0.0.1:8790/login        # 200 + 登录页
 - 余额快照与区间边界的偏差不得超过 `SNAPSHOT_BOUNDARY_TOLERANCE_MS`（5 分钟，允许略晚于边界：
   采集在整点 +10s 落库）。`/api/upstreams` 与 `/api/profit` 同一口径，超差即视为该边界没有快照，
   成本返回 null 而不是拿相邻时点顶替；只有「终点就在此刻」的区间，期末才退一步取最近一条（≤ 90 分钟）。
+- `channel_state` 由每轮日志采集整表替换（`DELETE` 后批量插入），只存 `channel_id / name / status / base_url`；
+  源库删除的渠道下一轮自然消失，不做逐行对齐。读取层以 `status=1` 判启用；表为空时退回「不过滤」。
 
 ## 验证
 

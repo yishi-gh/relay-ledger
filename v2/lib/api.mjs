@@ -12,6 +12,7 @@ import {
   readLatestSnapshot,
   readSpendSum,
 } from '../store/dashboard.mjs';
+import { readChannelStates, readLiveChannelIds } from '../store/channel-state.mjs';
 import { channelOwners } from './config.mjs';
 import {
   computeMargin,
@@ -192,6 +193,23 @@ function pickTopModels(rows) {
   return topByKey;
 }
 
+/**
+ * 账户配置的渠道在 channel_state 里的统计：配置总数与其中启用的数量。
+ * 只在 channel_state 有数据时调用；渠道 id 去重后计数。
+ */
+function channelCounts(account, states) {
+  const ids = new Set(
+    (Array.isArray(account.channels) ? account.channels : [])
+      .map(Number)
+      .filter((n) => Number.isFinite(n)),
+  );
+  let live = 0;
+  for (const id of ids) {
+    if (states.get(id)?.status === 1) live += 1;
+  }
+  return { channels_total: ids.size, channels_live: live };
+}
+
 function intParam(searchParams, name, fallback, { min = 1, max = null, clamp = false } = {}) {
   const raw = searchParams.get(name);
   if (raw === null || raw === '') return fallback;
@@ -215,29 +233,31 @@ function tableColumns(db, table) {
   }
 }
 
-const BUCKET_STEP_MS = { day: DAY_MS, hour: 3600000 };
-
-/** 北京时间小时桶起点；UTC+8 为整小时偏移，小时边界与 UTC 对齐 */
-function beijingHourStart(ms) {
-  return Math.floor(ms / BUCKET_STEP_MS.hour) * BUCKET_STEP_MS.hour;
-}
+const BUCKET_STEP_MS = { day: DAY_MS, hour: 3600000, '15m': 15 * 60 * 1000 };
 
 /**
- * 北京时间分桶（纯函数）：日桶用当日 00:00，小时桶用整点。
+ * 北京时间分桶（纯函数）：日桶用当日 00:00，小时桶用整点，15m 桶对齐 0/15/30/45 分。
+ * UTC+8 是 15 分钟的整数倍，直接按 UTC 毫秒取整即可对齐北京整刻。
  * 只生成与 [from, to] 有交集的桶，覆盖整个区间。
  */
 export function profitBuckets(from, to, granularity) {
   const step = BUCKET_STEP_MS[granularity];
-  if (!step) throw new RangeError('granularity 只能是 day 或 hour');
+  if (!step) throw new RangeError('granularity 只能是 day、hour 或 15m');
   if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return [];
-  const first = granularity === 'day' ? beijingDayStart(from) : beijingHourStart(from);
+  const first = granularity === 'day'
+    ? beijingDayStart(from)
+    : Math.floor(from / step) * step;
   const out = [];
   for (let t = first; t <= to; t += step) {
     // 区间正好结束在边界上时，不生成零宽的空桶（否则末列永远没有成本）
     if (t === to && t !== first) break;
     out.push({
       t_ms: t,
-      label: granularity === 'day' ? dayKey(t) : `${formatLocal(t).slice(0, 13)}:00`,
+      label: granularity === 'day'
+        ? dayKey(t)
+        : granularity === '15m'
+          ? formatLocal(t).slice(0, 16)
+          : `${formatLocal(t).slice(0, 13)}:00`,
     });
   }
   return out;
@@ -1112,6 +1132,8 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
 
   function channels(searchParams) {
     const range = resolveRange(searchParams);
+    // channel_state 为空（旧库/首轮采集前）时返回 null：不过滤，保持旧行为
+    const liveIds = readLiveChannelIds(dashboard);
     const agg = source.prepare(
       `SELECT channel_id,
               MAX(channel_name) AS channel_name,
@@ -1185,6 +1207,7 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
         last_t: r.last_t ?? null,
         top_model: topModelByChannel.get(key) ?? null,
         ...channelMeta(r.channel_id),
+        ...(liveIds ? { channel_status: 1 } : {}),
         archive_only: false,
       };
     });
@@ -1217,15 +1240,19 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
         last_t: null,
         top_model: null,
         ...channelMeta(r.channel_id),
+        ...(liveIds ? { channel_status: 1 } : {}),
         archive_only: true,
       });
     }
 
-    const ordered = [...byChannel.values()].sort(
-      (a, b) => (b.revenue - a.revenue)
-        || (b.requests - a.requests)
-        || ((a.channel_id ?? 0) - (b.channel_id ?? 0)),
-    );
+    // 已删除/停用（status !== 1）的渠道整行剔除；归档渠道同口径
+    const ordered = [...byChannel.values()]
+      .filter((row) => liveIds === null || liveIds.has(Number(row.channel_id)))
+      .sort(
+        (a, b) => (b.revenue - a.revenue)
+          || (b.requests - a.requests)
+          || ((a.channel_id ?? 0) - (b.channel_id ?? 0)),
+      );
 
     return {
       rows: ordered,
@@ -1494,9 +1521,19 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
   function capital(searchParams) {
     const range = resolveRange(searchParams);
     const now = Date.now();
-    const eligible = config.accounts.filter(
-      (a) => a.enabled !== false && a.kind !== 'external',
-    );
+    const channelStates = readChannelStates(dashboard);
+    const countsById = new Map();
+    const eligible = config.accounts
+      .filter((a) => a.enabled !== false && a.kind !== 'external')
+      .filter((a) => {
+        // 回退：channel_state 为空时与改动前一致，不筛账户
+        if (channelStates === null) return true;
+        const counts = channelCounts(a, channelStates);
+        // 配置里的渠道全部停用或已从源库删除：账户不进 accounts，也不进 total
+        if (counts.channels_live === 0) return false;
+        countsById.set(a.id, counts);
+        return true;
+      });
     const ledgerById = new Map(buildAccounts(range).map((a) => [a.id, a]));
 
     // 日均固定看最近 7 个北京自然日（含当天），与 /api/profit 同一账本函数按日桶算；
@@ -1520,6 +1557,25 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
       to: range.to,
       granularity: 'day',
     }).series.cost_by_site;
+
+    // 每个上游账户最主要的分组（按最近 7 天售出额），用于「最短续航」标注到组
+    const topGroupOf = (account) => {
+      if (!hasGroupName) return null;
+      const ids = Array.isArray(account.channels)
+        ? account.channels.map(Number).filter((n) => Number.isFinite(n))
+        : [];
+      if (!ids.length) return null;
+      const marks = ids.map(() => '?').join(',');
+      const row = source
+        .prepare(
+          `SELECT COALESCE(NULLIF(group_name, ''), '(未分组)') AS g, SUM(cost) AS rev
+             FROM logs
+            WHERE ${LOCAL_FILTER} AND t_ms BETWEEN ? AND ? AND channel_id IN (${marks})
+            GROUP BY g ORDER BY rev DESC LIMIT 1`,
+        )
+        .get(avgFrom, now, ...ids);
+      return row?.g ?? null;
+    };
 
     const rows = eligible.map((a) => {
       const ledger = ledgerById.get(a.id) ?? null;
@@ -1555,10 +1611,12 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
         account_id: a.id,
         name: a.name ?? a.id,
         balance,
+        ...(countsById.get(a.id) ?? {}),
         cost_range: costRange,
         credits_range: creditsRange,
         daily_avg_7d: dailyAvg,
         runway_days: runway,
+        top_group: topGroupOf(a),
         status: balance === null ? 'missing_balance' : costRange === null ? 'partial' : 'ok',
       };
     });
@@ -1592,8 +1650,16 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
 
   function upstreams(searchParams) {
     const range = resolveRange(searchParams);
+    const channelStates = readChannelStates(dashboard);
+    const accounts = buildAccounts(range);
+    // 不排除 0 live 的账户（前端自己标）；channel_state 为空时保持旧响应
+    if (channelStates !== null) {
+      for (const account of accounts) {
+        Object.assign(account, channelCounts(account, channelStates));
+      }
+    }
     return {
-      accounts: buildAccounts(range),
+      accounts,
       archive: archiveInfo(archiveTotals(range)),
     };
   }
@@ -1750,10 +1816,13 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
   /**
    * 渠道/分组健康：成功请求来自站点库 logs（LOCAL_FILTER），错误来自看板库 upstream_error。
    *
-   * 两边都按北京整点分桶：站点库在 SQL 里对 t_ms 取整，错误表同样是整点毫秒。
-   * 错误是独立的 type=5 事件，不在 logs 里，两者按「同一渠道/分组 + 同一小时」并列展示。
-   * uptime 分母用请求数：分母为 0 返回 null，不返回 1——没流量不等于全健康。
-   * state 只看该小时 error_rate：0 → ok，<0.02 → warn，≥0.02 → fail，无请求 → none。
+   * 两边按同一粒度分桶：bucket=15m（900000ms，对齐北京整点 0/15/30/45 分）或
+   * bucket=1h（整点）；缺省按区间跨度选：≤ 36 小时用 15m，否则 1h。
+   * 错误是独立的 type=5 事件，不在 logs 里，两者按「同渠道/分组 + 同桶」并列展示。
+   * uptime 分母用尝试数（成功 + 错误）：分母为 0 返回 null，不返回 1——没流量不等于全健康。
+   * state：0 次尝试 → none；< 3 次 → unknown（样本不足）；0 错误 → ok；
+   * 错误率 < 2% → warn；否则 fail。
+   * channel_state 有数据时只保留启用（status=1）的渠道；level=group 只保留含启用渠道的分组。
    */
   function status(searchParams) {
     const range = resolveRange(searchParams);
@@ -1764,14 +1833,54 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
     const isChannel = level === 'channel';
     const keySql = isChannel ? 'COALESCE(channel_id, 0)' : GROUP_KEY_SQL;
 
-    const buckets = profitBuckets(range.from, range.to, 'hour');
+    const requestedBucket = searchParams.get('bucket');
+    let bucket;
+    if (requestedBucket === null || requestedBucket === '') {
+      // 24 小时的 15m 序列是 96 个点，再长的区间退回整点桶
+      bucket = range.to - range.from <= 36 * 3600000 ? '15m' : '1h';
+    } else if (requestedBucket === '15m' || requestedBucket === '1h') {
+      bucket = requestedBucket;
+    } else {
+      throw new RangeError('bucket 只能是 15m 或 1h');
+    }
+    const bucketStep = bucket === '15m' ? 15 * 60 * 1000 : 3600000;
+    const bucketExpr = `(t_ms / ${bucketStep}) * ${bucketStep}`;
+    const buckets = profitBuckets(range.from, range.to, bucket === '15m' ? '15m' : 'hour');
     const bucketIndex = new Map(buckets.map((b, i) => [b.t_ms, i]));
+
+    // channel_state 为空（旧库/首轮采集前）返回 null：不过滤，保持旧行为
+    const liveIds = readLiveChannelIds(dashboard);
+    const liveGroupKeys = new Set();
+    if (liveIds !== null && !isChannel) {
+      // 分组没有独立状态：区间内出现过启用渠道即视为该分组存活
+      const groupMaps = source.prepare(
+        `SELECT DISTINCT COALESCE(channel_id, 0) AS channel_id, ${GROUP_KEY_SQL} AS key
+           FROM logs
+          WHERE ${LOCAL_FILTER} AND t_ms BETWEEN ? AND ?`,
+      ).all(range.from, range.to);
+      for (const row of groupMaps) {
+        if (liveIds.has(Number(row.channel_id))) liveGroupKeys.add(String(row.key));
+      }
+      if (upstreamErrorTableExists()) {
+        const errorMaps = dashboard.prepare(
+          `SELECT DISTINCT COALESCE(channel_id, 0) AS channel_id,
+                  COALESCE(group_name, '') AS key
+             FROM upstream_error
+            WHERE t_ms BETWEEN ? AND ?`,
+        ).all(range.from, range.to);
+        for (const row of errorMaps) {
+          if (liveIds.has(Number(row.channel_id))) liveGroupKeys.add(String(row.key));
+        }
+      }
+    }
+
     const emptyBuckets = () => buckets.map((b) => ({
       t_ms: b.t_ms,
       label: b.label,
       total: 0,
       errors: 0,
       state: 'none',
+      top_errors: [],
     }));
 
     const components = new Map();
@@ -1785,6 +1894,8 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
           requests: 0,
           errors: 0,
           buckets: emptyBuckets(),
+          // 每个桶的状态码计数，最终按次数降序取前 5
+          codes: buckets.map(() => new Map()),
           top: new Map(),
         };
         components.set(id, component);
@@ -1793,36 +1904,36 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
       return component;
     };
 
-    // 请求（成功消费）：站点库按「北京整点 × 渠道/分组」计数
+    // 请求（成功消费）：站点库按「桶起点 × 渠道/分组」计数
     const requestRows = source.prepare(
-      `SELECT (t_ms / 3600000) * 3600000 AS hour_ms,
+      `SELECT ${bucketExpr} AS bucket_ms,
               ${keySql} AS key,
               ${isChannel ? 'MAX(channel_name)' : 'NULL'} AS name,
               COUNT(*) AS requests
          FROM logs
         WHERE ${LOCAL_FILTER} AND t_ms BETWEEN ? AND ?
-        GROUP BY hour_ms, key`,
+        GROUP BY bucket_ms, key`,
     ).all(range.from, range.to);
 
     for (const row of requestRows) {
       const count = Number(row.requests ?? 0);
       const component = ensureComponent(row.key, isChannel ? row.name : null);
       component.requests += count;
-      const idx = bucketIndex.get(Number(row.hour_ms));
+      const idx = bucketIndex.get(Number(row.bucket_ms));
       if (idx !== undefined) component.buckets[idx].total += count;
     }
 
-    // 错误：看板库 upstream_error（源库 logs.type=5 的镜像），同样的整点与维度
+    // 错误：看板库 upstream_error（源库 logs.type=5 的镜像），同样的桶与维度
     const errorRows = upstreamErrorTableExists()
       ? dashboard.prepare(
-        `SELECT (t_ms / 3600000) * 3600000 AS hour_ms,
+        `SELECT ${bucketExpr} AS bucket_ms,
                 ${isChannel ? 'COALESCE(channel_id, 0)' : "COALESCE(group_name, '')"} AS key,
                 ${isChannel ? 'MAX(channel_name)' : 'NULL'} AS name,
                 status_code,
                 COUNT(*) AS errors
            FROM upstream_error
           WHERE t_ms BETWEEN ? AND ?
-          GROUP BY hour_ms, key, status_code`,
+          GROUP BY bucket_ms, key, status_code`,
       ).all(range.from, range.to)
       : [];
 
@@ -1831,8 +1942,15 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
       if (!(count > 0)) continue;
       const component = ensureComponent(row.key, isChannel ? row.name : null);
       component.errors += count;
-      const idx = bucketIndex.get(Number(row.hour_ms));
-      if (idx !== undefined) component.buckets[idx].errors += count;
+      const idx = bucketIndex.get(Number(row.bucket_ms));
+      if (idx !== undefined) {
+        component.buckets[idx].errors += count;
+        if (row.status_code != null) {
+          const code = Number(row.status_code);
+          const codes = component.codes[idx];
+          codes.set(code, (codes.get(code) ?? 0) + count);
+        }
+      }
       if (row.status_code != null) {
         const code = Number(row.status_code);
         component.top.set(code, (component.top.get(code) ?? 0) + count);
@@ -1844,20 +1962,30 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
     const stateOf = (successes, errors) => {
       const attempts = successes + errors;
       if (attempts <= 0) return 'none';
-      const rate = errors / attempts;
-      if (rate <= 0) return 'ok';
-      if (rate < 0.02) return 'warn';
+      // 样本太少时不给结论：1 次失败也判 fail 会让刚上线的渠道整屏飘红
+      if (attempts < 3) return 'unknown';
+      if (errors <= 0) return 'ok';
+      if (errors / attempts < 0.02) return 'warn';
       return 'fail';
     };
 
-    const list = [...components.values()].map((component) => {
-      for (const bucket of component.buckets) {
+    const topCodes = (map, limit) => [...map.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+      .slice(0, limit)
+      .map(([status, count]) => ({ status, count }));
+
+    let list = [...components.values()];
+    if (liveIds !== null) {
+      list = isChannel
+        ? list.filter((component) => liveIds.has(Number(component.key)))
+        : list.filter((component) => liveGroupKeys.has(component.key));
+    }
+
+    list = list.map((component) => {
+      component.buckets.forEach((bucket, idx) => {
         bucket.state = stateOf(bucket.total, bucket.errors);
-      }
-      const topErrors = [...component.top.entries()]
-        .sort((a, b) => b[1] - a[1] || a[0] - b[0])
-        .slice(0, 3)
-        .map(([status, count]) => ({ status, count }));
+        bucket.top_errors = topCodes(component.codes[idx], 5);
+      });
       return {
         key: component.key,
         name: component.name
@@ -1868,7 +1996,7 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
           ? round6(component.requests / (component.requests + component.errors))
           : null,
         buckets: component.buckets,
-        top_errors: topErrors,
+        top_errors: topCodes(component.top, 3),
       };
     });
 
@@ -1894,6 +2022,7 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
       from: range.from,
       to: range.to,
       level,
+      bucket,
       components: list,
       overall: {
         requests: totalRequests,

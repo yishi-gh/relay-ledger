@@ -144,7 +144,11 @@ test('status：北京整点分桶跨自然日，空桶 state=none', () => {
     ],
   });
   try {
-    const payload = fx.api.status(params({ from: BASE + 30 * MINUTE, to: BASE + HOUR + 30 * MINUTE }));
+    const payload = fx.api.status(params({
+      from: BASE + 30 * MINUTE,
+      to: BASE + HOUR + 30 * MINUTE,
+      bucket: '1h',
+    }));
     assert.equal(payload.level, 'channel');
     assert.equal(payload.components.length, 1);
 
@@ -157,8 +161,9 @@ test('status：北京整点分桶跨自然日，空桶 state=none', () => {
     assert.deepEqual(
       channel.buckets.map((b) => [b.t_ms, b.label, b.total, b.state]),
       [
-        [BASE, '2026-11-08 23:00', 1, 'ok'],
-        [BASE + HOUR, '2026-11-09 00:00', 1, 'ok'],
+        // 每桶只有 1 次成功：样本 < 3 判 unknown，不再直接给 ok
+        [BASE, '2026-11-08 23:00', 1, 'unknown'],
+        [BASE + HOUR, '2026-11-09 00:00', 1, 'unknown'],
       ],
     );
   } finally {
@@ -181,7 +186,7 @@ test('status：渠道聚合的 uptime、state 三档与 Top 错误码', () => {
   const fx = setup({ logs, errors });
   try {
     const payload = fx.api.status(
-      params({ from: BASE, to: BASE + 2 * HOUR + 30 * MINUTE, level: 'channel' }),
+      params({ from: BASE, to: BASE + 2 * HOUR + 30 * MINUTE, level: 'channel', bucket: '1h' }),
     );
     assert.equal(payload.level, 'channel');
     assert.equal(payload.components.length, 2);
@@ -236,7 +241,7 @@ test('status：分组聚合按 group_name，错误独有的分组保留且 uptim
   const fx = setup({ logs, errors });
   try {
     const payload = fx.api.status(
-      params({ from: BASE, to: BASE + HOUR - 1, level: 'group' }),
+      params({ from: BASE, to: BASE + HOUR - 1, level: 'group', bucket: '1h' }),
     );
     assert.equal(payload.level, 'group');
     // 错误多的分组排前面
@@ -258,8 +263,8 @@ test('status：分组聚合按 group_name，错误独有的分组保留且 uptim
     assert.equal(ghost.requests, 0);
     assert.equal(ghost.errors, 2);
     // 只有错误、没有成功：可用率就是 0，不能返回 null 掩盖
-    // 该小时只有错误：2 次尝试全失败，判 fail；'none' 只给真正没有尝试的桶
-    assert.equal(ghost.buckets[0].state, 'fail');
+    // 该小时只有 2 次尝试（2 错误），样本 < 3 判 unknown；'none' 只给真正没有尝试的桶
+    assert.equal(ghost.buckets[0].state, 'unknown');
 
     assert.deepEqual(payload.overall, {
       requests: 7,

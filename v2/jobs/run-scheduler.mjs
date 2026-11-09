@@ -19,11 +19,14 @@
  *   - 输出只含任务名、状态、耗时与脱敏后的错误信息；不含凭据、不含日志原文
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 
 import { loadConfig, resolveConfigFile } from '../lib/config.mjs';
 import { ensureDataDirs, INSTANCE } from '../lib/instance.mjs';
+import { replaceChannelStates } from '../store/channel-state.mjs';
 import { openDashboardDb, syncAccounts } from '../store/dashboard.mjs';
 import { openLogsDb } from '../store/site-logs.mjs';
 import { runCollectSpend } from './collect-spend.mjs';
@@ -463,6 +466,23 @@ async function withJobRun(job, run) {
   }
 }
 
+/**
+ * 把源库 channels 的启用状态整表同步进看板库 channel_state。
+ * 只读源库；文件不存在或没有 channels 表时抛错，由调用方降级为一行 warn。
+ * 返回写入的渠道数，供 job_runs.detail 记录。
+ */
+export function syncChannelStates(dashboardDb, relayDbFile = DEFAULT_DB_FILE) {
+  if (!fs.existsSync(relayDbFile)) throw new Error(`源库不存在：${relayDbFile}`);
+  const src = new DatabaseSync(relayDbFile, { readOnly: true });
+  try {
+    src.exec('PRAGMA busy_timeout = 3000');
+    const rows = src.prepare('SELECT id, name, status, base_url FROM channels').all();
+    return replaceChannelStates(dashboardDb, rows);
+  } finally {
+    src.close();
+  }
+}
+
 async function runLogsRound() {
   const startedAt = Date.now();
   let jobDb = null;
@@ -470,6 +490,13 @@ async function runLogsRound() {
   try {
     ensureDataDirs(INSTANCE);
     jobDb = openDashboardDb(INSTANCE.paths.dashboardFile);
+    // 渠道状态独立于日志采集：源库读不到时只打一行 warn，本轮照常采日志
+    let channelsSynced = null;
+    try {
+      channelsSynced = syncChannelStates(jobDb, DEFAULT_DB_FILE);
+    } catch (err) {
+      console.warn(`[run-scheduler] channel_state 同步失败：${redactMessage(err?.message ?? err)}`);
+    }
     // 直读源不需要 PAT：没有令牌文件时留空（与 CLI 一致），回退 HTTP 时再报「缺少管理员 PAT」
     let pat = null;
     try {
@@ -492,6 +519,7 @@ async function runLogsRound() {
         skipped: summary.skipped,
         since_ms: summary.sinceMs,
         until_ms: summary.untilMs,
+        ...(channelsSynced === null ? {} : { channels_synced: channelsSynced }),
       },
     });
     return summary;

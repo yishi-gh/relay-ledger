@@ -26,6 +26,9 @@ export interface GroupRowData {
     tokens: number
     per_1e8: number
   } | null
+  margin?: number | null
+  margin_pct?: number | null
+  status?: string
 }
 
 interface GroupsRankViewProps {

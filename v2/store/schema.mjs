@@ -28,6 +28,17 @@ export const DASHBOARD_SCHEMA = [
      updated_at INTEGER
    )`,
 
+  // 渠道启用状态：源库 channels 的整表镜像，日志采集每轮刷新一次。
+  // status=1 为启用；源库删除的渠道下一轮同步后自然消失，不做逐行对齐。
+  `CREATE TABLE IF NOT EXISTS channel_state (
+     channel_id INTEGER PRIMARY KEY,
+     name       TEXT,
+     status     INTEGER,
+     base_url   TEXT,
+     updated_at INTEGER NOT NULL
+   )`,
+  'CREATE INDEX IF NOT EXISTS idx_channel_state_status ON channel_state(status)',
+
   // 余额快照：同一账户同一时刻只保留一条。
   // balance 必须已按账户 unit 归一；原始值与原始单位另存 raw_*，读取层不再猜换算。
   `CREATE TABLE IF NOT EXISTS balance_snapshot (
