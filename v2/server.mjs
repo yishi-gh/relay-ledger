@@ -238,6 +238,7 @@ const API_ROUTES = {
   '/api/upstreams': (api, url) => api.upstreams(url.searchParams),
   '/api/quality': (api) => api.quality(),
   '/api/errors': (api, url) => api.errors(url.searchParams),
+  '/api/status': (api, url) => api.status(url.searchParams),
   '/api/rows': (api, url) => api.rows(url.searchParams),
   '/api/healthz': () => ({ ok: true }),
 };

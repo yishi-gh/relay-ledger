@@ -125,6 +125,23 @@ export const DASHBOARD_SCHEMA = [
      PRIMARY KEY (hour_ms, status, path_group)
    )`,
 
+  // 源库 logs 里 type=5（上游错误）的镜像：id 用源库 logs.id，天然幂等。
+  // content 里的 status_code 单独提出；原文只留截断后的 message，供面板展示。
+  `CREATE TABLE IF NOT EXISTS upstream_error (
+     id           INTEGER PRIMARY KEY,
+     t_ms         INTEGER NOT NULL,
+     channel_id   INTEGER,
+     channel_name TEXT,
+     model        TEXT,
+     group_name   TEXT,
+     status_code  INTEGER,
+     message      TEXT,
+     request_id   TEXT,
+     recorded_at  INTEGER
+   )`,
+  'CREATE INDEX IF NOT EXISTS idx_upstream_error_t ON upstream_error(t_ms)',
+  'CREATE INDEX IF NOT EXISTS idx_upstream_error_ch ON upstream_error(channel_id, t_ms)',
+
   // 结构元信息：只记一次，不覆盖已有值
   `CREATE TABLE IF NOT EXISTS schema_meta (
      key        TEXT PRIMARY KEY,

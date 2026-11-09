@@ -21,6 +21,7 @@ import {
   Server,
   Wallet,
   ShieldCheck,
+  HeartPulse,
   Settings,
   type LucideIcon,
 } from "lucide-react"
@@ -34,6 +35,7 @@ export type ViewKey =
   | "groups_detail"
   | "upstreams"
   | "capital"
+  | "health"
   | "quality"
   | "settings"
 
@@ -70,6 +72,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "运维",
     items: [
       { key: "capital", title: "资金与续航", icon: Wallet },
+      { key: "health", title: "渠道健康", icon: HeartPulse },
       { key: "quality", title: "数据质量", icon: ShieldCheck },
     ],
   },

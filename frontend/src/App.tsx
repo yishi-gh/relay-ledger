@@ -16,6 +16,7 @@ import { RankView } from "@/components/rank-view"
 import { ModelsView } from "@/components/models-view"
 import { UpstreamsView } from "@/components/upstreams-view"
 import { CapitalView } from "@/components/capital-view"
+import { HealthView } from "@/components/health-view"
 import { QualityView } from "@/components/quality-view"
 import { SettingsView } from "@/components/settings-view"
 import {
@@ -122,6 +123,7 @@ const VALID_VIEWS: ViewKey[] = [
   "groups_detail",
   "upstreams",
   "capital",
+  "health",
   "quality",
   "settings",
 ]
@@ -135,6 +137,7 @@ const VIEW_TITLES: Record<ViewKey, string> = {
   groups_detail: "分组明细",
   upstreams: "上游账户",
   capital: "资金与续航",
+  health: "渠道健康",
   quality: "数据质量",
   settings: "系统设置",
 }
@@ -530,6 +533,13 @@ export function App() {
                   />
                 )}
 
+                {currentView === "health" && (
+                  <HealthView
+                    timeRange={timeRange}
+                    dateRange={data?.range ?? null}
+                  />
+                )}
+
                 {currentView === "quality" && (
                   <QualityView
                     quality={data?.quality || {}}
@@ -555,6 +565,7 @@ export function App() {
                   currentView !== "groups_detail" &&
                   currentView !== "upstreams" &&
                   currentView !== "capital" &&
+                  currentView !== "health" &&
                   currentView !== "quality" &&
                   currentView !== "settings" && (
                     <PlaceholderView viewKey={currentView as PlaceholderKey} />

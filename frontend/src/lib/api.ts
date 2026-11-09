@@ -410,6 +410,59 @@ export interface HealthzPayload {
   ok: boolean
 }
 
+export type StatusLevel = "channel" | "group"
+
+export type StatusState = "ok" | "warn" | "fail" | "none"
+
+export interface StatusBucket {
+  t_ms: number
+  label: string
+  total: number
+  errors: number
+  state: StatusState
+}
+
+export interface StatusTopError {
+  status: number
+  count: number
+}
+
+export interface StatusComponent {
+  key: string
+  name: string
+  requests: number
+  errors: number
+  uptime: number | null
+  buckets: StatusBucket[]
+  top_errors: StatusTopError[]
+}
+
+export interface StatusPayload {
+  from: number
+  to: number
+  level: StatusLevel
+  components: StatusComponent[]
+  overall: {
+    requests: number
+    errors: number
+    uptime: number | null
+  }
+  coverage: {
+    errors_since: number | null
+  }
+}
+
+export async function fetchStatus(
+  range: DateRange,
+  level: StatusLevel
+): Promise<StatusPayload> {
+  return fetchJson<StatusPayload>("/api/status", {
+    from: range.from,
+    to: range.to,
+    level,
+  })
+}
+
 export async function fetchModels(range: DateRange): Promise<ModelsPayload> {
   return fetchJson<ModelsPayload>("/api/models", { from: range.from, to: range.to })
 }

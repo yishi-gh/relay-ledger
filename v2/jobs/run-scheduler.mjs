@@ -8,6 +8,7 @@
  *   node v2/jobs/run-scheduler.mjs --spend-interval-ms=1800000
  *   node v2/jobs/run-scheduler.mjs --no-prune      # 不跑每日日志清理
  *   node v2/jobs/run-scheduler.mjs --no-http-errors # 不聚合 nginx 错误码
+ *   node v2/jobs/run-scheduler.mjs --no-upstream-errors # 不同步上游错误日志（type=5）
  *
  * 定时链、防重入、退出处理都在本文件，timer 不 unref，进程靠定时器存活。
  * 首轮对齐的是「采集间隔网格 + 偏移」，不是下一个整点，重启不会造成长时间盲窗。
@@ -30,6 +31,7 @@ import {
   DEFAULT_LOG_FILE as HTTP_ERRORS_LOG_FILE,
   runCollectHttpErrors,
 } from './collect-http-errors.mjs';
+import { runCollectUpstreamErrors } from './collect-upstream-errors.mjs';
 import { DEFAULT_JOBS_DAYS, DEFAULT_RAW_DAYS, runPrune } from './prune-logs.mjs';
 import { DEFAULT_KEEP_DAYS, runRollup } from './rollup-logs.mjs';
 import {
@@ -52,6 +54,8 @@ export const TASK_PRUNE = 'prune';
 export const TASK_ROLLUP = 'rollup';
 /** nginx 访问日志错误码聚合任务。 */
 export const TASK_HTTP_ERRORS = 'http-errors';
+/** 源库上游错误日志（type=5）同步任务。 */
+export const TASK_UPSTREAM_ERRORS = 'upstream-errors';
 
 /** 余额采集间隔：默认取实例配置，15 分钟 */
 export const DEFAULT_SPEND_INTERVAL_MS = INSTANCE.collect.spendIntervalMs;
@@ -71,13 +75,16 @@ export const DEFAULT_ROLLUP_INTERVAL_MS = DEFAULT_PRUNE_INTERVAL_MS;
 /** nginx 错误码聚合：启动 5 分钟后首轮，之后每 15 分钟。 */
 export const HTTP_ERRORS_INITIAL_DELAY_MS = 5 * 60 * 1000;
 export const DEFAULT_HTTP_ERRORS_INTERVAL_MS = 15 * 60 * 1000;
+/** 上游错误日志同步：启动 7 分钟后首轮，之后每 15 分钟。 */
+export const UPSTREAM_ERRORS_INITIAL_DELAY_MS = 7 * 60 * 1000;
+export const DEFAULT_UPSTREAM_ERRORS_INTERVAL_MS = 15 * 60 * 1000;
 /** setTimeout 的毫秒上限（超过会被 Node 截断成 1ms） */
 const MAX_INTERVAL_MS = 2_147_483_647;
 
 export const USAGE = `用法：
   node v2/jobs/run-scheduler.mjs [--once] [--spend-interval-ms=<n>] [--logs-interval-ms=<n>] [--no-logs]
                                  [--prune-days-raw=<n>] [--prune-days-jobs=<n>] [--no-prune]
-                                 [--no-http-errors] [--help]
+                                 [--no-http-errors] [--no-upstream-errors] [--help]
 
   --once                     立即各跑一次（collect-spend、collect-site-logs）后退出，退出码 0/1
   --spend-interval-ms=<n>    余额采集间隔毫秒（默认 ${DEFAULT_SPEND_INTERVAL_MS}，取自实例配置）
@@ -87,12 +94,15 @@ export const USAGE = `用法：
   --prune-days-jobs=<n>      job_runs 保留天数（默认 ${DEFAULT_JOBS_DAYS}）
   --no-prune                 不跑每日日志清理
   --no-http-errors           不聚合 nginx 访问日志的 4xx/5xx
+  --no-upstream-errors       不同步源库的上游错误日志（logs.type=5）
   --help                     显示本说明
 
   常驻时：余额首轮对齐「下一个采集间隔槽位 + 10 秒」，站点日志对齐「下一个间隔槽位 + 45 秒」，
   之后按各自间隔循环；日志清理首轮在 ${PRUNE_INITIAL_DELAY_MS}ms 后（每天一次），nginx 错误码聚合
-  首轮在 ${HTTP_ERRORS_INITIAL_DELAY_MS}ms 后（之后每 ${DEFAULT_HTTP_ERRORS_INTERVAL_MS}ms）。--once 不跑清理与错误码聚合，
-  手动清理用 node v2/jobs/prune-logs.mjs，错误码聚合用 node v2/jobs/collect-http-errors.mjs。
+  首轮在 ${HTTP_ERRORS_INITIAL_DELAY_MS}ms 后，上游错误同步首轮在 ${UPSTREAM_ERRORS_INITIAL_DELAY_MS}ms 后
+  （两者之后每 ${DEFAULT_HTTP_ERRORS_INTERVAL_MS}ms）。--once 不跑清理、错误码聚合与上游错误同步，
+  手动清理用 node v2/jobs/prune-logs.mjs，错误码聚合用 node v2/jobs/collect-http-errors.mjs，
+  上游错误同步用 node v2/jobs/collect-upstream-errors.mjs。
   SIGINT / SIGTERM 会清掉定时器并正常退出。`;
 
 export class OptionsError extends Error {
@@ -215,6 +225,17 @@ export function splitHttpErrorsArgs(argv = []) {
     else rest.push(arg);
   }
   return { httpErrors, rest };
+}
+
+/** 摘出 `--no-upstream-errors`，同样不改变 resolveOptions 的返回形状。 */
+export function splitUpstreamErrorsArgs(argv = []) {
+  const upstreamErrors = { enabled: true };
+  const rest = [];
+  for (const arg of argv) {
+    if (arg === '--no-upstream-errors') upstreamErrors.enabled = false;
+    else rest.push(arg);
+  }
+  return { upstreamErrors, rest };
 }
 
 /** 错误信息脱敏 + 截断：凭据类字段一律替换，绝不透出原文 */
@@ -508,6 +529,15 @@ export function createDefaultTasks({
           log: () => {},
         }),
       ),
+    // 源库只读同步；自己会打一行汇总，常驻日志只保留 [run-scheduler] upstream-errors ok Xms
+    upstreamErrors: () =>
+      withJobRun(TASK_UPSTREAM_ERRORS, () =>
+        runCollectUpstreamErrors({
+          relayDbFile: INSTANCE.paths.relayDb,
+          dbFile: INSTANCE.paths.dashboardFile,
+          log: () => {},
+        }),
+      ),
     // 清理自己会打一行汇总；常驻日志只保留 [run-scheduler] prune ok Xms
     prune: () =>
       withJobRun(TASK_PRUNE, () =>
@@ -540,12 +570,15 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
   let options;
   let prune;
   let httpErrors;
+  let upstreamErrors;
   try {
     const split = splitPruneArgs(argv);
     prune = split.prune;
     const rest = splitHttpErrorsArgs(split.rest);
     httpErrors = rest.httpErrors;
-    options = resolveOptions(rest.rest);
+    const restUpstream = splitUpstreamErrorsArgs(rest.rest);
+    upstreamErrors = restUpstream.upstreamErrors;
+    options = resolveOptions(restUpstream.rest);
   } catch (err) {
     errorLog(`[run-scheduler] ${redactMessage(err?.message ?? err)}`);
     errorLog(USAGE);
@@ -660,6 +693,22 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
     }).start();
   }
 
+  let upstreamErrorsLoop = null;
+  if (upstreamErrors.enabled && typeof jobTasks.upstreamErrors === 'function') {
+    const upstreamErrorsRunner = createTaskRunner({
+      name: TASK_UPSTREAM_ERRORS,
+      run: jobTasks.upstreamErrors,
+      now,
+      log,
+      errorLog,
+    });
+    upstreamErrorsLoop = createLoop({
+      delayMs: UPSTREAM_ERRORS_INITIAL_DELAY_MS,
+      intervalMs: DEFAULT_UPSTREAM_ERRORS_INTERVAL_MS,
+      task: upstreamErrorsRunner,
+    }).start();
+  }
+
   log(
     `[run-scheduler] 常驻启动：${TASK_SPEND} 首轮 ${spendDelayMs}ms 后，之后每 ${options.spendIntervalMs}ms；` +
       (logsLoop
@@ -676,7 +725,11 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
       '；' +
       (httpErrorsLoop
         ? `${TASK_HTTP_ERRORS} 首轮 ${HTTP_ERRORS_INITIAL_DELAY_MS}ms 后，之后每 ${DEFAULT_HTTP_ERRORS_INTERVAL_MS}ms`
-        : `${TASK_HTTP_ERRORS} 已关闭`),
+        : `${TASK_HTTP_ERRORS} 已关闭`) +
+      '；' +
+      (upstreamErrorsLoop
+        ? `${TASK_UPSTREAM_ERRORS} 首轮 ${UPSTREAM_ERRORS_INITIAL_DELAY_MS}ms 后，之后每 ${DEFAULT_UPSTREAM_ERRORS_INTERVAL_MS}ms`
+        : `${TASK_UPSTREAM_ERRORS} 已关闭`),
   );
 
   let stopping = false;
@@ -688,6 +741,7 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
     pruneLoop?.stop();
     rollupLoop?.stop();
     httpErrorsLoop?.stop();
+    upstreamErrorsLoop?.stop();
     log(`[run-scheduler] 收到 ${signal}，定时器已清理，退出`);
     process.exitCode = 0;
     // 先让 stdout/stderr 刷出去；若还有在跑的请求，最多再等 1 秒强制退出

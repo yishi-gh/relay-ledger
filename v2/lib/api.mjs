@@ -1731,6 +1731,181 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
     };
   }
 
+  /** 看板库的 upstream_error 表可能还没建（旧库/首轮采集前）：缓存一次存在性，缺表按 0 错误处理 */
+  let upstreamErrorTableSeen = false;
+  function upstreamErrorTableExists() {
+    if (upstreamErrorTableSeen) return true;
+    try {
+      upstreamErrorTableSeen = Boolean(
+        dashboard
+          .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'upstream_error'")
+          .get(),
+      );
+    } catch {
+      upstreamErrorTableSeen = false;
+    }
+    return upstreamErrorTableSeen;
+  }
+
+  /**
+   * 渠道/分组健康：成功请求来自站点库 logs（LOCAL_FILTER），错误来自看板库 upstream_error。
+   *
+   * 两边都按北京整点分桶：站点库在 SQL 里对 t_ms 取整，错误表同样是整点毫秒。
+   * 错误是独立的 type=5 事件，不在 logs 里，两者按「同一渠道/分组 + 同一小时」并列展示。
+   * uptime 分母用请求数：分母为 0 返回 null，不返回 1——没流量不等于全健康。
+   * state 只看该小时 error_rate：0 → ok，<0.02 → warn，≥0.02 → fail，无请求 → none。
+   */
+  function status(searchParams) {
+    const range = resolveRange(searchParams);
+    const level = searchParams.get('level') ?? 'channel';
+    if (level !== 'channel' && level !== 'group') {
+      throw new RangeError('level 只能是 channel 或 group');
+    }
+    const isChannel = level === 'channel';
+    const keySql = isChannel ? 'COALESCE(channel_id, 0)' : GROUP_KEY_SQL;
+
+    const buckets = profitBuckets(range.from, range.to, 'hour');
+    const bucketIndex = new Map(buckets.map((b, i) => [b.t_ms, i]));
+    const emptyBuckets = () => buckets.map((b) => ({
+      t_ms: b.t_ms,
+      label: b.label,
+      total: 0,
+      errors: 0,
+      state: 'none',
+    }));
+
+    const components = new Map();
+    const ensureComponent = (key, name) => {
+      const id = String(key ?? '');
+      let component = components.get(id);
+      if (!component) {
+        component = {
+          key: id,
+          name: '',
+          requests: 0,
+          errors: 0,
+          buckets: emptyBuckets(),
+          top: new Map(),
+        };
+        components.set(id, component);
+      }
+      if (!component.name && name) component.name = String(name);
+      return component;
+    };
+
+    // 请求（成功消费）：站点库按「北京整点 × 渠道/分组」计数
+    const requestRows = source.prepare(
+      `SELECT (t_ms / 3600000) * 3600000 AS hour_ms,
+              ${keySql} AS key,
+              ${isChannel ? 'MAX(channel_name)' : 'NULL'} AS name,
+              COUNT(*) AS requests
+         FROM logs
+        WHERE ${LOCAL_FILTER} AND t_ms BETWEEN ? AND ?
+        GROUP BY hour_ms, key`,
+    ).all(range.from, range.to);
+
+    for (const row of requestRows) {
+      const count = Number(row.requests ?? 0);
+      const component = ensureComponent(row.key, isChannel ? row.name : null);
+      component.requests += count;
+      const idx = bucketIndex.get(Number(row.hour_ms));
+      if (idx !== undefined) component.buckets[idx].total += count;
+    }
+
+    // 错误：看板库 upstream_error（源库 logs.type=5 的镜像），同样的整点与维度
+    const errorRows = upstreamErrorTableExists()
+      ? dashboard.prepare(
+        `SELECT (t_ms / 3600000) * 3600000 AS hour_ms,
+                ${isChannel ? 'COALESCE(channel_id, 0)' : "COALESCE(group_name, '')"} AS key,
+                ${isChannel ? 'MAX(channel_name)' : 'NULL'} AS name,
+                status_code,
+                COUNT(*) AS errors
+           FROM upstream_error
+          WHERE t_ms BETWEEN ? AND ?
+          GROUP BY hour_ms, key, status_code`,
+      ).all(range.from, range.to)
+      : [];
+
+    for (const row of errorRows) {
+      const count = Number(row.errors ?? 0);
+      if (!(count > 0)) continue;
+      const component = ensureComponent(row.key, isChannel ? row.name : null);
+      component.errors += count;
+      const idx = bucketIndex.get(Number(row.hour_ms));
+      if (idx !== undefined) component.buckets[idx].errors += count;
+      if (row.status_code != null) {
+        const code = Number(row.status_code);
+        component.top.set(code, (component.top.get(code) ?? 0) + count);
+      }
+    }
+
+    // 一次「尝试」= 一条成功消费日志 + 一条错误日志，两者互不包含。
+    // 只用成功数当分母时，某一小时失败多于成功会把成功率算成负数。
+    const stateOf = (successes, errors) => {
+      const attempts = successes + errors;
+      if (attempts <= 0) return 'none';
+      const rate = errors / attempts;
+      if (rate <= 0) return 'ok';
+      if (rate < 0.02) return 'warn';
+      return 'fail';
+    };
+
+    const list = [...components.values()].map((component) => {
+      for (const bucket of component.buckets) {
+        bucket.state = stateOf(bucket.total, bucket.errors);
+      }
+      const topErrors = [...component.top.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+        .slice(0, 3)
+        .map(([status, count]) => ({ status, count }));
+      return {
+        key: component.key,
+        name: component.name
+          || (isChannel ? `渠道 #${component.key}` : component.key || '未分组'),
+        requests: component.requests,
+        errors: component.errors,
+        uptime: component.requests + component.errors > 0
+          ? round6(component.requests / (component.requests + component.errors))
+          : null,
+        buckets: component.buckets,
+        top_errors: topErrors,
+      };
+    });
+
+    // 有错误的排前面，同错误数按流量降序，最后按名称稳定排序
+    list.sort(
+      (a, b) => (b.errors - a.errors)
+        || (b.requests - a.requests)
+        || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+    );
+
+    let totalRequests = 0;
+    let totalErrors = 0;
+    for (const component of list) {
+      totalRequests += component.requests;
+      totalErrors += component.errors;
+    }
+
+    const since = upstreamErrorTableExists()
+      ? dashboard.prepare('SELECT MIN(t_ms) AS min_t FROM upstream_error').get()?.min_t ?? null
+      : null;
+
+    return {
+      from: range.from,
+      to: range.to,
+      level,
+      components: list,
+      overall: {
+        requests: totalRequests,
+        errors: totalErrors,
+        uptime: totalRequests + totalErrors > 0
+          ? round6(totalRequests / (totalRequests + totalErrors))
+          : null,
+      },
+      coverage: { errors_since: typeof since === 'number' ? since : null },
+    };
+  }
+
   function rows(searchParams) {
     const range = resolveRange(searchParams);
     const page = intParam(searchParams, 'page', 1, { min: 1 });
@@ -1761,5 +1936,5 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
     };
   }
 
-  return { meta, overview, trend, profit, channels, groups, users, models, capital, upstreams, quality, errors, rows };
+  return { meta, overview, trend, profit, channels, groups, users, models, capital, upstreams, quality, errors, status, rows };
 }
