@@ -718,7 +718,9 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
         `SELECT day AS bucket,
                 COALESCE(SUM(cost), 0) AS revenue,
                 COALESCE(SUM(quota_raw), 0) AS quota,
-                COALESCE(SUM(requests), 0) AS requests
+                COALESCE(SUM(requests), 0) AS requests,
+                COALESCE(SUM(input_total), 0) AS input_total,
+                COALESCE(SUM(output), 0) AS output
            FROM logs_daily
           WHERE site = ? AND day >= ? AND day <= ?
           GROUP BY day
@@ -1045,7 +1047,11 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
       `SELECT ${TREND_BUCKET_SQL[granularity]} AS bucket,
               COALESCE(SUM(cost), 0) AS revenue,
               COALESCE(SUM(quota_raw), 0) AS quota,
-              COUNT(*) AS requests
+              COUNT(*) AS requests,
+              COALESCE(SUM(input_total), 0) AS input_total,
+              COALESCE(SUM(output), 0) AS output,
+              COALESCE(SUM(cache_read), 0) AS cache_read,
+              COALESCE(SUM(input_uncached), 0) AS input_uncached
          FROM logs
         WHERE ${LOCAL_FILTER} AND t_ms BETWEEN ? AND ?
         GROUP BY bucket
@@ -1055,28 +1061,40 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
     // 归档只有日粒度：day 桶直接并入 logs_daily 的日汇总，hour 桶保持只覆盖明细窗口
     const archive = granularity === 'day' ? archiveByDay(range) : null;
     const byBucket = new Map(
-      rows.map((r) => [
-        r.bucket,
-        {
-          bucket: r.bucket,
-          revenue: round6(r.revenue ?? 0),
-          quota: r.quota ?? 0,
-          requests: r.requests ?? 0,
-        },
-      ]),
+      rows.map((r) => {
+        const cacheRead = r.cache_read ?? 0;
+        const cacheDenominator = cacheRead + (r.input_uncached ?? 0);
+        return [
+          r.bucket,
+          {
+            bucket: r.bucket,
+            revenue: round6(r.revenue ?? 0),
+            quota: r.quota ?? 0,
+            requests: r.requests ?? 0,
+            tokens: (r.input_total ?? 0) + (r.output ?? 0),
+            cache_rate: cacheDenominator > 0 ? round6(cacheRead / cacheDenominator) : null,
+          },
+        ];
+      }),
     );
     for (const r of archive?.rows ?? []) {
       const hit = byBucket.get(r.bucket);
+      const tokens = (r.input_total ?? 0) + (r.output ?? 0);
       if (hit) {
         hit.revenue = round6(hit.revenue + (r.revenue ?? 0));
         hit.quota += r.quota ?? 0;
         hit.requests += r.requests ?? 0;
+        hit.tokens += tokens;
+        // 归档没有 cache 字段：同桶只要混入归档，就不能把明细的不完整率当全量
+        hit.cache_rate = null;
       } else {
         byBucket.set(r.bucket, {
           bucket: r.bucket,
           revenue: round6(r.revenue ?? 0),
           quota: r.quota ?? 0,
           requests: r.requests ?? 0,
+          tokens,
+          cache_rate: null,
         });
       }
     }
@@ -1085,7 +1103,7 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
     return {
       granularity,
       points,
-      archive: archiveInfo(archive),
+      archive: archiveInfo(archive, ['cache_rate']),
     };
   }
 

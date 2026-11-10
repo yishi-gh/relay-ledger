@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AppSidebar, type ViewKey } from "@/components/app-sidebar"
 import { TopBar } from "@/components/top-bar"
-import { OverviewView, type KpiData } from "@/components/overview-view"
+import { OverviewView, type KpiData, type TrafficChartPoint } from "@/components/overview-view"
 import { ProfitView } from "@/components/profit-view"
 import { DetailsView } from "@/components/details-view"
 import { RankView } from "@/components/rank-view"
@@ -145,6 +145,25 @@ const VIEW_TITLES: Record<ViewKey, string> = {
 
 const REFRESH_INTERVAL_MS = 15 * 60 * 1000
 const REFRESH_OFFSET_MS = 12 * 1000
+const HOUR_MS = 3600000
+const DAY_MS = 86400000
+const BEIJING_OFFSET_MS = 8 * HOUR_MS
+
+/** 北京时间日界（与后端 beijingDayStart 一致） */
+function beijingDayStart(ms: number): number {
+  return Math.floor((ms + BEIJING_OFFSET_MS) / DAY_MS) * DAY_MS - BEIJING_OFFSET_MS
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0")
+}
+
+/** 与 /api/trend 的 bucket 字符串一致：hour=YYYY-MM-DD HH:00，day=YYYY-MM-DD */
+function beijingTrendBucket(ms: number, granularity: "hour" | "day"): string {
+  const d = new Date(ms + BEIJING_OFFSET_MS)
+  const date = `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`
+  return granularity === "hour" ? `${date} ${pad2(d.getUTCHours())}:00` : date
+}
 
 /** 下一次对齐到每 15 分钟的 :12/:27/:42/:57 的等待毫秒数 */
 function nextRefreshDelay(now: number): number {
@@ -484,7 +503,6 @@ export function App() {
       const pointData: Record<string, string | number> = {
         label,
         fullLabel: bucket.label,
-        requests: currentTrend?.points[index]?.requests ?? 0,
       }
 
       // 堆叠各站点的售出金额
@@ -498,7 +516,49 @@ export function App() {
 
       return pointData
     })
-  }, [currentProfit, currentTrend, timeRange])
+  }, [currentProfit, timeRange])
+
+  // 调用流量：独立于 profit，按实际查询范围生成稠密北京桶；缺桶是真实零请求
+  const trafficChartData = React.useMemo<TrafficChartPoint[]>(() => {
+    if (!currentTrend) return []
+
+    const granularity: "hour" | "day" = timeRange === "24h" ? "hour" : "day"
+    const labelOf = (bucket: string) =>
+      granularity === "hour" ? bucket.split(" ")[1] ?? bucket : bucket.slice(5)
+    const pointOf = (bucket: string, point?: (typeof currentTrend.points)[number]): TrafficChartPoint => {
+      if (!point) {
+        return { label: labelOf(bucket), fullLabel: bucket, requests: 0, tokens: 0, cacheRate: null }
+      }
+      return {
+        label: labelOf(bucket),
+        fullLabel: bucket,
+        requests: typeof point.requests === "number" ? point.requests : null,
+        tokens: typeof point.tokens === "number" ? point.tokens : null,
+        cacheRate: typeof point.cache_rate === "number" ? point.cache_rate : null,
+      }
+    }
+
+    const range = data?.range
+    if (!range) {
+      // 没有 range 时至少保留接口返回的真实桶，不补零
+      return currentTrend.points.map((point) => pointOf(point.bucket, point))
+    }
+
+    const byBucket = new Map(currentTrend.points.map((point) => [point.bucket, point]))
+    const buckets: string[] = []
+    if (granularity === "hour") {
+      const start = Math.floor(range.from / HOUR_MS) * HOUR_MS
+      for (let t = start; t <= range.to; t += HOUR_MS) {
+        buckets.push(beijingTrendBucket(t, "hour"))
+      }
+    } else {
+      const start = beijingDayStart(range.from)
+      for (let t = start; t <= range.to; t += DAY_MS) {
+        buckets.push(beijingTrendBucket(t, "day"))
+      }
+    }
+    return buckets.map((bucket) => pointOf(bucket, byBucket.get(bucket)))
+  }, [currentTrend, data?.range, timeRange])
 
   // 3. 上游账户盈利图表数据（成本柱 + 利润实线 + 毛利率虚线）
   const profitChartData = profitAgg?.rows ?? []
@@ -579,6 +639,7 @@ export function App() {
                     kpiData={kpiData}
                     activeSites={activeSites}
                     trendChartData={trendChartData}
+                    trafficChartData={trafficChartData}
                     getSiteColor={getSiteColor}
                     capital={data?.capital ?? null}
                     accounts={currentUpstreams?.accounts || []}

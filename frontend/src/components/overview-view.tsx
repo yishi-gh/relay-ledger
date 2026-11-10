@@ -11,6 +11,7 @@ import {
   Bar,
   CartesianGrid,
   ComposedChart,
+  Line,
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
   XAxis,
@@ -29,6 +30,7 @@ import {
   formatPercent,
   formatTokens,
 } from "@/lib/formatters"
+import { formatTokenCn } from "@/components/table-utils"
 
 export interface KpiData {
   revenue: number | null
@@ -50,11 +52,22 @@ export interface ActiveSite {
   revenue?: number | null
 }
 
+export type TrendChartItem = Record<string, string | number | null | undefined>
+
+export type TrafficChartPoint = {
+  label: string
+  fullLabel: string
+  requests: number | null
+  tokens: number | null
+  cacheRate: number | null
+}
+
 interface OverviewViewProps {
   timeRange: "24h" | "7d"
   kpiData: KpiData
   activeSites: ActiveSite[]
-  trendChartData: Record<string, string | number>[]
+  trendChartData: TrendChartItem[]
+  trafficChartData: TrafficChartPoint[]
   getSiteColor: (accountId: string) => string
   capital?: import("@/lib/api").CapitalPayload | null
   accounts?: { name?: string; last_sync?: number | null }[]
@@ -65,6 +78,7 @@ export function OverviewView({
   kpiData,
   activeSites,
   trendChartData,
+  trafficChartData,
   getSiteColor,
   capital,
   accounts,
@@ -375,7 +389,7 @@ export function OverviewView({
               调用流量
             </CardTitle>
             <CardDescription className="text-[12px] leading-[16px] text-muted-foreground mt-0.5">
-              请求量
+              请求量 (左轴) · Token / 缓存率 (右轴)
             </CardDescription>
           </CardHeader>
 
@@ -383,8 +397,8 @@ export function OverviewView({
             <div className="h-[220px] lg:h-auto lg:flex-1 lg:min-h-[250px] w-full min-w-0">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart
-                  data={trendChartData}
-                  margin={{ top: 10, right: 10, left: 4, bottom: 0 }}
+                  data={trafficChartData}
+                  margin={{ top: 10, right: 6, left: -10, bottom: 0 }}
                 >
                   <CartesianGrid
                     strokeDasharray="3 3"
@@ -398,63 +412,176 @@ export function OverviewView({
                     axisLine={{ stroke: "var(--border)" }}
                     tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
                   />
+                  {/* 左轴：请求量 */}
                   <YAxis
+                    yAxisId="requests"
+                    orientation="left"
                     tickLine={false}
                     axisLine={false}
-                    width={40}
-                    tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
+                    width={36}
+                    tick={{ fill: "var(--chart-1)", fontSize: 12 }}
                     tickFormatter={(val) =>
                       val >= 1000
                         ? `${(val / 1000).toFixed(1).replace(/\.0$/, "")}k`
                         : String(val)
                     }
                   />
+                  {/* 右轴 1：Token 消耗量 */}
+                  <YAxis
+                    yAxisId="tokens"
+                    orientation="right"
+                    tickLine={false}
+                    axisLine={false}
+                    width={38}
+                    tick={{ fill: "var(--chart-2)", fontSize: 12 }}
+                    tickFormatter={(val) =>
+                      val >= 1e6
+                        ? `${(val / 1e6).toFixed(1).replace(/\.0$/, "")}M`
+                        : val >= 1e3
+                        ? `${(val / 1e3).toFixed(0)}k`
+                        : String(val)
+                    }
+                  />
+                  {/* 右轴 2：缓存命中率 (0–100%) */}
+                  <YAxis
+                    yAxisId="cacheRate"
+                    orientation="right"
+                    domain={[0, 1]}
+                    ticks={[0, 0.5, 1]}
+                    tickLine={false}
+                    axisLine={false}
+                    width={34}
+                    tick={{ fill: "var(--chart-3)", fontSize: 12 }}
+                    tickFormatter={(val) => `${Math.round(val * 100)}%`}
+                  />
                   <RechartsTooltip
                     content={({ active, payload }) => {
                       if (!active || !payload || !payload.length) return null
-                      const point = payload[0].payload
+                      const point = payload[0].payload as Record<string, unknown>
+                      const reqs = typeof point.requests === "number" ? point.requests : null
+                      const tokens = typeof point.tokens === "number" ? point.tokens : null
+                      const cache = typeof point.cacheRate === "number" ? point.cacheRate : null
+
                       return (
-                        <div className="rounded-lg border border-border bg-card p-2.5 text-[12px] leading-[16px] shadow-md space-y-1 min-w-[160px]">
+                        <div className="rounded-lg border border-border bg-card p-2.5 text-[12px] leading-[16px] shadow-md space-y-1.5 min-w-[190px]">
                           <div className="font-medium text-foreground border-b border-border pb-1">
-                            {point.fullLabel}
+                            {typeof point.fullLabel === "string" ? point.fullLabel : typeof point.label === "string" ? point.label : ""}
                           </div>
-                          <div className="flex items-center justify-between gap-3 text-muted-foreground pt-0.5 text-[12px]">
-                            <span>请求量:</span>
-                            <span className="font-mono tabular-nums text-foreground font-semibold text-[14px]">
-                              {formatNumber(point.requests)}
-                            </span>
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between gap-3 text-muted-foreground">
+                              <span className="inline-flex items-center gap-1.5">
+                                <span className="size-2 rounded-xs bg-[var(--chart-1)] shrink-0" />
+                                <span>请求量:</span>
+                              </span>
+                              <span className="font-mono tabular-nums text-foreground font-semibold">
+                                {reqs != null ? `${formatNumber(reqs)} 次` : "—"}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3 text-muted-foreground">
+                              <span className="inline-flex items-center gap-1.5">
+                                <span className="size-2 rounded-xs bg-[var(--chart-2)] shrink-0" />
+                                <span>Token:</span>
+                              </span>
+                              <span
+                                className="font-mono tabular-nums text-foreground font-semibold"
+                                title={tokens != null ? `${formatNumber(tokens)} Tokens` : undefined}
+                              >
+                                {tokens != null ? formatTokenCn(tokens) : "—"}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3 text-muted-foreground">
+                              <span className="inline-flex items-center gap-1.5">
+                                <span className="w-2 border-t-2 border-dashed border-[var(--chart-3)] shrink-0" />
+                                <span>缓存率:</span>
+                              </span>
+                              <span className="font-mono tabular-nums text-foreground font-semibold">
+                                {cache != null ? formatPercent(cache) : "—"}
+                              </span>
+                            </div>
                           </div>
                         </div>
                       )
                     }}
                   />
+                  {/* 请求量面积 */}
                   <Area
+                    yAxisId="requests"
                     type="monotone"
                     dataKey="requests"
                     name="请求量"
                     stroke="var(--chart-1)"
                     strokeWidth={2}
                     fill="var(--chart-1)"
-                    fillOpacity={0.15}
-                    dot={{ r: 2.5, fill: "var(--chart-1)" }}
+                    fillOpacity={0.12}
+                    dot={{ r: 2, fill: "var(--chart-1)" }}
                     activeDot={{ r: 4 }}
                     isAnimationActive={false}
+                    connectNulls={false}
+                  />
+                  {/* Token 消耗折线 */}
+                  <Line
+                    yAxisId="tokens"
+                    type="monotone"
+                    dataKey="tokens"
+                    name="Token 消耗"
+                    stroke="var(--chart-2)"
+                    strokeWidth={2}
+                    dot={{ r: 2, fill: "var(--chart-2)" }}
+                    activeDot={{ r: 4 }}
+                    isAnimationActive={false}
+                    connectNulls={false}
+                  />
+                  {/* 缓存命中率折线 (虚线区分) */}
+                  <Line
+                    yAxisId="cacheRate"
+                    type="monotone"
+                    dataKey="cacheRate"
+                    name="缓存命中率"
+                    stroke="var(--chart-3)"
+                    strokeWidth={2}
+                    strokeDasharray="3 3"
+                    dot={{ r: 2, fill: "var(--chart-3)" }}
+                    activeDot={{ r: 4 }}
+                    isAnimationActive={false}
+                    connectNulls={false}
                   />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
           </CardContent>
 
-          {/* 卡底指标说明 */}
+          {/* 卡底指标说明与窗口汇总 */}
           <div className="pt-2 border-t border-border/60 shrink-0 mt-auto">
-            <div className="flex items-center justify-between text-[12px] leading-[16px] text-muted-foreground flex-wrap gap-1">
-              <span className="flex items-center gap-2">
+            <div className="flex items-center justify-between text-[12px] leading-[16px] text-muted-foreground flex-wrap gap-x-4 gap-y-1.5">
+              <div className="flex items-center gap-1.5">
                 <span className="size-2.5 rounded-xs bg-[var(--chart-1)] shrink-0" />
-                <span>请求总量汇总</span>
-              </span>
-              <span className="font-mono tabular-nums font-semibold text-foreground text-[14px]">
-                {formatNumber(kpiData.requests)}
-              </span>
+                <span>请求量:</span>
+                <span className="font-mono tabular-nums font-semibold text-foreground text-[13px]">
+                  {formatNumber(kpiData.requests)}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-0.5 bg-[var(--chart-2)] rounded-full shrink-0" />
+                <span>Token:</span>
+                <span
+                  className="font-mono tabular-nums font-semibold text-foreground text-[13px]"
+                  title={kpiData.tokens != null ? `${formatNumber(kpiData.tokens)} Tokens` : undefined}
+                >
+                  {formatTokens(kpiData.tokens)}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-0.5 border-t-2 border-dashed border-[var(--chart-3)] shrink-0" />
+                <span className="inline-flex items-center gap-1">
+                  <span>缓存率:</span>
+                  {kpiData.isCache7d && (
+                    <span className="text-[12px] text-muted-foreground" title="24 小时窗口暂无独立缓存统计，当前引用近 7 天整体缓存率">(7d)</span>
+                  )}
+                </span>
+                <span className="font-mono tabular-nums font-semibold text-foreground text-[13px]">
+                  {formatPercent(kpiData.cacheRate)}
+                </span>
+              </div>
             </div>
           </div>
         </Card>

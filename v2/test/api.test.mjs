@@ -346,18 +346,21 @@ test('归档：overview/trend/channels/profit 跨边界仍正确，hour 粒度�
   await t.test('trend(day)：归档日直接给日汇总，hour 粒度只覆盖明细', () => {
     const day = api.trend(params({ from: oldDay, to: detailDay + 12 * 3600000, granularity: 'day' }));
     assert.deepEqual(day.points, [
-      { bucket: dayKey(oldDay), revenue: 11, quota: 1100, requests: 4 },
-      { bucket: dayKey(midDay), revenue: 5, quota: 500, requests: 1 },
-      { bucket: dayKey(detailDay), revenue: 13, quota: 1300, requests: 2 },
+      { bucket: dayKey(oldDay), revenue: 11, quota: 1100, requests: 4, tokens: 1310, cache_rate: null },
+      { bucket: dayKey(midDay), revenue: 5, quota: 500, requests: 1, tokens: 650, cache_rate: null },
+      { bucket: dayKey(detailDay), revenue: 13, quota: 1300, requests: 2, tokens: 1690, cache_rate: null },
     ]);
     assert.equal(day.archive.available, true);
     assert.equal(day.archive.days, 2);
+    assert.deepEqual(day.archive.partial_fields, ['cache_rate']);
 
     const hour = api.trend(params({ from: oldDay, to: detailDay + 12 * 3600000, granularity: 'hour' }));
     assert.equal(hour.points.length, 2, '小时粒度没有归档，只剩明细那天');
     assert.equal(hour.archive.available, false);
     assert.deepEqual(hour.archive.from_day, null);
     assert.deepEqual(hour.points.map((p) => p.revenue), [6, 7]);
+    assert.deepEqual(hour.points.map((p) => p.tokens), [780, 910]);
+    assert.deepEqual(hour.points.map((p) => p.cache_rate), [null, null]);
   });
 
   await t.test('channels：归档并入同渠道，只有归档的渠道标 archive_only', () => {

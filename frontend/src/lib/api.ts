@@ -64,6 +64,8 @@ export interface TrendPoint {
   revenue: number
   quota: number
   requests: number
+  tokens: number
+  cache_rate: number | null
 }
 
 export interface TrendData {

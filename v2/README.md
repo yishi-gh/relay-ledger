@@ -130,6 +130,12 @@ v2/
 | `GET /api/rows?from=&to=&page=&page_size=` | 逐条明细，`t_ms DESC`；`page_size` 上限 200（超限收敛到 200） |
 | `GET /api/healthz` | `{ "ok": true }` |
 
+`/api/trend` 每点新增 `tokens:number`（`input_total + output`）与 `cache_rate:number|null`
+（`cache_read / (cache_read + input_uncached)`，分母 0 为 null，按桶加权，不按请求数平均）。
+day 粒度并入归档时，tokens 含 `logs_daily.input_total/output`；归档没有缓存字段，
+归档桶及明细/归档混桶的 `cache_rate` 为 null，`archive.partial_fields` 标 `cache_rate`；
+hour 粒度只覆盖明细，不并入归档。
+
 时间参数为毫秒时间戳；缺省走默认范围，`from > to` 或非法分页返回 `400`。
 错误统一为 `{ "error": { "code": "...", "message": "..." } }`。
 
