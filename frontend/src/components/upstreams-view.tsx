@@ -120,9 +120,66 @@ function computeColWidths(
   return result
 }
 
+type ChannelStatusInfo =
+  | { type: "unknown"; total?: number }
+  | { type: "none"; total: 0 }
+  | { type: "disabled"; live: 0; total: number }
+  | { type: "partial"; live: number; total: number }
+  | { type: "enabled"; live: number; total: number }
+
+// 解析关联 NewAPI 渠道启用状态：total 由 channels_total 或 channels 去重数确定，缺计数标状态未知
+function getChannelStatus(a: UpstreamAccount): ChannelStatusInfo {
+  const hasChannelsArr = Array.isArray(a.channels)
+  const channelsCount = hasChannelsArr ? new Set(a.channels).size : undefined
+
+  const total =
+    typeof a.channels_total === "number" && Number.isFinite(a.channels_total) && a.channels_total >= 0
+      ? a.channels_total
+      : channelsCount
+
+  const hasLive =
+    typeof a.channels_live === "number" && Number.isFinite(a.channels_live) && a.channels_live >= 0
+  const live = hasLive ? (a.channels_live as number) : undefined
+
+  // 显式 total === 0 或明确空数组 => 无关联渠道
+  if (total === 0) {
+    return { type: "none", total: 0 }
+  }
+
+  // 缺少总数或 live 计数 => 状态未知
+  if (total === undefined || live === undefined) {
+    return { type: "unknown", total }
+  }
+
+  const safeLive = Math.min(live, total)
+  if (safeLive === 0) {
+    return { type: "disabled", live: 0, total }
+  }
+  if (safeLive < total) {
+    return { type: "partial", live: safeLive, total }
+  }
+  return { type: "enabled", live: safeLive, total }
+}
+
+function getChannelStatusRank(a: UpstreamAccount): number {
+  const status = getChannelStatus(a)
+  switch (status.type) {
+    case "enabled":
+      return 4
+    case "partial":
+      return 3
+    case "disabled":
+      return 2
+    case "none":
+      return 1
+    case "unknown":
+      return 0
+  }
+}
+
 const UPSTREAM_ACCESSORS: AccessorMap<UpstreamAccount> = {
   account: (a) => a.name || a.id,
-  enabled: (a) => (a.enabled === false ? 0 : a.external ? 1 : 2),
+  enabled: (a) => getChannelStatusRank(a),
   balance: (a) => a.closing_balance ?? null,
   credits: (a) => a.credits ?? null,
   cost: (a) => a.consumption ?? null,
@@ -140,22 +197,28 @@ interface UpstreamsViewProps {
   accounts: UpstreamAccount[]
 }
 
+// 默认排序活跃组：仅依据 NewAPI 渠道状态（enabled / partial 为活跃），忽略本地 enabled 与 external 开关
+function isChannelActive(a: UpstreamAccount): boolean {
+  const status = getChannelStatus(a)
+  return status.type === "enabled" || status.type === "partial"
+}
+
 /**
- * 默认行序：启用且有余额（余额升序）→ 启用无余额 → 已禁用/无上游（名称升序）
+ * 默认行序：渠道活跃且有余额（余额升序）→ 渠道活跃无余额 → 其余状态（名称升序）
  */
 function getDefaultSortedRows(accounts: UpstreamAccount[]): UpstreamAccount[] {
   const group1 = accounts
-    .filter((a) => a.enabled !== false && !a.external && a.closing_balance != null)
+    .filter((a) => isChannelActive(a) && a.closing_balance != null)
     .sort((a, b) => (a.closing_balance ?? 0) - (b.closing_balance ?? 0))
 
   const group2 = accounts
-    .filter((a) => a.enabled !== false && !a.external && a.closing_balance == null)
+    .filter((a) => isChannelActive(a) && a.closing_balance == null)
     .sort((a, b) =>
       (a.name || a.id).localeCompare(b.name || b.id, "zh-Hans-CN", { numeric: true })
     )
 
   const group3 = accounts
-    .filter((a) => a.enabled === false || a.external === true)
+    .filter((a) => !isChannelActive(a))
     .sort((a, b) =>
       (a.name || a.id).localeCompare(b.name || b.id, "zh-Hans-CN", { numeric: true })
     )
@@ -506,53 +569,79 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
                         case "account":
                           content = (
                             <div className="flex flex-col justify-center min-w-0 leading-tight">
-                              <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                                <span
-                                  className="font-medium text-foreground text-[13px] leading-[18px] line-clamp-2"
-                                  title={row.name || row.id}
-                                >
-                                  {row.name || row.id}
-                                </span>
-                                {row.channels_live === 0 && (
-                                  <Badge
-                                    variant="destructive"
-                                    className="text-[11px] leading-[14px] h-4.5 px-1.5 font-medium whitespace-nowrap shrink-0"
-                                  >
-                                    渠道已全部停用
-                                  </Badge>
-                                )}
-                              </div>
+                              <span
+                                className="font-medium text-foreground text-[13px] leading-[18px] line-clamp-2"
+                                title={row.name || row.id}
+                              >
+                                {row.name || row.id}
+                              </span>
                               <span className="font-mono text-[11px] leading-[15px] text-muted-foreground">
                                 {row.kind}
                               </span>
                             </div>
                           )
                           break
-                        case "enabled":
-                          content =
-                            row.enabled === false ? (
-                              <Badge
-                                variant="outline"
-                                className="text-[12px] leading-[16px] h-5 px-1.5 font-medium text-muted-foreground border-border bg-muted/30"
-                              >
-                                已禁用
-                              </Badge>
-                            ) : row.external ? (
-                              <Badge
-                                variant="secondary"
-                                className="text-[12px] leading-[16px] h-5 px-1.5 font-medium text-muted-foreground"
-                              >
-                                无上游
-                              </Badge>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="text-[12px] leading-[16px] h-5 px-1.5 font-medium text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
-                              >
-                                启用
-                              </Badge>
-                            )
+                        case "enabled": {
+                          const status = getChannelStatus(row)
+                          switch (status.type) {
+                            case "unknown":
+                              content = (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[12px] leading-[16px] h-5 px-1.5 whitespace-nowrap font-medium text-muted-foreground border-border bg-muted/20"
+                                  title="未获取到关联渠道状态数据"
+                                >
+                                  状态未知
+                                </Badge>
+                              )
+                              break
+                            case "none":
+                              content = (
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[12px] leading-[16px] h-5 px-1.5 whitespace-nowrap font-medium text-muted-foreground"
+                                  title="该账户暂无关联的 NewAPI 渠道"
+                                >
+                                  无关联渠道
+                                </Badge>
+                              )
+                              break
+                            case "disabled":
+                              content = (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[12px] leading-[16px] h-5 px-1.5 whitespace-nowrap font-medium text-rose-600 dark:text-rose-400 border-rose-500/30 bg-rose-500/10"
+                                  title={`关联 NewAPI 渠道已全部停用 (0/${status.total})`}
+                                >
+                                  已停用
+                                </Badge>
+                              )
+                              break
+                            case "partial":
+                              content = (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[12px] leading-[16px] h-5 px-1.5 whitespace-nowrap font-medium text-amber-600 dark:text-amber-400 border-amber-500/30 bg-amber-500/10"
+                                  title={`关联 NewAPI 渠道部分启用 (${status.live}/${status.total})`}
+                                >
+                                  部分启用 ({status.live}/{status.total})
+                                </Badge>
+                              )
+                              break
+                            case "enabled":
+                              content = (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[12px] leading-[16px] h-5 px-1.5 whitespace-nowrap font-medium text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+                                  title={`关联 NewAPI 渠道全部启用 (${status.live}/${status.total})`}
+                                >
+                                  启用
+                                </Badge>
+                              )
+                              break
+                          }
                           break
+                        }
                         case "balance":
                           content = (
                             <span className="font-semibold text-foreground">
