@@ -17,6 +17,12 @@ import { fileURLToPath } from 'node:url';
 import { createApi } from './lib/api.mjs';
 import { loadConfig, resolveConfigFile } from './lib/config.mjs';
 import { ensureDataDirs, INSTANCE, INSTANCE_FILE } from './lib/instance.mjs';
+import {
+  createRuntimeSettingsStore,
+  RevisionConflictError,
+  RuntimeSettingsError,
+  SHARED_DEFAULTS,
+} from './lib/runtime-settings.mjs';
 import { openDashboardDb, syncAccounts } from './store/dashboard.mjs';
 import { ensureAggIndexes, LOGS_SCHEMA } from './store/site-logs.mjs';
 
@@ -243,6 +249,7 @@ const API_ROUTES = {
   '/api/quality': (api) => api.quality(),
   '/api/errors': (api, url) => api.errors(url.searchParams),
   '/api/status': (api, url) => api.status(url.searchParams),
+  '/api/routes': (api) => api.routeGraph(),
   '/api/rows': (api, url) => api.rows(url.searchParams),
   '/api/healthz': () => ({ ok: true }),
 };
@@ -315,6 +322,227 @@ export function respondApi({ api, cache, pathname, url }) {
   const payload = JSON.stringify(handler(api, url));
   if (cacheable) cache.set(key, payload);
   return { payload, cache: cacheable && cache.enabled ? 'MISS' : null };
+}
+
+/** 设置请求体上限：16 KiB，足够放下三组阈值加 revision */
+export const SETTINGS_BODY_LIMIT = 16 * 1024;
+
+/** 心跳缺失时的空状态；心跳损坏也回退到它，并额外带 error 字段 */
+function emptyCollectorStatus() {
+  return {
+    state: 'unconfirmed',
+    observedRevision: null,
+    updatedAt: null,
+    effective: { logsMinutes: null, spendMinutes: null },
+    overrides: { logs: false, spend: false },
+    logsEnabled: null,
+  };
+}
+
+/**
+ * 心跳文件损坏不应让整个设置接口失败（尤其 PATCH 已写盘后再 500 会变成假失败），
+ * 但也不能装作正常：回 unconfirmed 空状态 + collector.error 让前端可见。
+ * 设置文件本身损坏仍在 settingsPayload 之前抛错，由上层回 500。
+ */
+function collectorStatusOf(settingsStore) {
+  try {
+    return settingsStore.readCollectorStatus();
+  } catch (err) {
+    console.error('[v2] 读取采集器状态失败', err?.message ?? err);
+    return {
+      ...emptyCollectorStatus(),
+      error: '采集器状态文件不可读，已按未确认展示',
+    };
+  }
+}
+
+/** GET/PATCH 共用的响应体：settings 三组 + defaults 五组 + revision + 采集器状态 */
+function settingsPayload(settingsStore) {
+  const snapshot = settingsStore.read();
+  return {
+    settings: snapshot.settings,
+    defaults: {
+      display: SHARED_DEFAULTS.display,
+      refresh: SHARED_DEFAULTS.refresh,
+      ...snapshot.defaults,
+    },
+    revision: snapshot.revision,
+    collector: collectorStatusOf(settingsStore),
+  };
+}
+
+function isLoopbackAddress(address) {
+  const text = String(address ?? '');
+  return text === '127.0.0.1' || text === '::1' || text === '::ffff:127.0.0.1';
+}
+
+/**
+ * 判断请求实际使用的协议。只有本机反代（loopback）传来的 X-Forwarded-Proto 可信，
+ * 其它来源一律看连接本身，避免外部伪造 https 骗过同源校验。
+ */
+function requestScheme(req) {
+  if (isLoopbackAddress(req.socket?.remoteAddress)) {
+    const forwarded = String(req.headers['x-forwarded-proto'] ?? '')
+      .split(',')[0].trim().toLowerCase();
+    if (forwarded === 'http' || forwarded === 'https') return forwarded;
+  }
+  return req.socket?.encrypted ? 'https' : 'http';
+}
+
+/** 写接口必须同源：Origin 的协议与 host 必须和当前请求一致，缺 Origin 直接拒绝 */
+function originAllowed(req) {
+  const origin = req.headers.origin;
+  if (typeof origin !== 'string' || !origin) return false;
+  let parsed;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+  const host = req.headers.host;
+  if (!host) return false;
+  return parsed.protocol === `${requestScheme(req)}:` && parsed.host === host;
+}
+
+/** 读请求体，超过上限只标记不中断连接，交给调用方回 413 */
+function readLimitedBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    let tooLarge = false;
+    req.on('data', (chunk) => {
+      total += chunk.length;
+      if (total > limit) {
+        tooLarge = true;
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve({ tooLarge, text: Buffer.concat(chunks).toString('utf8') }));
+    req.on('error', reject);
+  });
+}
+
+/** GET/HEAD 只读；PATCH 校验后写盘并清缓存，不触发任务、不重启服务 */
+async function handleSettingsRequest({ req, res, head, settingsStore, cache }) {
+  if (req.method === 'GET' || head) {
+    sendJson(res, 200, settingsPayload(settingsStore), { head });
+    return;
+  }
+  if (req.method !== 'PATCH') {
+    req.resume();
+    sendError(res, 405, 'method_not_allowed', '设置接口只支持 GET/HEAD/PATCH');
+    return;
+  }
+  if (!originAllowed(req)) {
+    req.resume();
+    sendError(res, 403, 'forbidden_origin', '请求来源与站点不同源');
+    return;
+  }
+  const contentType = String(req.headers['content-type'] ?? '');
+  if (contentType.split(';')[0].trim().toLowerCase() !== 'application/json') {
+    req.resume();
+    sendError(res, 415, 'unsupported_media_type', '请求体必须是 application/json');
+    return;
+  }
+  const declared = Number(req.headers['content-length']);
+  if (Number.isFinite(declared) && declared > SETTINGS_BODY_LIMIT) {
+    req.resume();
+    sendError(res, 413, 'payload_too_large', '请求体超过 16 KiB 上限');
+    return;
+  }
+  const { tooLarge, text } = await readLimitedBody(req, SETTINGS_BODY_LIMIT);
+  if (tooLarge) {
+    sendError(res, 413, 'payload_too_large', '请求体超过 16 KiB 上限');
+    return;
+  }
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    sendError(res, 400, 'bad_json', '请求体不是合法 JSON');
+    return;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    sendError(res, 400, 'invalid_settings', '请求体必须是 {settings, revision} 对象');
+    return;
+  }
+  const unknown = Object.keys(body).filter((key) => key !== 'settings' && key !== 'revision');
+  if (unknown.length > 0) {
+    sendError(res, 400, 'invalid_settings', `请求体包含未知字段 ${unknown.join(', ')}`);
+    return;
+  }
+  if (typeof body.revision !== 'string') {
+    sendError(res, 400, 'invalid_settings', 'revision 必须是字符串');
+    return;
+  }
+  if (!body.settings || typeof body.settings !== 'object' || Array.isArray(body.settings)) {
+    sendError(res, 400, 'invalid_settings', 'settings 必须是对象');
+    return;
+  }
+  try {
+    settingsStore.update(body.settings, body.revision);
+  } catch (err) {
+    if (err instanceof RevisionConflictError) {
+      sendError(res, 409, 'revision_conflict', err.message);
+      return;
+    }
+    if (err instanceof RuntimeSettingsError) {
+      sendError(res, 400, 'invalid_settings', err.message);
+      return;
+    }
+    throw err;
+  }
+  // 阈值可能影响 /api/status 的分类，立即失效缓存，保证下一次 GET 用新规则
+  cache.clear();
+  sendJson(res, 200, settingsPayload(settingsStore));
+}
+
+/**
+ * 请求处理入口：抽成工厂后，测试可以注入临时库、临时 dataDir 与真实 listen(0)，
+ * 生产路径（缓存、401/405、静态文件）保持不变。
+ */
+export function createRequestHandler({ api, cache, settingsStore }) {
+  return async (req, res) => {
+    const head = req.method === 'HEAD';
+    try {
+      const url = new URL(req.url ?? '/', 'http://localhost');
+      const pathname = url.pathname;
+
+      if (pathname === '/api/settings') {
+        await handleSettingsRequest({ req, res, head, settingsStore, cache });
+        return;
+      }
+
+      if (req.method !== 'GET' && !head) {
+        sendError(res, 405, 'method_not_allowed', '只支持 GET/HEAD', { head });
+        return;
+      }
+
+      if (pathname.startsWith('/api/')) {
+        const result = respondApi({ api, cache, pathname, url });
+        if (!result) {
+          sendError(res, 404, 'not_found', `未知接口 ${pathname}`, { head });
+          return;
+        }
+        sendPayload(res, 200, result.payload, {
+          head,
+          headers: result.cache ? { 'X-Cache': result.cache } : {},
+        });
+        return;
+      }
+
+      serveStatic(req, res, pathname, { head });
+    } catch (err) {
+      if (err instanceof RangeError || err instanceof TypeError) {
+        sendError(res, 400, 'bad_request', err.message, { head });
+      } else {
+        console.error('[v2] 请求失败', req.url, err);
+        if (!res.headersSent) sendError(res, 500, 'internal_error', '服务内部错误', { head });
+        else res.end();
+      }
+    }
+  };
 }
 
 /**
@@ -398,49 +626,25 @@ function main() {
   ensureDataDirs(INSTANCE);
   const dashboard = openDashboardDb(DASHBOARD_FILE);
   syncAccounts(dashboard, config.accounts.filter((a) => a.enabled));
+  // 采集间隔的「恢复默认」取实例部署值（毫秒 ÷ 60000，允许小数），不强行改成 15 分钟
+  const settingsStore = createRuntimeSettingsStore({
+    dataDir: INSTANCE.paths.dataDir,
+    collectionDefaults: {
+      logsMinutes: INSTANCE.collect.logsIntervalMs / 60_000,
+      spendMinutes: INSTANCE.collect.spendIntervalMs / 60_000,
+    },
+  });
   const api = createApi({
     source,
     dashboard,
     config,
     siteName: opts.site,
     sourceLabel,
+    getHealthSettings: () => settingsStore.read().settings.health,
   });
   const cache = createApiCache();
 
-  const server = http.createServer((req, res) => {
-    const head = req.method === 'HEAD';
-    try {
-      if (req.method !== 'GET' && !head) {
-        sendError(res, 405, 'method_not_allowed', '只支持 GET/HEAD', { head });
-        return;
-      }
-      const url = new URL(req.url ?? '/', 'http://localhost');
-      const pathname = url.pathname;
-
-      if (pathname.startsWith('/api/')) {
-        const result = respondApi({ api, cache, pathname, url });
-        if (!result) {
-          sendError(res, 404, 'not_found', `未知接口 ${pathname}`, { head });
-          return;
-        }
-        sendPayload(res, 200, result.payload, {
-          head,
-          headers: result.cache ? { 'X-Cache': result.cache } : {},
-        });
-        return;
-      }
-
-      serveStatic(req, res, pathname, { head });
-    } catch (err) {
-      if (err instanceof RangeError || err instanceof TypeError) {
-        sendError(res, 400, 'bad_request', err.message, { head });
-      } else {
-        console.error('[v2] 请求失败', req.url, err);
-        if (!res.headersSent) sendError(res, 500, 'internal_error', '服务内部错误', { head });
-        else res.end();
-      }
-    }
-  });
+  const server = http.createServer(createRequestHandler({ api, cache, settingsStore }));
 
   server.on('error', (err) => {
     console.error(`[v2] 服务启动失败: ${err.message}`);
@@ -450,7 +654,8 @@ function main() {
   server.listen(opts.port, opts.host, () => {
     console.log(
       `[v2] http://${opts.host}:${opts.port}  源库=${sourceLabel}  看板库=${displayPath(DASHBOARD_FILE)}` +
-        `  配置=${configFile ? displayPath(configFile) : '默认'}  实例=${INSTANCE_FILE ? displayPath(INSTANCE_FILE) : '默认'}`,
+        `  配置=${configFile ? displayPath(configFile) : '默认'}  实例=${INSTANCE_FILE ? displayPath(INSTANCE_FILE) : '默认'}` +
+        `  运行时设置=${displayPath(settingsStore.path)}`,
     );
     warmup(api);
   });

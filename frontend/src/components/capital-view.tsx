@@ -13,6 +13,7 @@ import { Wallet, DollarSign, Calendar, Hourglass, Inbox, AlertCircle } from "luc
 import {
   formatCurrency,
 } from "@/lib/formatters"
+import { getServerSettings } from "@/lib/settings"
 import {
   type SortState,
   type AccessorMap,
@@ -102,10 +103,11 @@ function renderRunway(days: number | null | undefined) {
     return <span className="text-muted-foreground">—</span>
   }
 
+  const runwayThresholds = getServerSettings().monitoring.runway
   let colorClass = "text-foreground font-medium"
-  if (days < 3) {
+  if (days < runwayThresholds.dangerDays) {
     colorClass = "text-rose-600 dark:text-rose-400 font-semibold"
-  } else if (days < 7) {
+  } else if (days < runwayThresholds.warnDays) {
     colorClass = "text-amber-600 dark:text-amber-400 font-semibold"
   }
 
@@ -241,18 +243,23 @@ export function CapitalView({
           </div>
           <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums">
             {total?.runway_days != null ? (
-              <span
-                className={
-                  total.runway_days < 3
-                    ? "text-rose-600 dark:text-rose-400"
-                    : total.runway_days < 7
-                    ? "text-amber-600 dark:text-amber-400"
-                    : "text-foreground"
-                }
-              >
-                {total.runway_days.toFixed(1)}{" "}
-                <span className="text-[14px] font-normal font-sans text-muted-foreground">天</span>
-              </span>
+              (() => {
+                const runwayThresholds = getServerSettings().monitoring.runway
+                return (
+                  <span
+                    className={
+                      total.runway_days < runwayThresholds.dangerDays
+                        ? "text-rose-600 dark:text-rose-400"
+                        : total.runway_days < runwayThresholds.warnDays
+                        ? "text-amber-600 dark:text-amber-400"
+                        : "text-foreground"
+                    }
+                  >
+                    {total.runway_days.toFixed(1)}{" "}
+                    <span className="text-[14px] font-normal font-sans text-muted-foreground">天</span>
+                  </span>
+                )
+              })()
             ) : (
               <span className="text-muted-foreground">—</span>
             )}
@@ -264,9 +271,14 @@ export function CapitalView({
                 : "总可用余额 ÷ 7 日日均成本"}
             </span>
             {shortest && (
-              <span className={shortest.days < 3 ? "text-rose-600 dark:text-rose-400 font-medium" : shortest.days < 7 ? "text-amber-600 dark:text-amber-400 font-medium" : "text-muted-foreground"}>
-                最短: {shortest.days.toFixed(1)} 天 ({shortest.name})
-              </span>
+              (() => {
+                const runwayThresholds = getServerSettings().monitoring.runway
+                return (
+                  <span className={shortest.days < runwayThresholds.dangerDays ? "text-rose-600 dark:text-rose-400 font-medium" : shortest.days < runwayThresholds.warnDays ? "text-amber-600 dark:text-amber-400 font-medium" : "text-muted-foreground"}>
+                    最短: {shortest.days.toFixed(1)} 天 ({shortest.name})
+                  </span>
+                )
+              })()
             )}
           </div>
         </Card>

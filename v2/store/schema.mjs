@@ -153,6 +153,17 @@ export const DASHBOARD_SCHEMA = [
   'CREATE INDEX IF NOT EXISTS idx_upstream_error_t ON upstream_error(t_ms)',
   'CREATE INDEX IF NOT EXISTS idx_upstream_error_ch ON upstream_error(channel_id, t_ms)',
 
+  // 渠道配置快照：源库 channels + abilities 的一致读结果，单行保存最近一次成功快照。
+  // 与 channel_state 分开：channel_state 只服务日志过滤，这里服务「渠道路由」页的配置视图。
+  // payload 为 NULL 表示从未成功同步过；失败只更新 last_attempt_at / last_error，保留旧快照。
+  `CREATE TABLE IF NOT EXISTS channel_routing_snapshot (
+     id              INTEGER PRIMARY KEY CHECK (id = 1),
+     payload         TEXT,
+     synced_at       INTEGER,
+     last_attempt_at INTEGER,
+     last_error      TEXT
+   )`,
+
   // 结构元信息：只记一次，不覆盖已有值
   `CREATE TABLE IF NOT EXISTS schema_meta (
      key        TEXT PRIMARY KEY,

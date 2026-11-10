@@ -41,6 +41,7 @@ import {
   type RangeType,
 } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { useSettings } from "@/lib/settings"
 import type { QualityData } from "@/components/quality-view"
 import type { UpstreamAccount } from "@/components/upstreams-view"
 
@@ -50,23 +51,6 @@ interface ApiEndpointItem {
   interval: string
   description: string
 }
-
-const API_ENDPOINTS: ApiEndpointItem[] = [
-  { path: "/api/healthz", name: "服务健康检查", interval: "实时探测", description: "后端单进程心跳探针与响应就绪检测" },
-  { path: "/api/meta", name: "元数据与配置", interval: "15 分钟", description: "实例站点名、基础地址、币种汇率及数据边界" },
-  { path: "/api/overview", name: "经营总览", interval: "15 分钟", description: "全站售出额、Token 消耗、请求总量与综合缓存率" },
-  { path: "/api/trend", name: "售出趋势", interval: "15 分钟", description: "小时/自然日级售出金额堆叠与调用走势" },
-  { path: "/api/profit", name: "盈利面板", interval: "15 分钟", description: "上游供应商账户成本、利润与毛利率账本对账" },
-  { path: "/api/models", name: "模型经营", interval: "15 分钟", description: "按模型聚合售出、请求、Token 及每亿 Token 均价" },
-  { path: "/api/channels", name: "渠道明细", interval: "15 分钟", description: "下游渠道经营表现、TPS 速率与延迟分位数" },
-  { path: "/api/groups", name: "分组明细", interval: "15 分钟", description: "业务分组维度用量、售出额与渠道聚合明细" },
-  { path: "/api/users", name: "用户排行", interval: "15 分钟", description: "下游调用用户售出贡献、请求量与 Token 消耗排行" },
-  { path: "/api/capital", name: "资金与续航", interval: "15 分钟", description: "上游账户实时余额流水、7日日均消耗与续航天数" },
-  { path: "/api/upstreams", name: "上游账户", interval: "15 分钟", description: "上游各供应商账户配置状态、渠道归属与期末余额" },
-  { path: "/api/status", name: "可用性状态", interval: "15 分钟", description: "分时健康度状态条、成功与错误统计" },
-  { path: "/api/quality", name: "数据质量", interval: "15 分钟", description: "日志同步任务、采集耗时、缺快照及 Schema 状态" },
-  { path: "/api/errors", name: "HTTP 错误", interval: "15 分钟", description: "Nginx 4xx/5xx 小时分桶、Top 状态码与路径分布" },
-]
 
 export interface SystemViewProps {
   quality?: QualityData
@@ -86,6 +70,34 @@ export function SystemView({
   timeRange = "24h",
   previewMode = false,
 }: SystemViewProps) {
+  const { preferences, server, collector } = useSettings()
+
+  const pollIntervalText =
+    preferences.refresh.intervalMinutes === 0
+      ? "手动刷新拉取"
+      : `每轮刷新并发拉取 (${preferences.refresh.intervalMinutes}m)`
+  const logsIntervalDesc = `${collector?.effective.logsMinutes ?? server.collection.logsMinutes} 分钟采集`
+  const spendIntervalDesc = `${collector?.effective.spendMinutes ?? server.collection.spendMinutes} 分钟采集`
+
+  const apiEndpoints: ApiEndpointItem[] = React.useMemo(() => [
+    { path: "/api/healthz", name: "服务健康检查", interval: "手动探测 / 进入页面", description: "后端单进程心跳探针与响应就绪检测" },
+    { path: "/api/settings", name: "共享设置与采集器", interval: "30 秒轮询（待采用约 5 秒）/ 实时保存", description: "读取 (GET) 与持久化 (PATCH) 服务端监控阈值、调度间隔及采集器心跳" },
+    { path: "/api/routes", name: "渠道路由拓扑", interval: "按需懒加载（进入页面/手动刷新）", description: "读取 NewAPI 真实 abilities 配置快照、渠道与上游账户 5 层拓扑关系" },
+    { path: "/api/meta", name: "元数据与配置", interval: pollIntervalText, description: "实例站点名、基础地址、币种汇率及数据可用边界" },
+    { path: "/api/overview", name: "经营总览", interval: pollIntervalText, description: "全站售出额、Token 消耗、请求总量与综合缓存率" },
+    { path: "/api/trend", name: "售出趋势", interval: pollIntervalText, description: "小时/自然日级售出金额堆叠与调用走势" },
+    { path: "/api/profit", name: "盈利面板", interval: pollIntervalText, description: "上游供应商账户成本、利润与毛利率账本对账" },
+    { path: "/api/models", name: "模型经营", interval: pollIntervalText, description: "按模型聚合售出、请求、Token 及每亿 Token 均价" },
+    { path: "/api/channels", name: "渠道明细", interval: pollIntervalText, description: "下游渠道经营表现、TPS 速率与延迟分位数" },
+    { path: "/api/groups", name: "分组明细", interval: pollIntervalText, description: "业务分组维度用量、售出额与渠道聚合明细" },
+    { path: "/api/users", name: "用户排行", interval: pollIntervalText, description: "下游调用用户售出贡献、请求量与 Token 消耗排行" },
+    { path: "/api/capital", name: "资金与续航", interval: pollIntervalText, description: `上游账户实时余额流水与续航天数（后台来源：${spendIntervalDesc}）` },
+    { path: "/api/upstreams", name: "上游账户", interval: pollIntervalText, description: `上游供应商配置状态、渠道归属与期末余额（后台来源：${logsIntervalDesc}）` },
+    { path: "/api/status", name: "可用性状态", interval: "按需懒加载（切页/切窗口，不随轮询刷新）", description: "分时健康度状态条、成功与错误统计（含服务端 health_rules）" },
+    { path: "/api/quality", name: "数据质量", interval: pollIntervalText, description: `日志同步任务、采集耗时及缺快照状态（后台来源：${logsIntervalDesc}）` },
+    { path: "/api/errors", name: "HTTP 错误", interval: "按需懒加载（进入状态页/切窗口，不随轮询刷新）", description: "Nginx 4xx/5xx 小时分桶与状态码路径分布（后台来源：15 分钟采集）" },
+  ], [pollIntervalText, logsIntervalDesc, spendIntervalDesc])
+
   // HTTP 错误数据快照：loading 由当前 range 与快照 key 的差异派生，避免在 effect 内同步 setState
   const [errorsSnapshot, setErrorsSnapshot] = React.useState<ErrorsSnapshot | null>(null)
   const errorsRangeKey = dateRange ? `${dateRange.from}:${dateRange.to}` : null
@@ -286,7 +298,7 @@ export function SystemView({
                     服务名称
                   </TableHead>
                   <TableHead className="h-8 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-left whitespace-nowrap">
-                    刷新策略
+                    前端请求策略
                   </TableHead>
                   <TableHead className="h-8 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-left whitespace-nowrap">
                     功能定义与职责
@@ -294,7 +306,7 @@ export function SystemView({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {API_ENDPOINTS.map((ep) => (
+                {apiEndpoints.map((ep) => (
                   <TableRow
                     key={ep.path}
                     className="h-[38px] hover:bg-muted/40 transition-colors border-b border-border/60"

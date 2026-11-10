@@ -2,6 +2,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { formatCurrency } from "@/lib/formatters"
 import { FreshnessCard } from "@/components/freshness-card"
+import { getServerSettings } from "@/lib/settings"
 import type { CapitalPayload } from "@/lib/api"
 
 interface UpstreamLike {
@@ -73,8 +74,13 @@ export function FundingStrip({ capital, accounts = [], now, className }: Funding
     return { name: a.name, group: a.top_group ?? null, days: a.runway_days }
   }, null)
   const runway = shortest?.days ?? null
+  const runwayThresholds = getServerSettings().monitoring.runway
   const runwayTone =
-    runway != null && runway < 3 ? "bad" : runway != null && runway < 7 ? "warn" : undefined
+    runway != null && runway < runwayThresholds.dangerDays
+      ? "bad"
+      : runway != null && runway < runwayThresholds.warnDays
+      ? "warn"
+      : undefined
 
   return (
     <section className={cn("grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-4 shrink-0", className)}>

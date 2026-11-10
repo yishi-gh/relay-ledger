@@ -824,7 +824,7 @@ export function DetailsView({
                             case "per_1e8":
                               content = row.top_model?.per_1e8 != null ? (
                                 <span className="font-mono tabular-nums text-[13px] leading-[18px]" title={row.top_model.model}>
-                                  ${row.top_model.per_1e8.toFixed(2)}
+                                  {formatCurrency(row.top_model.per_1e8)}
                                 </span>
                               ) : (
                                 "—"
@@ -970,7 +970,7 @@ export function DetailsView({
                           case "per_1e8":
                             content = group.top_model?.per_1e8 != null ? (
                               <span className="font-mono tabular-nums text-[13px] leading-[18px]" title={group.top_model.model}>
-                                ${group.top_model.per_1e8.toFixed(2)}
+                                {formatCurrency(group.top_model.per_1e8)}
                               </span>
                             ) : (
                               "—"

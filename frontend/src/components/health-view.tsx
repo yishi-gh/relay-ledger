@@ -27,6 +27,7 @@ import {
   type StatusState,
 } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { useSettings } from "@/lib/settings"
 
 /** 状态条颜色：正常、告警、故障、样本不足、无请求 */
 export const STATE_COLOR: Record<StatusState, string> = {
@@ -78,6 +79,7 @@ export function HealthView({
   embedded = false,
   onLevelChange,
 }: HealthViewProps) {
+  const { server, revision } = useSettings()
   const [internalLevel, setInternalLevel] = React.useState<StatusLevel>(fixedLevel ?? initialLevel)
   const [data, setData] = React.useState<StatusPayload | null>(null)
   const [notReady, setNotReady] = React.useState(false)
@@ -134,7 +136,7 @@ export function HealthView({
     return () => {
       cancelled = true
     }
-  }, [range, level, bucketSize])
+  }, [range, level, bucketSize, revision])
 
   const components = data?.components ?? []
   const overall = data?.overall ?? null
@@ -147,6 +149,25 @@ export function HealthView({
       data.from !== range.from ||
       data.level !== level ||
       (data.bucket && data.bucket !== bucketSize))
+
+  const healthRules =
+    (data as (StatusPayload & { health_rules?: { minSamples: number; failErrorRate: number } }) | null)
+      ?.health_rules ?? server.health
+
+  const getHealthStatusColor = (
+    requests: number | null | undefined,
+    errors: number | null | undefined,
+    uptime: number | null | undefined
+  ) => {
+    const req = requests ?? 0
+    const err = errors ?? 0
+    const attempts = req + err
+    if (attempts <= 0 || uptime == null || !Number.isFinite(uptime)) return "text-muted-foreground"
+    if (attempts < healthRules.minSamples) return "text-muted-foreground" // 样本不足与后端一致保持中性
+    if (err <= 0) return "text-emerald-600 dark:text-emerald-400 font-medium"
+    if (err / attempts < healthRules.failErrorRate) return "text-amber-600 dark:text-amber-400 font-medium"
+    return "text-rose-600 dark:text-rose-400 font-semibold"
+  }
 
   // 表格内部公共渲染
   const renderTableContent = () => {
@@ -250,7 +271,7 @@ export function HealthView({
                           const attempts = total + errors
                           const successRate =
                             attempts > 0
-                              ? ((total / attempts) * 100).toFixed(1)
+                              ? ((total / attempts) * 100).toFixed(2)
                               : null
                           const state: StatusState = bucket.state ?? "none"
                           const topErrors = bucket.top_errors ?? []
@@ -292,9 +313,14 @@ export function HealthView({
                                 </div>
                                 <div className="text-[12px] opacity-85 leading-tight">
                                   {attempts === 0
-                                    ? (state === "unknown" ? "样本不足（无足够调用数据）" : "无请求记录")
+                                    ? "无请求记录"
                                     : `成功 ${total} · 失败 ${errors} · 成功率 ${successRate}%`}
                                 </div>
+                                {attempts > 0 && attempts < healthRules.minSamples && (
+                                  <div className="text-[11px] text-muted-foreground leading-tight">
+                                    注：调用数 ({attempts}) 低于故障判定门槛 ({healthRules.minSamples} 次)
+                                  </div>
+                                )}
                                 <div className="text-[12px] leading-tight pt-0.5">
                                   {topErrors.length === 0 ? (
                                     <span className="opacity-75">
@@ -323,16 +349,7 @@ export function HealthView({
 
                     <TableCell className="px-2 py-0 h-8 align-middle text-right font-mono tabular-nums text-[13px] leading-[18px]" style={{ width: "72px" }}>
                       {uptime != null ? (
-                        <span
-                          className={cn(
-                            "font-medium",
-                            uptime >= 0.99
-                              ? "text-emerald-600 dark:text-emerald-400"
-                              : uptime >= 0.95
-                              ? "text-amber-600 dark:text-amber-400"
-                              : "text-rose-600 dark:text-rose-400 font-semibold"
-                          )}
-                        >
+                        <span className={cn("font-medium", getHealthStatusColor(component.requests, component.errors, uptime))}>
                           {formatUptime(uptime)}
                         </span>
                       ) : (
@@ -400,7 +417,7 @@ export function HealthView({
             ))}
           </div>
           <span className="text-muted-foreground/80">
-            注：样本不足与无请求不参与状态判定
+            注：样本不足（调用 &lt; {healthRules.minSamples} 次）与无请求不参与状态判定
           </span>
         </div>
       </div>
@@ -433,18 +450,7 @@ export function HealthView({
           <div className="flex items-center gap-2.5 text-[12px] leading-[16px] flex-wrap">
             <div className="flex items-center gap-1.5 font-mono tabular-nums">
               <span className="text-muted-foreground">整体 Uptime:</span>
-              <span
-                className={cn(
-                  "font-semibold",
-                  overall?.uptime == null
-                    ? "text-muted-foreground"
-                    : overall.uptime >= 0.99
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : overall.uptime >= 0.95
-                    ? "text-amber-600 dark:text-amber-400"
-                    : "text-rose-600 dark:text-rose-400"
-                )}
-              >
+              <span className={cn("font-semibold", getHealthStatusColor(overall?.requests, overall?.errors, overall?.uptime))}>
                 {formatUptime(overall?.uptime ?? null)}
               </span>
             </div>
@@ -490,9 +496,9 @@ export function HealthView({
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px]">整体 uptime</span>
-            <HeartPulse className="size-4 text-emerald-600 dark:text-emerald-400" />
+            <HeartPulse className={cn("size-4", getHealthStatusColor(overall?.requests, overall?.errors, overall?.uptime))} />
           </div>
-          <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
+          <div className={cn("mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums", getHealthStatusColor(overall?.requests, overall?.errors, overall?.uptime))}>
             {formatUptime(overall?.uptime ?? null)}
           </div>
           <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">

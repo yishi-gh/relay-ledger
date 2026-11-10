@@ -23,6 +23,7 @@ import {
   HeartPulse,
   ShieldCheck,
   Activity,
+  Route,
   Settings,
   type LucideIcon,
 } from "lucide-react"
@@ -34,6 +35,7 @@ export type ViewKey =
   | "models"
   | "channels_detail"
   | "groups_detail"
+  | "routes"
   | "upstreams"
   | "capital"
   | "health"
@@ -69,6 +71,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { key: "channels_detail", title: "渠道明细", icon: Radio },
       { key: "groups_detail", title: "分组明细", icon: Layers },
+      { key: "routes", title: "渠道路由", icon: Route },
       { key: "upstreams", title: "上游账户", icon: Server },
       { key: "capital", title: "资金与续航", icon: Wallet },
     ],

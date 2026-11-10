@@ -14,6 +14,7 @@ import { RankView } from "@/components/rank-view"
 import { ModelsView } from "@/components/models-view"
 import { UpstreamsView } from "@/components/upstreams-view"
 import { CapitalView } from "@/components/capital-view"
+import { ChannelRoutesView } from "@/components/channel-routes-view"
 import { HealthView } from "@/components/health-view"
 import { QualityView } from "@/components/quality-view"
 import { SystemView } from "@/components/system-view"
@@ -24,6 +25,8 @@ import {
   type ProfitData,
   type RangeType,
 } from "@/lib/api"
+import { getInitialTimeRange, rememberTimeRange, useSettings } from "@/lib/settings"
+import { startAutoRefresh } from "@/lib/refresh"
 
 // 全局稳定的站点颜色映射表：首次出现的 account_id 按字典序分配固定色位，之后跨刷新/切窗口都不跳色
 const SITE_COLOR_MAP: Record<string, string> = {}
@@ -122,6 +125,7 @@ const VALID_VIEWS: ViewKey[] = [
   "groups_detail",
   "upstreams",
   "capital",
+  "routes",
   "health",
   "quality",
   "system",
@@ -137,14 +141,13 @@ const VIEW_TITLES: Record<ViewKey, string> = {
   groups_detail: "分组明细",
   upstreams: "上游账户",
   capital: "资金与续航",
+  routes: "渠道路由",
   health: "渠道健康",
   quality: "数据质量",
   system: "系统状态",
   settings: "系统设置",
 }
 
-const REFRESH_INTERVAL_MS = 15 * 60 * 1000
-const REFRESH_OFFSET_MS = 12 * 1000
 const HOUR_MS = 3600000
 const DAY_MS = 86400000
 const BEIJING_OFFSET_MS = 8 * HOUR_MS
@@ -163,16 +166,6 @@ function beijingTrendBucket(ms: number, granularity: "hour" | "day"): string {
   const d = new Date(ms + BEIJING_OFFSET_MS)
   const date = `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`
   return granularity === "hour" ? `${date} ${pad2(d.getUTCHours())}:00` : date
-}
-
-/** 下一次对齐到每 15 分钟的 :12/:27/:42/:57 的等待毫秒数 */
-function nextRefreshDelay(now: number): number {
-  return Math.max(
-    0,
-    Math.ceil((now - REFRESH_OFFSET_MS) / REFRESH_INTERVAL_MS) * REFRESH_INTERVAL_MS +
-      REFRESH_OFFSET_MS -
-      now
-  )
 }
 
 type DetailLevel = "channel" | "group"
@@ -280,8 +273,9 @@ function pushRoute(url: string) {
 }
 
 export function App() {
+  const { preferences } = useSettings()
   const initialRoute = React.useMemo(() => parseRouteState(), [])
-  const [timeRange, setTimeRange] = React.useState<RangeType>("24h")
+  const [timeRange, setTimeRange] = React.useState<RangeType>(getInitialTimeRange)
   const [currentView, setCurrentView] = React.useState<ViewKey>(initialRoute.view)
   const [detailLevel, setDetailLevel] = React.useState<DetailLevel>(initialRoute.level)
   const [lastLoadedAt, setLastLoadedAt] = React.useState<number>(0)
@@ -309,6 +303,7 @@ export function App() {
   const loadingRef = React.useRef(false)
   const requestSeqRef = React.useRef(0)
   const requestedRangeRef = React.useRef<RangeType | null>(null)
+  const lastLoadedAtRef = React.useRef(0)
 
   React.useEffect(() => {
     timeRangeRef.current = timeRange
@@ -339,7 +334,9 @@ export function App() {
         if (seq === requestSeqRef.current) {
           loadingRef.current = false
           setLoading(false)
-          setLastLoadedAt(Date.now())
+          const loadedAt = Date.now()
+          lastLoadedAtRef.current = loadedAt
+          setLastLoadedAt(loadedAt)
         }
       }
     },
@@ -358,40 +355,23 @@ export function App() {
     void performLoad(timeRangeRef.current)
   }, [performLoad])
 
-  // 自动刷新：对齐到每 15 分钟的 :12 秒；页面隐藏时跳过并顺延到下一个槽位
+  const handleTimeRangeChange = React.useCallback((range: RangeType) => {
+    timeRangeRef.current = range
+    rememberTimeRange(range)
+    setTimeRange(range)
+  }, [])
+
+  // 偏好变化时清理旧计时器；读取 ref 保证异步刷新始终使用最新窗口。
   React.useEffect(() => {
-    let cancelled = false
-    let timer: number | undefined
-
-    function schedule() {
-      if (cancelled) return
-      timer = window.setTimeout(tick, nextRefreshDelay(Date.now()))
-    }
-
-    async function tick() {
-      if (cancelled) return
-      if (!document.hidden && !loadingRef.current) {
-        await performLoad(timeRangeRef.current)
-      }
-      schedule()
-    }
-
-    function handleVisibilityChange() {
-      if (document.hidden || loadingRef.current) return
-      if (Date.now() - lastLoadedAt > REFRESH_INTERVAL_MS) {
-        void performLoad(timeRangeRef.current)
-      }
-    }
-
-    schedule()
-    document.addEventListener("visibilitychange", handleVisibilityChange)
-
-    return () => {
-      cancelled = true
-      if (timer !== undefined) window.clearTimeout(timer)
-      document.removeEventListener("visibilitychange", handleVisibilityChange)
-    }
-  }, [performLoad, lastLoadedAt])
+    return startAutoRefresh({
+      intervalMinutes: preferences.refresh.intervalMinutes,
+      pauseWhenHidden: preferences.refresh.pauseWhenHidden,
+    }, {
+      isLoading: () => loadingRef.current,
+      getLastLoadedAt: () => lastLoadedAtRef.current,
+      refresh: () => performLoad(timeRangeRef.current),
+    })
+  }, [performLoad, preferences.refresh.intervalMinutes, preferences.refresh.pauseWhenHidden])
 
   // 路由/视图同步 URL 查询参数：导航用 pushState，同 URL 不重复入栈
   const navigate = React.useCallback(
@@ -594,7 +574,7 @@ export function App() {
             maxT={meta?.max_t ?? undefined}
             rows={meta?.rows}
             timeRange={timeRange}
-            onTimeRangeChange={setTimeRange}
+            onTimeRangeChange={handleTimeRangeChange}
             onRefresh={handleRefresh}
             refreshing={loading}
           />
@@ -701,6 +681,10 @@ export function App() {
                     dateRange={data?.range ?? null}
                     previewMode={import.meta.env.DEV && Boolean(meta?.preview)}
                   />
+                )}
+
+                {currentView === "routes" && (
+                  <ChannelRoutesView refreshKey={lastLoadedAt} />
                 )}
 
                 {currentView === "health" && (

@@ -2,7 +2,7 @@
  * 常驻采集入口：把 collect-spend 与 collect-site-logs 挂到进程内的定时器上。
  *
  * 用法：
- *   node v2/jobs/run-scheduler.mjs                 # 常驻：余额整点 +10s 起，之后每小时
+ *   node v2/jobs/run-scheduler.mjs                 # 常驻：采用运行时设置或实例采集间隔
  *   node v2/jobs/run-scheduler.mjs --once          # 各跑一次后退出（首次验证 / cron）
  *   node v2/jobs/run-scheduler.mjs --no-logs       # 只采余额
  *   node v2/jobs/run-scheduler.mjs --spend-interval-ms=1800000
@@ -26,7 +26,9 @@ import { fileURLToPath } from 'node:url';
 
 import { loadConfig, resolveConfigFile } from '../lib/config.mjs';
 import { ensureDataDirs, INSTANCE } from '../lib/instance.mjs';
+import { createRuntimeSettingsStore } from '../lib/runtime-settings.mjs';
 import { replaceChannelStates } from '../store/channel-state.mjs';
+import { recordRoutingFailure, replaceRoutingSnapshot } from '../store/channel-routing.mjs';
 import { openDashboardDb, syncAccounts } from '../store/dashboard.mjs';
 import { openLogsDb } from '../store/site-logs.mjs';
 import { runCollectSpend } from './collect-spend.mjs';
@@ -83,6 +85,8 @@ export const UPSTREAM_ERRORS_INITIAL_DELAY_MS = 7 * 60 * 1000;
 export const DEFAULT_UPSTREAM_ERRORS_INTERVAL_MS = 15 * 60 * 1000;
 /** setTimeout 的毫秒上限（超过会被 Node 截断成 1ms） */
 const MAX_INTERVAL_MS = 2_147_483_647;
+export const RUNTIME_SETTINGS_POLL_MS = 2000;
+export const COLLECTOR_HEARTBEAT_MS = 30_000;
 
 export const USAGE = `用法：
   node v2/jobs/run-scheduler.mjs [--once] [--spend-interval-ms=<n>] [--logs-interval-ms=<n>] [--no-logs]
@@ -90,9 +94,9 @@ export const USAGE = `用法：
                                  [--no-http-errors] [--no-upstream-errors] [--help]
 
   --once                     立即各跑一次（collect-spend、collect-site-logs）后退出，退出码 0/1
-  --spend-interval-ms=<n>    余额采集间隔毫秒（默认 ${DEFAULT_SPEND_INTERVAL_MS}，取自实例配置）
-  --logs-interval-ms=<n>     站点日志采集间隔毫秒（默认 ${DEFAULT_LOGS_INTERVAL_MS}，取自实例配置）
-  --no-logs                  不采集站点日志
+  --spend-interval-ms=<n>    显式覆盖余额采集间隔毫秒（优先于运行时设置；实例默认 ${DEFAULT_SPEND_INTERVAL_MS}）
+  --logs-interval-ms=<n>     显式覆盖站点日志及渠道状态采集间隔毫秒（实例默认 ${DEFAULT_LOGS_INTERVAL_MS}）
+  --no-logs                  不采集站点日志及渠道状态
   --prune-days-raw=<n>       raw_json 保留天数（默认 ${DEFAULT_RAW_DAYS}）
   --prune-days-jobs=<n>      job_runs 保留天数（默认 ${DEFAULT_JOBS_DAYS}）
   --no-prune                 不跑每日日志清理
@@ -106,6 +110,7 @@ export const USAGE = `用法：
   （两者之后每 ${DEFAULT_HTTP_ERRORS_INTERVAL_MS}ms）。--once 不跑清理、错误码聚合与上游错误同步，
   手动清理用 node v2/jobs/prune-logs.mjs，错误码聚合用 node v2/jobs/collect-http-errors.mjs，
   上游错误同步用 node v2/jobs/collect-upstream-errors.mjs。
+  未显式传入采集间隔时采用运行时设置，未保存设置时取实例默认值；常驻进程自动采用后续修改。
   SIGINT / SIGTERM 会清掉定时器并正常退出。`;
 
 export class OptionsError extends Error {
@@ -340,14 +345,17 @@ export function createLoop({ delayMs, intervalMs, task, timer = realTimer, nextD
   let timeout = null;
   let interval = null;
   let stopped = false;
+  let inFlight = false;
 
   const chain = (delay) => {
     if (stopped) return;
     timeout = timer.setTimeout(async () => {
       timeout = null;
+      inFlight = true;
       try {
         await task.execute();
       } finally {
+        inFlight = false;
         if (stopped) return;
         const next = Number(nextDelayMs());
         chain(Number.isFinite(next) && next >= 1000 ? next : intervalMs);
@@ -357,7 +365,7 @@ export function createLoop({ delayMs, intervalMs, task, timer = realTimer, nextD
 
   return {
     start() {
-      if (timeout !== null || interval !== null) return this;
+      if (timeout !== null || interval !== null || inFlight) return this;
       stopped = false;
       if (typeof nextDelayMs === 'function') {
         chain(delayMs);
@@ -370,6 +378,14 @@ export function createLoop({ delayMs, intervalMs, task, timer = realTimer, nextD
           void task.execute();
         }, intervalMs);
       }, delayMs);
+      return this;
+    },
+    reschedule() {
+      // 正在执行时没有 pending timeout；结束后的 nextDelayMs 会直接读取最新设置。
+      if (stopped || timeout === null || typeof nextDelayMs !== 'function') return this;
+      timer.clearTimeout(timeout);
+      const next = Number(nextDelayMs());
+      chain(Number.isFinite(next) && next >= 1000 ? next : intervalMs);
       return this;
     },
     stop() {
@@ -386,6 +402,151 @@ export function createLoop({ delayMs, intervalMs, task, timer = realTimer, nextD
     },
     get scheduled() {
       return timeout !== null || interval !== null;
+    },
+  };
+}
+
+/** 只协调余额与日志的间隔；文件轮询按路径跟踪原子替换，不重建任务或定时链。 */
+export function createCollectionScheduler({
+  argv = [],
+  options = resolveOptions(argv),
+  tasks,
+  store,
+  now = Date.now,
+  timer = realTimer,
+  watchFile = fs.watchFile,
+  unwatchFile = fs.unwatchFile,
+  log = console.log,
+  errorLog = console.error,
+} = {}) {
+  const overrides = {
+    logs: argv.some((arg) => arg.startsWith('--logs-interval-ms=')),
+    spend: argv.some((arg) => arg.startsWith('--spend-interval-ms=')),
+  };
+  let spendIntervalMs = options.spendIntervalMs;
+  let logsIntervalMs = options.logsIntervalMs;
+  let observedRevision = null;
+  let spendLoop = null;
+  let logsLoop = null;
+  let heartbeat = null;
+  let watching = false;
+  let started = false;
+  let initialDelays = null;
+
+  const reportStatus = () => {
+    try {
+      store.writeCollectorStatus({
+        observedRevision,
+        updatedAt: now(),
+        effective: {
+          logsMinutes: logsIntervalMs / 60_000,
+          spendMinutes: spendIntervalMs / 60_000,
+        },
+        overrides: { ...overrides },
+        logsEnabled: !options.noLogs,
+      });
+    } catch (err) {
+      errorLog(`[run-scheduler] 写入采集器设置状态失败：${redactMessage(err?.message ?? err)}`);
+    }
+  };
+
+  const refresh = () => {
+    let snapshot;
+    let nextSpend;
+    let nextLogs;
+    try {
+      snapshot = store.read();
+      const collection = snapshot.settings.collection;
+      nextSpend = overrides.spend ? options.spendIntervalMs : collection.spendMinutes * 60_000;
+      nextLogs = overrides.logs ? options.logsIntervalMs : collection.logsMinutes * 60_000;
+      if (
+        typeof snapshot.revision !== 'string' ||
+        ![nextSpend, nextLogs].every(
+          (value) => Number.isFinite(value) && value > 0 && value <= MAX_INTERVAL_MS,
+        )
+      ) {
+        throw new Error('运行时采集间隔或版本无效');
+      }
+    } catch (err) {
+      const action = observedRevision === null ? '尚无有效配置，无法启动' : '保留最近有效采集间隔';
+      errorLog(`[run-scheduler] 读取运行时设置失败，${action}：${redactMessage(err?.message ?? err)}`);
+      // 启动时尚无有效版本，不能把损坏的文件当作默认配置继续运行。
+      if (observedRevision === null) throw err;
+      return false;
+    }
+    const spendChanged = nextSpend !== spendIntervalMs;
+    const logsChanged = nextLogs !== logsIntervalMs;
+    const revisionChanged = observedRevision !== snapshot.revision;
+    if (!spendChanged && !logsChanged && !revisionChanged) return false;
+    spendIntervalMs = nextSpend;
+    logsIntervalMs = nextLogs;
+    observedRevision = snapshot.revision;
+    // 一次性采集只读取设置，不能覆盖常驻采集器的采用状态或心跳。
+    if (options.once) return true;
+    if (spendChanged) spendLoop?.reschedule();
+    if (logsChanged) logsLoop?.reschedule();
+    reportStatus();
+    log(
+      `[run-scheduler] 已采用运行时设置：余额 ${spendIntervalMs}ms，日志及渠道状态 ${logsIntervalMs}ms` +
+        `；CLI 覆盖：余额 ${overrides.spend}，日志 ${overrides.logs}；日志采集启用 ${!options.noLogs}`,
+    );
+    return true;
+  };
+  const onChange = () => {
+    if (started) refresh();
+  };
+
+  return {
+    start() {
+      if (started) return this;
+      refresh();
+      started = true;
+      if (options.once) return this;
+      initialDelays = {
+        spendDelayMs: computeInitialDelayMs(now(), spendIntervalMs),
+        logsDelayMs: nextSlotDelayMs(now(), logsIntervalMs, SPEND_ALIGN_MS + LOGS_ALIGN_MS),
+      };
+      try {
+        spendLoop = createLoop({
+          delayMs: initialDelays.spendDelayMs,
+          intervalMs: spendIntervalMs,
+          task: createTaskRunner({ name: TASK_SPEND, run: tasks.spend, now, log, errorLog }),
+          timer,
+          nextDelayMs: () => nextSlotDelayMs(now(), spendIntervalMs, SPEND_ALIGN_MS),
+        }).start();
+        if (!options.noLogs) {
+          logsLoop = createLoop({
+            delayMs: initialDelays.logsDelayMs,
+            intervalMs: logsIntervalMs,
+            task: createTaskRunner({ name: TASK_LOGS, run: tasks.logs, now, log, errorLog }),
+            timer,
+            nextDelayMs: () => nextSlotDelayMs(now(), logsIntervalMs, SPEND_ALIGN_MS + LOGS_ALIGN_MS),
+          }).start();
+        }
+        watchFile(store.path, { interval: RUNTIME_SETTINGS_POLL_MS }, onChange);
+        watching = true;
+        heartbeat = timer.setInterval(reportStatus, COLLECTOR_HEARTBEAT_MS);
+      } catch (err) {
+        this.stop();
+        throw err;
+      }
+      return this;
+    },
+    stop() {
+      started = false;
+      spendLoop?.stop();
+      logsLoop?.stop();
+      if (heartbeat !== null) timer.clearInterval(heartbeat);
+      heartbeat = null;
+      if (watching) unwatchFile(store.path, onChange);
+      watching = false;
+      return this;
+    },
+    get initialDelays() {
+      return initialDelays && { ...initialDelays };
+    },
+    get intervals() {
+      return { spendIntervalMs, logsIntervalMs };
     },
   };
 }
@@ -466,21 +627,158 @@ async function withJobRun(job, run) {
   }
 }
 
+/** 源库表的实际列；表不存在返回 null */
+function sourceColumns(db, table) {
+  try {
+    const rows = db.prepare(`PRAGMA table_info("${table}")`).all();
+    return rows.length ? new Set(rows.map((row) => row.name)) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 只取存在的列，缺失列用 NULL 占位：兼容老库/测试夹具的窄表 */
+function selectColumn(columns, name) {
+  return columns.has(name) ? `"${name}" AS "${name}"` : `NULL AS "${name}"`;
+}
+
+function toInteger(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isInteger(n) ? n : null;
+}
+
+function toFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function toText(value) {
+  return value === null || value === undefined ? null : String(value);
+}
+
+function normalizeRoutingChannel(row) {
+  const id = toInteger(row?.id);
+  if (id === null) return null;
+  return {
+    id,
+    name: toText(row?.name),
+    type: toInteger(row?.type),
+    status: toInteger(row?.status),
+    base_url: toText(row?.base_url),
+    model_mapping: toText(row?.model_mapping),
+  };
+}
+
+function normalizeRoutingAbility(row) {
+  const channelId = toInteger(row?.channel_id);
+  if (channelId === null) return null;
+  if (typeof row?.group !== 'string' || typeof row?.model !== 'string') return null;
+  const enabled = row.enabled === 0 || row.enabled === 1 ? row.enabled === 1 : null;
+  return {
+    group: row.group,
+    model: row.model,
+    channel_id: channelId,
+    enabled,
+    priority: toFiniteNumber(row.priority),
+    weight: toFiniteNumber(row.weight),
+  };
+}
+
+function safeRecordRoutingFailure(dashboardDb, message, now) {
+  try {
+    recordRoutingFailure(dashboardDb, { error: message, now });
+  } catch (err) {
+    console.warn(`[run-scheduler] 记录渠道路由同步失败时出错：${redactMessage(err?.message ?? err)}`);
+  }
+}
+
 /**
  * 把源库 channels 的启用状态整表同步进看板库 channel_state。
- * 只读源库；文件不存在或没有 channels 表时抛错，由调用方降级为一行 warn。
- * 返回写入的渠道数，供 job_runs.detail 记录。
+ * 同一只读连接、同一个读事务里顺带抓 routes 配置快照（channels + abilities），
+ * 不复制连接、不与看板库的 BEGIN 嵌套；路由快照写失败只告警，不影响 channel_state 与日志采集。
+ * 路由读取失败（缺表/缺列/读错）记录到 last_error 并保留旧 payload，绝不伪报最新。
+ * 返回写入的渠道数（保持原有返回与抛错语义），供 job_runs.detail 记录。
  */
-export function syncChannelStates(dashboardDb, relayDbFile = DEFAULT_DB_FILE) {
-  if (!fs.existsSync(relayDbFile)) throw new Error(`源库不存在：${relayDbFile}`);
-  const src = new DatabaseSync(relayDbFile, { readOnly: true });
+export function syncChannelStates(
+  dashboardDb,
+  relayDbFile = DEFAULT_DB_FILE,
+  { openSource = (file) => new DatabaseSync(file, { readOnly: true }) } = {},
+) {
+  const attemptAt = Date.now();
+  if (!fs.existsSync(relayDbFile)) {
+    const message = `源库不存在：${relayDbFile}`;
+    safeRecordRoutingFailure(dashboardDb, message, attemptAt);
+    throw new Error(message);
+  }
+  const src = openSource(relayDbFile);
+  let channelRows;
+  let abilities = [];
+  let routesError = null;
   try {
     src.exec('PRAGMA busy_timeout = 3000');
-    const rows = src.prepare('SELECT id, name, status, base_url FROM channels').all();
-    return replaceChannelStates(dashboardDb, rows);
+    // 一致读：channels 与 abilities 必须来自同一时刻
+    src.exec('BEGIN');
+    try {
+      const channelColumns = sourceColumns(src, 'channels');
+      if (!channelColumns) throw new Error('源库缺少 channels 表');
+      channelRows = src.prepare(
+        `SELECT ${['id', 'name', 'type', 'status', 'base_url', 'model_mapping']
+          .map((name) => selectColumn(channelColumns, name))
+          .join(', ')} FROM channels`,
+      ).all();
+
+      const abilityColumns = sourceColumns(src, 'abilities');
+      if (!abilityColumns) {
+        routesError = '源库缺少 abilities 表，无法生成渠道路由';
+      } else if (!['group', 'model', 'channel_id'].every((name) => abilityColumns.has(name))) {
+        routesError = '源库 abilities 缺少 group/model/channel_id 列';
+      } else {
+        // abilities 读取失败只降级路由，不能让已读到的 channels 白读：
+        // channel_state 必须继续更新，路由明确标记不可用并给出原因。
+        try {
+          abilities = src.prepare(
+            `SELECT ${['group', 'model', 'channel_id', 'enabled', 'priority', 'weight']
+              .map((name) => selectColumn(abilityColumns, name))
+              .join(', ')} FROM abilities`,
+          ).all()
+            .map(normalizeRoutingAbility)
+            .filter(Boolean);
+        } catch (err) {
+          abilities = [];
+          routesError = `读取源库 abilities 失败：${redactMessage(err?.message ?? err)}`;
+        }
+      }
+    } finally {
+      try {
+        src.exec('COMMIT');
+      } catch {
+        // 读事务提交失败不覆盖原始错误
+      }
+    }
+  } catch (err) {
+    safeRecordRoutingFailure(dashboardDb, redactMessage(err?.message ?? err), attemptAt);
+    throw err;
   } finally {
     src.close();
   }
+
+  const count = replaceChannelStates(dashboardDb, channelRows);
+
+  const channels = channelRows.map(normalizeRoutingChannel).filter(Boolean);
+  try {
+    replaceRoutingSnapshot(dashboardDb, {
+      channels,
+      abilities,
+      routesAvailable: routesError === null,
+      routesError,
+      now: attemptAt,
+    });
+  } catch (err) {
+    console.warn(`[run-scheduler] 渠道路由快照写入失败：${redactMessage(err?.message ?? err)}`);
+  }
+  return count;
 }
 
 async function runLogsRound() {
@@ -633,6 +931,21 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
 
   const jobTasks =
     tasks ?? createDefaultTasks({ pruneDaysRaw: prune.daysRaw, pruneDaysJobs: prune.daysJobs });
+  const collectionScheduler = createCollectionScheduler({
+    argv,
+    options,
+    tasks: jobTasks,
+    store: createRuntimeSettingsStore({
+      dataDir: INSTANCE.paths.dataDir,
+      collectionDefaults: {
+        logsMinutes: DEFAULT_LOGS_INTERVAL_MS / 60_000,
+        spendMinutes: DEFAULT_SPEND_INTERVAL_MS / 60_000,
+      },
+    }),
+    now,
+    log,
+    errorLog,
+  }).start();
 
   if (options.once) {
     const result = await runOnce({
@@ -641,37 +954,12 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
       log,
       errorLog,
     });
+    collectionScheduler.stop();
     return result.failed > 0 ? 1 : 0;
   }
 
-  const spendRunner = createTaskRunner({ name: TASK_SPEND, run: jobTasks.spend, now, log, errorLog });
-  const logsRunner = createTaskRunner({ name: TASK_LOGS, run: jobTasks.logs, now, log, errorLog });
-  const spendDelayMs = computeInitialDelayMs(now(), options.spendIntervalMs);
-  // 日志对齐槽位 +45 秒：等余额快照落库，刷新时成本与售出才是同一段区间
-  const logsDelayMs = nextSlotDelayMs(
-    now(),
-    options.logsIntervalMs,
-    SPEND_ALIGN_MS + LOGS_ALIGN_MS,
-  );
-
-  const spendLoop = createLoop({
-    delayMs: spendDelayMs,
-    intervalMs: options.spendIntervalMs,
-    task: spendRunner,
-    // 每轮重算下一个槽位：主机挂起或时钟跳变后能自动回到整点网格
-    nextDelayMs: () => nextSlotDelayMs(now(), options.spendIntervalMs, SPEND_ALIGN_MS),
-  }).start();
-
-  let logsLoop = null;
-  if (!options.noLogs) {
-    logsLoop = createLoop({
-      delayMs: logsDelayMs,
-      intervalMs: options.logsIntervalMs,
-      task: logsRunner,
-      nextDelayMs: () =>
-        nextSlotDelayMs(now(), options.logsIntervalMs, SPEND_ALIGN_MS + LOGS_ALIGN_MS),
-    }).start();
-  }
+  const { spendDelayMs, logsDelayMs } = collectionScheduler.initialDelays;
+  const { spendIntervalMs, logsIntervalMs } = collectionScheduler.intervals;
 
   let pruneLoop = null;
   if (prune.enabled && typeof jobTasks.prune === 'function') {
@@ -738,9 +1026,9 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
   }
 
   log(
-    `[run-scheduler] 常驻启动：${TASK_SPEND} 首轮 ${spendDelayMs}ms 后，之后每 ${options.spendIntervalMs}ms；` +
-      (logsLoop
-        ? `${TASK_LOGS} 首轮 ${logsDelayMs}ms 后，之后每 ${options.logsIntervalMs}ms`
+    `[run-scheduler] 常驻启动：${TASK_SPEND} 首轮 ${spendDelayMs}ms 后，之后每 ${spendIntervalMs}ms；` +
+      (!options.noLogs
+        ? `${TASK_LOGS} 首轮 ${logsDelayMs}ms 后，之后每 ${logsIntervalMs}ms`
         : `${TASK_LOGS} 已关闭`) +
       '；' +
       (pruneLoop
@@ -764,8 +1052,7 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
   const shutdown = (signal) => {
     if (stopping) return;
     stopping = true;
-    spendLoop.stop();
-    logsLoop?.stop();
+    collectionScheduler.stop();
     pruneLoop?.stop();
     rollupLoop?.stop();
     httpErrorsLoop?.stop();

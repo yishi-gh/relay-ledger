@@ -1,0 +1,43 @@
+{
+  "display": {
+    "unitSystem": "zh",
+    "currencyDecimals": 2,
+    "tokenDecimals": 2,
+    "percentDecimals": 1
+  },
+  "refresh": {
+    "intervalMinutes": 15,
+    "pauseWhenHidden": true,
+    "defaultRange": "24h"
+  },
+  "monitoring": {
+    "cacheRate": {
+      "good": 0.8,
+      "warn": 0.5
+    },
+    "latencyP50": {
+      "goodMs": 5000,
+      "warnMs": 15000
+    },
+    "latencyP95": {
+      "goodMs": 20000,
+      "warnMs": 60000
+    },
+    "runway": {
+      "dangerDays": 3,
+      "warnDays": 7
+    },
+    "freshness": {
+      "warnMinutes": 30,
+      "dangerMinutes": 120
+    }
+  },
+  "collection": {
+    "logsMinutes": 15,
+    "spendMinutes": 15
+  },
+  "health": {
+    "minSamples": 3,
+    "failErrorRate": 0.02
+  }
+}

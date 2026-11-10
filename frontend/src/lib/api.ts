@@ -132,6 +132,39 @@ export interface ChannelsPayload {
   archive?: ArchiveInfo
 }
 
+export interface ChannelRoutesPayload {
+  available: boolean
+  synced_at: number | null
+  last_attempt_at: number | null
+  error: string | null
+  routes_available: boolean
+  routes_error: string | null
+  channels: Array<{
+    id: number
+    name: string
+    status: number | null
+    state: "enabled" | "disabled" | "unknown"
+    endpoint: string | null
+    account_ids: string[]
+    model_mapping: Record<string, string> | null
+    mapping_error: string | null
+  }>
+  accounts: Array<{
+    id: string
+    name: string
+    website: string | null
+    channel_ids: number[]
+  }>
+  abilities: Array<{
+    group: string
+    model: string
+    channel_id: number
+    enabled: boolean | null
+    priority: number | null
+    weight: number | null
+  }>
+}
+
 export interface GroupsPayload {
   groups: GroupRowData[]
 }
@@ -184,7 +217,8 @@ export function getApiBaseUrl(): string {
 
 export async function fetchJson<T>(
   path: string,
-  params?: Record<string, string | number>
+  params?: Record<string, string | number>,
+  options?: { signal?: AbortSignal },
 ): Promise<T> {
   const url = new URL(path, getApiBaseUrl())
   if (params) {
@@ -198,6 +232,7 @@ export async function fetchJson<T>(
   const res = await fetch(url.toString(), {
     headers: { Accept: "application/json" },
     cache: "no-store",
+    signal: options?.signal,
   })
 
   if (!res.ok) {
@@ -212,6 +247,10 @@ export async function fetchJson<T>(
   }
 
   return (await res.json()) as T
+}
+
+export function fetchChannelRoutes(options?: { signal?: AbortSignal }): Promise<ChannelRoutesPayload> {
+  return fetchJson<ChannelRoutesPayload>("/api/routes", undefined, options)
 }
 
 /** 北京时间自然日 00:00 的 UTC 毫秒时间戳 */

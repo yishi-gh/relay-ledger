@@ -13,12 +13,14 @@ import {
   readSpendSum,
 } from '../store/dashboard.mjs';
 import { readChannelStates, readLiveChannelIds } from '../store/channel-state.mjs';
+import { readRoutingSnapshot } from '../store/channel-routing.mjs';
 import { channelOwners } from './config.mjs';
 import {
   computeMargin,
   evaluateLedger,
   round6,
 } from './ledger.mjs';
+import { SHARED_DEFAULTS } from './runtime-settings.mjs';
 import {
   DAY_MS,
   beijingDayStart,
@@ -33,6 +35,57 @@ export const LOCAL_FILTER = "log_type = 2 AND (token_name IS NULL OR token_name 
 
 const MAX_PAGE_SIZE = 200;
 const DEFAULT_PAGE_SIZE = 50;
+
+/** 只保留 http(s) origin：去掉 userinfo / path / query / hash；解析失败或非 http(s) 返回 null */
+function safeOrigin(value) {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!text) return null;
+  let url;
+  try {
+    url = new URL(text);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  // host 自带端口；userinfo/path/query/hash 全部丢弃
+  return `${url.protocol}//${url.host}`;
+}
+
+/** model_mapping 仅作为渠道附注：必须是 string→string 对象，非法时不回传原文 */
+function parseChannelModelMapping(raw) {
+  if (raw === null || raw === undefined || raw === '') {
+    return { model_mapping: null, mapping_error: null };
+  }
+  if (typeof raw !== 'string') {
+    return { model_mapping: null, mapping_error: 'model_mapping 不是字符串' };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { model_mapping: null, mapping_error: 'model_mapping 不是合法 JSON' };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { model_mapping: null, mapping_error: 'model_mapping 必须是对象' };
+  }
+  // Object.fromEntries 用定义属性写入，__proto__ 这类键不会被原型 setter 吃掉
+  const entries = [];
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value !== 'string') {
+      return { model_mapping: null, mapping_error: 'model_mapping 含非字符串值' };
+    }
+    entries.push([key, value]);
+  }
+  return { model_mapping: Object.fromEntries(entries), mapping_error: null };
+}
+
+/** 渠道状态：1 启用；2/3 停用；其它或 null 未知 */
+function routingChannelState(status) {
+  if (status === 1) return 'enabled';
+  if (status === 2 || status === 3) return 'disabled';
+  return 'unknown';
+}
 
 /** /api/errors 的区间上限：nginx 聚合按小时存，超过 31 天分桶过密且多半没人看 */
 const MAX_ERROR_RANGE_MS = 31 * DAY_MS;
@@ -578,7 +631,14 @@ export function buildProfit({
   };
 }
 
-export function createApi({ source, dashboard, config, siteName, sourceLabel }) {
+export function createApi({
+  source,
+  dashboard,
+  config,
+  siteName,
+  sourceLabel,
+  getHealthSettings = () => SHARED_DEFAULTS.health,
+}) {
   const owners = channelOwners(config);
   const columns = Object.fromEntries(
     Object.keys(REQUIRED_SOURCE_COLUMNS).map((t) => [t, tableColumns(source, t)]),
@@ -1977,13 +2037,15 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
 
     // 一次「尝试」= 一条成功消费日志 + 一条错误日志，两者互不包含。
     // 只用成功数当分母时，某一小时失败多于成功会把成功率算成负数。
+    // 阈值来自运行时设置（health.minSamples / failErrorRate），面板改完立刻生效。
+    const healthRules = getHealthSettings();
     const stateOf = (successes, errors) => {
       const attempts = successes + errors;
       if (attempts <= 0) return 'none';
       // 样本太少时不给结论：1 次失败也判 fail 会让刚上线的渠道整屏飘红
-      if (attempts < 3) return 'unknown';
+      if (attempts < healthRules.minSamples) return 'unknown';
       if (errors <= 0) return 'ok';
-      if (errors / attempts < 0.02) return 'warn';
+      if (errors / attempts < healthRules.failErrorRate) return 'warn';
       return 'fail';
     };
 
@@ -2050,6 +2112,10 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
           : null,
       },
       coverage: { errors_since: typeof since === 'number' ? since : null },
+      health_rules: {
+        minSamples: healthRules.minSamples,
+        failErrorRate: healthRules.failErrorRate,
+      },
     };
   }
 
@@ -2083,5 +2149,82 @@ export function createApi({ source, dashboard, config, siteName, sourceLabel }) 
     };
   }
 
-  return { meta, overview, trend, profit, channels, groups, users, models, capital, upstreams, quality, errors, status, rows };
+  /**
+   * 渠道路由页：只读看板库的配置快照 + 静态账户归属。
+   * 不读日志、不补边、不猜归属：渠道全部保留（含无流量/无 ability/未映射），
+   * abilities 只来自源库 abilities 表，model_mapping 仅作附注。
+   */
+  function routeGraph() {
+    const snapshot = readRoutingSnapshot(dashboard);
+    const payload = snapshot.payload ?? null;
+    const ownersByChannel = new Map();
+    const sourceAccounts = Array.isArray(config?.accounts) ? config.accounts : [];
+    const accounts = sourceAccounts.map((account) => {
+      const id = String(account?.id ?? '');
+      const channelIds = [];
+      for (const value of Array.isArray(account?.channels) ? account.channels : []) {
+        const channelId = Number(value);
+        if (!Number.isInteger(channelId) || channelIds.includes(channelId)) continue;
+        channelIds.push(channelId);
+        const owners = ownersByChannel.get(channelId) ?? [];
+        if (!owners.includes(id)) owners.push(id);
+        ownersByChannel.set(channelId, owners);
+      }
+      return {
+        id,
+        name: account?.name == null ? id : String(account.name),
+        // 静态配置里的 base_url 只取 origin，避免把接口路径当财务网站
+        website: safeOrigin(account?.base_url),
+        channel_ids: channelIds,
+      };
+    });
+
+    const channels = (Array.isArray(payload?.channels) ? payload.channels : []).map((channel) => {
+      const id = Number(channel?.id);
+      const status = typeof channel?.status === 'number' && Number.isFinite(channel.status)
+        ? channel.status
+        : null;
+      const mapping = parseChannelModelMapping(channel?.model_mapping);
+      return {
+        id,
+        name: channel?.name == null ? `渠道 #${id}` : String(channel.name),
+        status,
+        state: routingChannelState(status),
+        endpoint: safeOrigin(channel?.base_url),
+        account_ids: ownersByChannel.get(id) ?? [],
+        model_mapping: mapping.model_mapping,
+        mapping_error: mapping.mapping_error,
+      };
+    });
+
+    return {
+      available: snapshot.available,
+      synced_at: snapshot.synced_at,
+      last_attempt_at: snapshot.last_attempt_at,
+      error: snapshot.error,
+      routes_available: payload ? payload.routes_available !== false : false,
+      routes_error: payload && typeof payload.routes_error === 'string' ? payload.routes_error : null,
+      channels,
+      accounts,
+      abilities: Array.isArray(payload?.abilities) ? payload.abilities : [],
+    };
+  }
+
+  return {
+    meta,
+    overview,
+    trend,
+    profit,
+    channels,
+    groups,
+    users,
+    models,
+    capital,
+    upstreams,
+    quality,
+    errors,
+    status,
+    rows,
+    routeGraph,
+  };
 }

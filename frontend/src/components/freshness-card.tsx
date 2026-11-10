@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Radio } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { formatNumber } from "@/lib/formatters"
+import { getServerSettings } from "@/lib/settings"
 
 export interface UpstreamLike {
   name?: string
@@ -16,25 +16,45 @@ export interface FreshnessCardProps {
   className?: string
 }
 
-/** 小时后按陈旧程度分档：30 分钟内正常，2 小时内告警，超过即失效 */
-export function freshnessTone(hours: number): "muted" | "warn" | "bad" {
-  if (hours <= 0.5) return "muted"
-  if (hours <= 2) return "warn"
+/** 分钟后按陈旧程度分档：warnMinutes 内正常，dangerMinutes 内告警，超过或缺失即失效/未同步 */
+export function freshnessTone(
+  minutes: number | null | undefined,
+  thresholds = getServerSettings().monitoring.freshness
+): "muted" | "warn" | "bad" {
+  if (minutes == null || !Number.isFinite(minutes)) return "bad"
+  if (minutes <= thresholds.warnMinutes) return "muted"
+  if (minutes <= thresholds.dangerMinutes) return "warn"
   return "bad"
+}
+
+function formatFreshnessText(minutes: number | null): string {
+  if (minutes == null) return "未同步"
+  if (minutes < 60) return `陈旧 ${minutes} 分钟`
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+  if (mins === 0) return `陈旧 ${hours} 小时`
+  return `陈旧 ${hours}小时 ${mins}分`
 }
 
 export function FreshnessCard({ accounts = [], now, className }: FreshnessCardProps) {
   const [clockFallback] = React.useState(() => Date.now())
   const clock = now ?? clockFallback
+  const thresholds = getServerSettings().monitoring.freshness
 
   const stale = accounts
     .map((a) => {
       const last = typeof a.last_sync === "number" ? a.last_sync : null
-      const hours = last ? (clock - last) / 36e5 : null
-      return { name: a.name || "未知账户", hours }
+      const diffMs = last ? clock - last : null
+      const minutes = diffMs != null ? Math.max(0, Math.floor(diffMs / 60000)) : null
+      return { name: a.name || "未知账户", last, minutes }
     })
-    .filter((a) => a.hours != null && a.hours > 0.5)
-    .sort((a, b) => (b.hours ?? 0) - (a.hours ?? 0))
+    .filter((a) => a.last == null || (a.minutes != null && a.minutes > thresholds.warnMinutes))
+    .sort((a, b) => {
+      if (a.last == null && b.last == null) return 0
+      if (a.last == null) return -1
+      if (b.last == null) return 1
+      return (b.minutes ?? 0) - (a.minutes ?? 0)
+    })
 
   const latest = accounts.reduce<number | null>((acc, a) => {
     const last = typeof a.last_sync === "number" ? a.last_sync : null
@@ -96,14 +116,14 @@ export function FreshnessCard({ accounts = [], now, className }: FreshnessCardPr
                 <span
                   className={cn(
                     "font-mono tabular-nums shrink-0",
-                    freshnessTone(a.hours ?? 0) === "bad"
+                    freshnessTone(a.minutes, thresholds) === "bad"
                       ? "text-destructive font-semibold"
-                      : freshnessTone(a.hours ?? 0) === "warn"
+                      : freshnessTone(a.minutes, thresholds) === "warn"
                         ? "text-[var(--chart-3)]"
                         : "text-muted-foreground"
                   )}
                 >
-                  陈旧 {formatNumber(Math.round(a.hours ?? 0))} 小时
+                  {formatFreshnessText(a.minutes)}
                 </span>
               </li>
             ))}
@@ -116,7 +136,7 @@ export function FreshnessCard({ accounts = [], now, className }: FreshnessCardPr
         )}
 
         <div className="text-[12px] leading-[16px] text-muted-foreground border-t border-border/50 pt-1.5 shrink-0">
-          上游账户共 {accounts.length} 个 · 阈值 30 分钟
+          上游账户共 {accounts.length} 个 · 阈值 {thresholds.warnMinutes} 分钟
         </div>
       </CardContent>
     </Card>

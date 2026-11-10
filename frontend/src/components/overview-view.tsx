@@ -28,8 +28,11 @@ import {
   formatNumber,
   formatPercent,
   formatTokens,
+  formatQuantity,
+  formatRawNumber,
 } from "@/lib/formatters"
 import { formatTokenCn } from "@/components/table-utils"
+import { getPreferences } from "@/lib/settings"
 
 export interface KpiData {
   revenue: number | null
@@ -87,6 +90,10 @@ export function OverviewView({
     kpiData.accountableRevenue != null &&
     kpiData.revenue != null &&
     kpiData.accountableRevenue < kpiData.revenue
+
+  const isRawUnit = getPreferences().display.unitSystem === "raw"
+  // raw 模式大数（如 1,400,000,000）留足 >=104px 宽度，避免左侧截断；非 raw 保持 54px
+  const tokenAxisWidth = isRawUnit ? 108 : 54
 
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
@@ -411,21 +418,15 @@ export function OverviewView({
                     axisLine={{ stroke: "var(--border)" }}
                     tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
                   />
-                  {/* 左轴：Token 消耗量（留足 48px 宽度与 0 左边距，确保 140M 等长刻度完整位于 SVG 内部） */}
+                  {/* 左轴：Token 消耗量（遵循统一单位，留足宽度与 0 左边距） */}
                   <YAxis
                     yAxisId="tokens"
                     orientation="left"
                     tickLine={false}
                     axisLine={false}
-                    width={48}
+                    width={tokenAxisWidth}
                     tick={{ fill: "var(--chart-2)", fontSize: 12 }}
-                    tickFormatter={(val) =>
-                      val >= 1e6
-                        ? `${(val / 1e6).toFixed(1).replace(/\.0$/, "")}M`
-                        : val >= 1e3
-                        ? `${(val / 1e3).toFixed(0)}k`
-                        : String(val)
-                    }
+                    tickFormatter={(val) => formatQuantity(val)}
                   />
                   {/* 右轴：缓存命中率 (0–100%) */}
                   <YAxis
@@ -447,7 +448,7 @@ export function OverviewView({
                       const cache = typeof point.cacheRate === "number" ? point.cacheRate : null
 
                       return (
-                        <div className="rounded-lg border border-border bg-card p-2.5 text-[12px] leading-[16px] shadow-md space-y-1.5 min-w-[170px]">
+                        <div className="rounded-lg border border-border bg-card p-2.5 text-[12px] leading-[16px] shadow-md space-y-1.5 min-w-[190px]">
                           <div className="font-medium text-foreground border-b border-border pb-1">
                             {typeof point.fullLabel === "string" ? point.fullLabel : typeof point.label === "string" ? point.label : ""}
                           </div>
@@ -459,7 +460,7 @@ export function OverviewView({
                               </span>
                               <span
                                 className="font-mono tabular-nums text-foreground font-semibold"
-                                title={tokens != null ? `${formatNumber(tokens)} Tokens` : undefined}
+                                title={tokens != null ? `${formatRawNumber(tokens)} Tokens` : undefined}
                               >
                                 {tokens != null ? formatTokenCn(tokens) : "—"}
                               </span>
@@ -518,7 +519,7 @@ export function OverviewView({
                 <span>Token:</span>
                 <span
                   className="font-mono tabular-nums font-semibold text-foreground text-[13px]"
-                  title={kpiData.tokens != null ? `${formatNumber(kpiData.tokens)} Tokens` : undefined}
+                  title={kpiData.tokens != null ? `${formatRawNumber(kpiData.tokens)} Tokens` : undefined}
                 >
                   {formatTokens(kpiData.tokens)}
                 </span>

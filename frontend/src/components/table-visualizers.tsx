@@ -4,6 +4,7 @@ import {
   cacheToneClass,
   latencyP95ToneClass,
 } from "@/components/table-utils"
+import { getServerSettings } from "@/lib/settings"
 import { cn } from "@/lib/utils"
 
 /** 1. 售出可视化：数字 + 右侧 2px 细横条，按本表最大值归一（>20% 主色，Top1 更深） */
@@ -40,7 +41,7 @@ export function RevenueCell({ value, maxValue = 0, isTop1 = false }: RevenueCell
   )
 }
 
-/** 2. 缓存率可视化：数字 + 下方 3px 细进度条（0–100%），>=80 绿 / >=50 黄 / <50 红 */
+/** 2. 缓存率可视化：数字 + 下方 3px 细进度条（0–100%），沿用配置 good / warn 阈值 */
 export interface CacheRateCellProps {
   value: number | null | undefined
 }
@@ -49,19 +50,20 @@ export function CacheRateCell({ value }: CacheRateCellProps) {
   if (value == null || isNaN(value)) {
     return <span className="text-muted-foreground">—</span>
   }
+  const thresholds = getServerSettings().monitoring.cacheRate
   const pct = Math.min(100, Math.max(0, value * 100))
   return (
     <div className="flex flex-col items-end justify-center gap-0.5 w-full">
-      <span className={cn("text-[13px] leading-[18px] font-mono tabular-nums", cacheToneClass(value))}>
+      <span className={cn("text-[13px] leading-[18px] font-mono tabular-nums", cacheToneClass(value, thresholds))}>
         {formatPercent(value)}
       </span>
       <div className="w-10 sm:w-12 h-[3px] bg-muted/40 rounded-full shrink-0 overflow-hidden">
         <div
           className={cn(
             "h-full rounded-full transition-all duration-300",
-            value >= 0.8
+            value >= thresholds.good
               ? "bg-emerald-500"
-              : value >= 0.5
+              : value >= thresholds.warn
               ? "bg-amber-500"
               : "bg-rose-500"
           )}
@@ -72,7 +74,7 @@ export function CacheRateCell({ value }: CacheRateCellProps) {
   )
 }
 
-/** 3. P95 可视化：条形按 0–60s 归一，>=60s 顶满变红；保留原数字 */
+/** 3. P95 可视化：条形按配置 warnMs 归一，>=warnMs 顶满变红；保留原数字 */
 export interface LatencyP95CellProps {
   value: number | null | undefined
 }
@@ -81,24 +83,26 @@ export function LatencyP95Cell({ value }: LatencyP95CellProps) {
   if (value == null || isNaN(value) || value < 0) {
     return <span className="text-muted-foreground">—</span>
   }
-  const pct = Math.min(100, Math.max(0, (value / 60000) * 100))
-  const isOver60s = value >= 60000
+  const thresholds = getServerSettings().monitoring.latencyP95
+  const warnMs = thresholds.warnMs > 0 ? thresholds.warnMs : 60000
+  const pct = Math.min(100, Math.max(0, (value / warnMs) * 100))
+  const isOverWarn = value > warnMs
   return (
     <div className="flex flex-col items-end justify-center gap-0.5 w-full">
-      <span className={cn("text-[13px] leading-[18px] font-mono tabular-nums", latencyP95ToneClass(value))}>
+      <span className={cn("text-[13px] leading-[18px] font-mono tabular-nums", latencyP95ToneClass(value, thresholds))}>
         {formatLatency(value)}
       </span>
       <div className="w-10 sm:w-12 h-[3px] bg-muted/40 rounded-full shrink-0 overflow-hidden">
         <div
           className={cn(
             "h-full rounded-full transition-all duration-300",
-            isOver60s
+            isOverWarn
               ? "bg-rose-500"
-              : value <= 20000
+              : value <= thresholds.goodMs
               ? "bg-emerald-500"
               : "bg-amber-500"
           )}
-          style={{ width: `${isOver60s ? 100 : pct}%` }}
+          style={{ width: `${isOverWarn ? 100 : pct}%` }}
         />
       </div>
     </div>
