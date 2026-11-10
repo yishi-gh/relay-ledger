@@ -7,7 +7,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import {
-  Area,
   Bar,
   CartesianGrid,
   ComposedChart,
@@ -389,7 +388,7 @@ export function OverviewView({
               调用流量
             </CardTitle>
             <CardDescription className="text-[12px] leading-[16px] text-muted-foreground mt-0.5">
-              请求量 (左轴) · Token / 缓存率 (右轴)
+              Token 消耗 (左轴) · 缓存命中率 (右轴)
             </CardDescription>
           </CardHeader>
 
@@ -398,7 +397,7 @@ export function OverviewView({
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart
                   data={trafficChartData}
-                  margin={{ top: 10, right: 6, left: -10, bottom: 0 }}
+                  margin={{ top: 10, right: 6, left: 0, bottom: 0 }}
                 >
                   <CartesianGrid
                     strokeDasharray="3 3"
@@ -412,27 +411,13 @@ export function OverviewView({
                     axisLine={{ stroke: "var(--border)" }}
                     tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
                   />
-                  {/* 左轴：请求量 */}
+                  {/* 左轴：Token 消耗量（留足 48px 宽度与 0 左边距，确保 140M 等长刻度完整位于 SVG 内部） */}
                   <YAxis
-                    yAxisId="requests"
+                    yAxisId="tokens"
                     orientation="left"
                     tickLine={false}
                     axisLine={false}
-                    width={36}
-                    tick={{ fill: "var(--chart-1)", fontSize: 12 }}
-                    tickFormatter={(val) =>
-                      val >= 1000
-                        ? `${(val / 1000).toFixed(1).replace(/\.0$/, "")}k`
-                        : String(val)
-                    }
-                  />
-                  {/* 右轴 1：Token 消耗量 */}
-                  <YAxis
-                    yAxisId="tokens"
-                    orientation="right"
-                    tickLine={false}
-                    axisLine={false}
-                    width={38}
+                    width={48}
                     tick={{ fill: "var(--chart-2)", fontSize: 12 }}
                     tickFormatter={(val) =>
                       val >= 1e6
@@ -442,7 +427,7 @@ export function OverviewView({
                         : String(val)
                     }
                   />
-                  {/* 右轴 2：缓存命中率 (0–100%) */}
+                  {/* 右轴：缓存命中率 (0–100%) */}
                   <YAxis
                     yAxisId="cacheRate"
                     orientation="right"
@@ -458,25 +443,15 @@ export function OverviewView({
                     content={({ active, payload }) => {
                       if (!active || !payload || !payload.length) return null
                       const point = payload[0].payload as Record<string, unknown>
-                      const reqs = typeof point.requests === "number" ? point.requests : null
                       const tokens = typeof point.tokens === "number" ? point.tokens : null
                       const cache = typeof point.cacheRate === "number" ? point.cacheRate : null
 
                       return (
-                        <div className="rounded-lg border border-border bg-card p-2.5 text-[12px] leading-[16px] shadow-md space-y-1.5 min-w-[190px]">
+                        <div className="rounded-lg border border-border bg-card p-2.5 text-[12px] leading-[16px] shadow-md space-y-1.5 min-w-[170px]">
                           <div className="font-medium text-foreground border-b border-border pb-1">
                             {typeof point.fullLabel === "string" ? point.fullLabel : typeof point.label === "string" ? point.label : ""}
                           </div>
                           <div className="space-y-1">
-                            <div className="flex items-center justify-between gap-3 text-muted-foreground">
-                              <span className="inline-flex items-center gap-1.5">
-                                <span className="size-2 rounded-xs bg-[var(--chart-1)] shrink-0" />
-                                <span>请求量:</span>
-                              </span>
-                              <span className="font-mono tabular-nums text-foreground font-semibold">
-                                {reqs != null ? `${formatNumber(reqs)} 次` : "—"}
-                              </span>
-                            </div>
                             <div className="flex items-center justify-between gap-3 text-muted-foreground">
                               <span className="inline-flex items-center gap-1.5">
                                 <span className="size-2 rounded-xs bg-[var(--chart-2)] shrink-0" />
@@ -502,21 +477,6 @@ export function OverviewView({
                         </div>
                       )
                     }}
-                  />
-                  {/* 请求量面积 */}
-                  <Area
-                    yAxisId="requests"
-                    type="monotone"
-                    dataKey="requests"
-                    name="请求量"
-                    stroke="var(--chart-1)"
-                    strokeWidth={2}
-                    fill="var(--chart-1)"
-                    fillOpacity={0.12}
-                    dot={{ r: 2, fill: "var(--chart-1)" }}
-                    activeDot={{ r: 4 }}
-                    isAnimationActive={false}
-                    connectNulls={false}
                   />
                   {/* Token 消耗折线 */}
                   <Line
@@ -550,16 +510,9 @@ export function OverviewView({
             </div>
           </CardContent>
 
-          {/* 卡底指标说明与窗口汇总 */}
+          {/* 卡底指标说明与窗口汇总：仅保留 Token 消耗与缓存命中率两项 */}
           <div className="pt-2 border-t border-border/60 shrink-0 mt-auto">
             <div className="flex items-center justify-between text-[12px] leading-[16px] text-muted-foreground flex-wrap gap-x-4 gap-y-1.5">
-              <div className="flex items-center gap-1.5">
-                <span className="size-2.5 rounded-xs bg-[var(--chart-1)] shrink-0" />
-                <span>请求量:</span>
-                <span className="font-mono tabular-nums font-semibold text-foreground text-[13px]">
-                  {formatNumber(kpiData.requests)}
-                </span>
-              </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-3 h-0.5 bg-[var(--chart-2)] rounded-full shrink-0" />
                 <span>Token:</span>
