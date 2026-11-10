@@ -28,13 +28,13 @@ import {
 } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-/** 状态条颜色：正常绿、告警黄、故障红、样本不足中性灰、无请求深灰 */
+/** 状态条颜色：正常、告警、故障、样本不足、无请求 */
 export const STATE_COLOR: Record<StatusState, string> = {
   ok: "var(--chart-2)",
   warn: "var(--chart-3)",
   fail: "var(--chart-5)",
-  unknown: "#64748b",
-  none: "#334155",
+  unknown: "var(--status-unknown)",
+  none: "var(--status-none)",
 }
 
 export const STATE_LABEL: Record<StatusState, string> = {
@@ -260,7 +260,11 @@ export function HealthView({
                               <TooltipTrigger
                                 render={
                                   <span
-                                    className="flex-1 basis-0 min-w-[1px] h-3.5 rounded-[1px] transition-opacity hover:opacity-80 cursor-pointer"
+                                    className={cn(
+                                      "flex-1 basis-0 min-w-[1px] h-3.5 rounded-[1px] transition-opacity hover:opacity-80 cursor-pointer",
+                                      state === "unknown" && "health-pattern-unknown",
+                                      state === "none" && "shadow-[inset_0_0_0_1px_var(--border)]"
+                                    )}
                                     style={{
                                       backgroundColor: STATE_COLOR[state],
                                     }}
@@ -274,14 +278,16 @@ export function HealthView({
                               >
                                 <div className="font-semibold text-[12px] leading-tight flex items-center justify-between gap-2 w-full">
                                   <span>{bucket.label}</span>
-                                  <span
-                                    className="text-[12px] font-medium px-1.5 py-0.5 rounded-[2px]"
-                                    style={{
-                                      backgroundColor: STATE_COLOR[state] + "26",
-                                      color: state === "ok" ? "var(--chart-2)" : state === "warn" ? "var(--chart-3)" : state === "fail" ? "var(--chart-5)" : "var(--muted-foreground)"
-                                    }}
-                                  >
-                                    {STATE_LABEL[state]}
+                                  <span className="inline-flex items-center gap-1.5 text-[12px] font-medium px-1.5 py-0.5 rounded-[3px] bg-muted/80 text-foreground border border-border/60">
+                                    <span
+                                      className={cn(
+                                        "size-2 rounded-[1px] shrink-0",
+                                        state === "unknown" && "health-pattern-unknown",
+                                        state === "none" && "border border-border/60"
+                                      )}
+                                      style={{ backgroundColor: STATE_COLOR[state] }}
+                                    />
+                                    <span>{STATE_LABEL[state]}</span>
                                   </span>
                                 </div>
                                 <div className="text-[12px] opacity-85 leading-tight">
@@ -382,7 +388,11 @@ export function HealthView({
             {LEGEND.map((state) => (
               <div key={state} className="flex items-center gap-1.5">
                 <span
-                  className="size-2.5 rounded-[1px] shrink-0"
+                  className={cn(
+                    "size-2.5 rounded-[1px] shrink-0",
+                    state === "unknown" && "health-pattern-unknown",
+                    state === "none" && "border border-border/60"
+                  )}
                   style={{ backgroundColor: STATE_COLOR[state] }}
                 />
                 <span>{STATE_LABEL[state]}</span>
