@@ -97,18 +97,18 @@ export function FundingStrip({ capital, accounts = [], now, className }: Funding
             hint="按自然日摊分"
           />
           <Metric
-            label="最短续航"
+            label="最早预计耗尽"
             value={runway == null ? "—" : `${runway.toFixed(1)} 天`}
             hint={
               shortest
-                ? `${shortest.group ?? "未分组"} · ${shortest.name}`
+                ? `上游账户 ${shortest.name}`
                 : runway == null
                   ? "缺余额或成本"
                   : "余额 ÷ 日均成本"
             }
             hintTitle={
               shortest
-                ? `${shortest.group ?? "未分组"} / ${shortest.name}：最先耗尽的账户，余额 ÷ 日均成本`
+                ? `上游账户 ${shortest.name}：最先耗尽，余额 ÷ 日均成本`
                 : undefined
             }
             tone={runwayTone}

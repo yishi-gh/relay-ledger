@@ -28,6 +28,7 @@ import {
 } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useSettings } from "@/lib/settings"
+import { SiteLogo } from "@/components/site-logo"
 
 /** 状态条颜色：正常、告警、故障、样本不足、无请求 */
 export const STATE_COLOR: Record<StatusState, string> = {
@@ -204,7 +205,7 @@ export function HealthView({
 
     return (
       <div className="flex flex-col gap-2">
-        <div className="rounded-lg border border-border bg-card overflow-hidden [&_[data-slot=table-container]]:max-h-[clamp(180px,calc((100dvh-320px)/2),420px)] [&_[data-slot=table-container]]:overflow-y-auto max-md:[&_[data-slot=table-container]]:max-h-none">
+        <div className="rounded-lg border border-border bg-card overflow-hidden [&_[data-slot=table-container]]:h-[clamp(180px,calc((100dvh-320px)/2),420px)] [&_[data-slot=table-container]]:overflow-y-auto max-md:[&_[data-slot=table-container]]:h-auto max-md:[&_[data-slot=table-container]]:max-h-none">
           <Table className="table-fixed text-sm" style={{ width: "100%", minWidth: `${healthTableMinPx}px` }}>
             <colgroup>
               <col style={{ width: "155px" }} />
@@ -250,12 +251,17 @@ export function HealthView({
                     className="h-8 hover:bg-muted/40 transition-colors border-b border-border/60"
                   >
                     <TableCell className="px-2.5 py-0 h-8 align-middle" style={{ width: "155px" }}>
-                      <span
-                        className="block truncate text-[13px] leading-[18px] text-foreground font-medium"
-                        title={component.name}
-                      >
-                        {component.name}
-                      </span>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        {level === "channel" && (
+                          <SiteLogo kind="channel" id={component.key} label={component.name} size={16} />
+                        )}
+                        <span
+                          className="block truncate text-[13px] leading-[18px] text-foreground font-medium"
+                          title={component.name}
+                        >
+                          {component.name}
+                        </span>
+                      </div>
                     </TableCell>
 
                     <TableCell className="px-2 py-0 h-8 align-middle" style={{ width: `${matrixColWidthPx}px` }}>

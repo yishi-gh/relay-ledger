@@ -23,6 +23,8 @@ import {
   RuntimeSettingsError,
   SHARED_DEFAULTS,
 } from './lib/runtime-settings.mjs';
+import { buildServiceHealth } from './lib/service-health.mjs';
+import { createSiteLogoService } from './lib/site-logos.mjs';
 import { openDashboardDb, syncAccounts } from './store/dashboard.mjs';
 import { ensureAggIndexes, LOGS_SCHEMA } from './store/site-logs.mjs';
 
@@ -156,6 +158,33 @@ function sendText(res, status, text, { head = false } = {}) {
     'Content-Type': 'text/plain; charset=utf-8',
     'Content-Length': Buffer.byteLength(payload),
     'Cache-Control': 'no-store',
+  });
+  res.end(head ? undefined : payload);
+}
+
+/** 图标是二进制资源：直接写 body，不走 JSON 包装，也不进 API cache */
+const LOGO_SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'Content-Security-Policy': "sandbox; default-src 'none'",
+};
+
+function sendLogo(res, logo, { head = false } = {}) {
+  res.writeHead(200, {
+    'Content-Type': logo.contentType,
+    'Content-Length': logo.body.length,
+    'Cache-Control': 'private, max-age=86400',
+    ...LOGO_SECURITY_HEADERS,
+  });
+  res.end(head ? undefined : logo.body);
+}
+
+function sendLogoMiss(res, { head = false } = {}) {
+  const payload = JSON.stringify({ error: { code: 'not_found', message: '未找到站点图标' } });
+  res.writeHead(404, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(payload),
+    'Cache-Control': 'private, max-age=21600',
+    ...LOGO_SECURITY_HEADERS,
   });
   res.end(head ? undefined : payload);
 }
@@ -323,6 +352,12 @@ export function respondApi({ api, cache, pathname, url }) {
   if (cacheable) cache.set(key, payload);
   return { payload, cache: cacheable && cache.enabled ? 'MISS' : null };
 }
+
+/** 图标参数的 id 形态：渠道只接受数字，账户只接受安全 id 字符 */
+const LOGO_ID_PATTERN = {
+  channel: /^\d{1,12}$/,
+  account: /^[A-Za-z0-9._-]{1,128}$/,
+};
 
 /** 设置请求体上限：16 KiB，足够放下三组阈值加 revision */
 export const SETTINGS_BODY_LIMIT = 16 * 1024;
@@ -502,7 +537,14 @@ async function handleSettingsRequest({ req, res, head, settingsStore, cache }) {
  * 请求处理入口：抽成工厂后，测试可以注入临时库、临时 dataDir 与真实 listen(0)，
  * 生产路径（缓存、401/405、静态文件）保持不变。
  */
-export function createRequestHandler({ api, cache, settingsStore }) {
+export function createRequestHandler({
+  api,
+  cache,
+  settingsStore,
+  dashboard = null,
+  now = Date.now,
+  logoService = null,
+}) {
   return async (req, res) => {
     const head = req.method === 'HEAD';
     try {
@@ -511,6 +553,70 @@ export function createRequestHandler({ api, cache, settingsStore }) {
 
       if (pathname === '/api/settings') {
         await handleSettingsRequest({ req, res, head, settingsStore, cache });
+        return;
+      }
+
+      if (pathname === '/api/services') {
+        if (req.method !== 'GET' && !head) {
+          sendError(res, 405, 'method_not_allowed', '服务状态只支持 GET/HEAD', { head });
+          return;
+        }
+        const range = url.searchParams.get('range') ?? '24h';
+        if (range !== '24h' && range !== '7d') {
+          sendError(res, 400, 'bad_request', 'range 只能是 24h 或 7d', { head });
+          return;
+        }
+        if (!dashboard) {
+          sendError(res, 500, 'internal_error', '服务状态不可用', { head });
+          return;
+        }
+        // 设置文件损坏仍按 500 暴露；心跳损坏由 collectorStatusOf 降级为 unconfirmed+error
+        const snapshot = settingsStore.read();
+        const collector = collectorStatusOf(settingsStore);
+        const payload = buildServiceHealth({
+          dashboard,
+          settings: snapshot.settings,
+          collector,
+          now: now(),
+          range,
+        });
+        sendPayload(res, 200, JSON.stringify(payload), { head });
+        return;
+      }
+
+      if (pathname === '/api/site-logo') {
+        if (req.method !== 'GET' && !head) {
+          sendError(res, 405, 'method_not_allowed', '站点图标只支持 GET/HEAD', { head });
+          return;
+        }
+        for (const key of url.searchParams.keys()) {
+          if (key !== 'kind' && key !== 'id') {
+            sendError(res, 400, 'bad_request', `不支持的参数 ${key}`, { head });
+            return;
+          }
+        }
+        const kind = url.searchParams.get('kind');
+        const id = url.searchParams.get('id');
+        const pattern = kind === 'channel' || kind === 'account' ? LOGO_ID_PATTERN[kind] : null;
+        if (!pattern || !id || !pattern.test(id)) {
+          sendError(res, 400, 'bad_request', 'kind 只接受 channel/account，id 形态非法', { head });
+          return;
+        }
+        if (!logoService) {
+          sendError(res, 503, 'logo_unavailable', '站点图标服务未启用', { head });
+          return;
+        }
+        let logo = null;
+        try {
+          logo = await logoService.getLogo({ kind, id });
+        } catch {
+          logo = null;
+        }
+        if (!logo) {
+          sendLogoMiss(res, { head });
+          return;
+        }
+        sendLogo(res, logo, { head });
         return;
       }
 
@@ -644,7 +750,13 @@ function main() {
   });
   const cache = createApiCache();
 
-  const server = http.createServer(createRequestHandler({ api, cache, settingsStore }));
+  // 图标服务只认配置/快照白名单解析出的 origin，不接收任意 URL 参数
+  const logoService = createSiteLogoService({
+    dataDir: INSTANCE.paths.dataDir,
+    resolveSource: (input) => api.siteLogoSource(input),
+  });
+
+  const server = http.createServer(createRequestHandler({ api, cache, settingsStore, dashboard, logoService }));
 
   server.on('error', (err) => {
     console.error(`[v2] 服务启动失败: ${err.message}`);

@@ -16,7 +16,7 @@ import {
   formatPercent,
   formatTimestamp,
 } from "@/lib/formatters"
-import { MarginCell } from "@/components/table-visualizers"
+import { SiteLogo } from "@/components/site-logo"
 import {
   type SortState,
   type AccessorMap,
@@ -568,16 +568,19 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
                       switch (col.key) {
                         case "account":
                           content = (
-                            <div className="flex flex-col justify-center min-w-0 leading-tight">
-                              <span
-                                className="font-medium text-foreground text-[13px] leading-[18px] line-clamp-2"
-                                title={row.name || row.id}
-                              >
-                                {row.name || row.id}
-                              </span>
-                              <span className="font-mono text-[11px] leading-[15px] text-muted-foreground">
-                                {row.kind}
-                              </span>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <SiteLogo kind="account" id={row.id} label={row.name || row.id} size={18} />
+                              <div className="flex flex-col justify-center min-w-0 leading-tight">
+                                <span
+                                  className="font-medium text-foreground text-[13px] leading-[18px] line-clamp-2"
+                                  title={row.name || row.id}
+                                >
+                                  {row.name || row.id}
+                                </span>
+                                <span className="font-mono text-[11px] leading-[15px] text-muted-foreground">
+                                  {row.kind}
+                                </span>
+                              </div>
                             </div>
                           )
                           break
@@ -662,7 +665,20 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
                           content = formatCurrency(row.margin)
                           break
                         case "margin_pct":
-                          content = <MarginCell value={row.margin_pct} />
+                          content = (
+                            <span
+                              className={cn(
+                                "font-mono tabular-nums text-[13px] leading-[18px]",
+                                row.margin_pct != null && row.margin_pct > 0
+                                  ? "text-emerald-600 dark:text-emerald-400 font-medium"
+                                  : row.margin_pct != null && row.margin_pct < 0
+                                  ? "text-rose-600 dark:text-rose-400 font-medium"
+                                  : "text-muted-foreground"
+                              )}
+                            >
+                              {formatPercent(row.margin_pct)}
+                            </span>
+                          )
                           break
                         case "status":
                           content =

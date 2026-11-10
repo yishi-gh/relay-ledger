@@ -725,7 +725,7 @@ export function SettingsView({ meta }: SettingsViewProps) {
               {loading && <RefreshCw className="size-3 animate-spin text-muted-foreground" />}
             </div>
             <p className="text-[12px] leading-[16px] text-muted-foreground mt-0.5">
-              定义全站缓存命中率、延迟分档、账户资金续航与数据新鲜度警戒线
+              定义全站缓存命中率、延迟分档、账户余额耗尽时间与数据新鲜度警戒线
             </p>
           </div>
           <Button variant="outline" size="sm" className="text-[12px] h-7 px-2.5" onClick={handleResetMonitoringDraft} disabled={saving || loading}>
@@ -822,7 +822,7 @@ export function SettingsView({ meta }: SettingsViewProps) {
 
             {/* 资金续航天数（允许小数） */}
             <ThresholdPairField
-              label="资金续航阈值 (严重 / 警告 天)"
+              label="余额耗尽阈值 (严重 / 警告 天)"
               hint="默认 3 天 / 7 天，支持小数"
               comparator="<"
               leftLabel="严重天数"

@@ -3,6 +3,7 @@ import type { GroupRowData } from "@/components/groups-rank-view"
 import type { UpstreamAccount } from "@/components/upstreams-view"
 import type { QualityData } from "@/components/quality-view"
 import type { UserRowData } from "@/components/table-utils"
+import type { CollectorStatus } from "./settings"
 
 const HOUR_MS = 3600000
 const DAY_MS = 86400000
@@ -139,6 +140,22 @@ export interface ChannelRoutesPayload {
   error: string | null
   routes_available: boolean
   routes_error: string | null
+  near_1h?: {
+    as_of: number
+    from: number
+    to: number
+    errors_available: boolean
+    errors_last_collected_at: number | null
+    health_rules: { minSamples: number; failErrorRate: number }
+    channels: Array<{
+      channel_id: number
+      requests: number
+      errors: number
+      attempts: number
+      uptime: number | null
+      state: "none" | "unknown" | "ok" | "warn" | "fail"
+    }>
+  }
   channels: Array<{
     id: number
     name: string
@@ -251,6 +268,37 @@ export async function fetchJson<T>(
 
 export function fetchChannelRoutes(options?: { signal?: AbortSignal }): Promise<ChannelRoutesPayload> {
   return fetchJson<ChannelRoutesPayload>("/api/routes", undefined, options)
+}
+
+export interface ServicesPayload {
+  generated_at: number
+  from: number
+  to: number
+  bucket_ms: number
+  collector: CollectorStatus
+  services: Array<{
+    id: string
+    label: string
+    enabled: boolean | null
+    interval_minutes: number | null
+    state: "ok" | "warn" | "fail" | "unknown" | "disabled"
+    reason: string
+    last_started_at: number | null
+    last_finished_at: number | null
+    last_status: string | null
+    buckets: Array<{
+      from: number
+      to: number
+      state: "ok" | "warn" | "fail" | "unknown" | "none"
+      runs: number
+      failures: number
+      partial: number
+    }>
+  }>
+}
+
+export function fetchServices(timeRange: RangeType, options?: { signal?: AbortSignal }): Promise<ServicesPayload> {
+  return fetchJson<ServicesPayload>("/api/services", { range: timeRange }, options)
 }
 
 /** 北京时间自然日 00:00 的 UTC 毫秒时间戳 */

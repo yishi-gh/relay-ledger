@@ -87,6 +87,11 @@ function routingChannelState(status) {
   return 'unknown';
 }
 
+/** 只把「表不存在」当作可降级；库关闭/损坏等错误必须向上抛 */
+function isMissingTableError(err) {
+  return /no such table/i.test(String(err?.message ?? ''));
+}
+
 /** /api/errors 的区间上限：nginx 聚合按小时存，超过 31 天分桶过密且多半没人看 */
 const MAX_ERROR_RANGE_MS = 31 * DAY_MS;
 
@@ -638,6 +643,7 @@ export function createApi({
   siteName,
   sourceLabel,
   getHealthSettings = () => SHARED_DEFAULTS.health,
+  now = Date.now,
 }) {
   const owners = channelOwners(config);
   const columns = Object.fromEntries(
@@ -2197,6 +2203,101 @@ export function createApi({
       };
     });
 
+    // ---- 最近 1 小时健康（滑动窗口，不逐渠道调用 status，也不做 7d 聚合） ----
+    const asOf = now();
+    const nearFrom = asOf - 3_600_000;
+    const rules = getHealthSettings();
+
+    let requestRows = [];
+    let requestsKnown = true;
+    try {
+      requestRows = source.prepare(
+        `SELECT COALESCE(channel_id, 0) AS channel_id, COUNT(*) AS n
+           FROM logs
+          WHERE ${LOCAL_FILTER} AND t_ms >= ? AND t_ms < ?
+          GROUP BY channel_id`,
+      ).all(nearFrom, asOf);
+    } catch (err) {
+      // 缺 logs 表可以降级为「请求覆盖不可用」，但不能因此判绿；其它错误照常暴露
+      if (!isMissingTableError(err)) throw err;
+      requestsKnown = false;
+      requestRows = [];
+    }
+
+    let errorRows = [];
+    let errorsAvailable = false;
+    let errorsLastCollectedAt = null;
+    let errorsTable = upstreamErrorTableExists();
+    if (errorsTable) {
+      try {
+        errorRows = dashboard.prepare(
+          `SELECT COALESCE(channel_id, 0) AS channel_id, COUNT(*) AS n
+             FROM upstream_error
+            WHERE t_ms >= ? AND t_ms < ?
+            GROUP BY channel_id`,
+        ).all(nearFrom, asOf);
+      } catch (err) {
+        if (!isMissingTableError(err)) throw err;
+        errorsTable = false;
+        errorRows = [];
+      }
+    }
+    try {
+      const latest = dashboard.prepare(
+        `SELECT status, finished_at
+           FROM job_runs
+          WHERE job = 'upstream-errors'
+          ORDER BY COALESCE(finished_at, started_at, 0) DESC, id DESC
+          LIMIT 1`,
+      ).get();
+      const lastOk = dashboard.prepare(
+        "SELECT MAX(finished_at) AS t FROM job_runs WHERE job = 'upstream-errors' AND status = 'ok'",
+      ).get();
+      errorsLastCollectedAt = lastOk && typeof lastOk.t === 'number' ? lastOk.t : null;
+      errorsAvailable = errorsTable
+        && Boolean(latest)
+        && latest.status === 'ok'
+        && typeof latest.finished_at === 'number'
+        && asOf - latest.finished_at <= 30 * 60 * 1000;
+    } catch (err) {
+      if (!isMissingTableError(err)) throw err;
+      errorsAvailable = false;
+      errorsLastCollectedAt = null;
+    }
+
+    const requestsByChannel = new Map();
+    for (const row of requestRows) {
+      requestsByChannel.set(Number(row.channel_id), Number(row.n) || 0);
+    }
+    const errorsByChannel = new Map();
+    for (const row of errorRows) {
+      errorsByChannel.set(Number(row.channel_id), Number(row.n) || 0);
+    }
+    const nearIds = new Set(channels.map((channel) => channel.id));
+    for (const id of requestsByChannel.keys()) nearIds.add(id);
+    for (const id of errorsByChannel.keys()) nearIds.add(id);
+
+    const nearChannels = [...nearIds].sort((a, b) => a - b).map((channelId) => {
+      const requests = requestsByChannel.get(channelId) ?? 0;
+      const errors = errorsByChannel.get(channelId) ?? 0;
+      const attempts = requests + errors;
+      let state;
+      if (!requestsKnown) state = 'unknown';
+      else if (attempts <= 0) state = 'none';
+      else if (attempts < rules.minSamples) state = 'unknown';
+      else if (errors <= 0) state = 'ok';
+      else if (errors / attempts < rules.failErrorRate) state = 'warn';
+      else state = 'fail';
+      return {
+        channel_id: channelId,
+        requests,
+        errors,
+        attempts,
+        uptime: requestsKnown && attempts > 0 ? round6(requests / attempts) : null,
+        state,
+      };
+    });
+
     return {
       available: snapshot.available,
       synced_at: snapshot.synced_at,
@@ -2207,7 +2308,41 @@ export function createApi({
       channels,
       accounts,
       abilities: Array.isArray(payload?.abilities) ? payload.abilities : [],
+      near_1h: {
+        as_of: asOf,
+        from: nearFrom,
+        to: asOf,
+        errors_available: errorsAvailable,
+        errors_last_collected_at: errorsLastCollectedAt,
+        health_rules: {
+          minSamples: rules.minSamples,
+          failErrorRate: rules.failErrorRate,
+        },
+        channels: nearChannels,
+      },
     };
+  }
+
+  function siteLogoSource({ kind, id } = {}) {
+    const accountList = Array.isArray(config?.accounts) ? config.accounts : [];
+    if (kind === 'account') {
+      const account = accountList.find((item) => String(item?.id) === String(id));
+      return account ? safeOrigin(account?.base_url) : null;
+    }
+    if (kind !== 'channel') return null;
+    const channelId = Number(id);
+    if (!Number.isInteger(channelId)) return null;
+    const snapshot = readRoutingSnapshot(dashboard);
+    const channel = (Array.isArray(snapshot.payload?.channels) ? snapshot.payload.channels : [])
+      .find((item) => Number(item?.id) === channelId);
+    const endpoint = channel ? safeOrigin(channel.base_url) : null;
+    if (endpoint) return endpoint;
+    const websites = [...new Set(accountList
+      .filter((account) => (Array.isArray(account?.channels) ? account.channels : [])
+        .some((value) => Number(value) === channelId))
+      .map((account) => safeOrigin(account?.base_url))
+      .filter(Boolean))];
+    return websites.length === 1 ? websites[0] : null;
   }
 
   return {
@@ -2226,5 +2361,6 @@ export function createApi({
     status,
     rows,
     routeGraph,
+    siteLogoSource,
   };
 }

@@ -20,7 +20,6 @@ import {
   Layers,
   Server,
   Wallet,
-  HeartPulse,
   ShieldCheck,
   Activity,
   Route,
@@ -38,12 +37,11 @@ export type ViewKey =
   | "routes"
   | "upstreams"
   | "capital"
-  | "health"
   | "quality"
   | "system"
   | "settings"
 
-export type CompatibleViewKey = ViewKey | "details" | "ops"
+export type CompatibleViewKey = ViewKey | "health" | "details" | "ops"
 
 interface NavItem {
   key: ViewKey
@@ -67,19 +65,18 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: "运营与资产",
+    label: "运营资产",
     items: [
       { key: "channels_detail", title: "渠道明细", icon: Radio },
       { key: "groups_detail", title: "分组明细", icon: Layers },
       { key: "routes", title: "渠道路由", icon: Route },
       { key: "upstreams", title: "上游账户", icon: Server },
-      { key: "capital", title: "资金与续航", icon: Wallet },
+      { key: "capital", title: "余额耗尽", icon: Wallet },
     ],
   },
   {
-    label: "系统与运维",
+    label: "系统运维",
     items: [
-      { key: "health", title: "渠道健康", icon: HeartPulse },
       { key: "quality", title: "数据质量", icon: ShieldCheck },
       { key: "system", title: "系统状态", icon: Activity },
     ],

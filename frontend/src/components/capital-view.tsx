@@ -14,6 +14,7 @@ import {
   formatCurrency,
 } from "@/lib/formatters"
 import { getServerSettings } from "@/lib/settings"
+import { SiteLogo } from "@/components/site-logo"
 import {
   type SortState,
   type AccessorMap,
@@ -238,25 +239,25 @@ export function CapitalView({
 
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">
           <div className="flex items-center justify-between text-muted-foreground">
-            <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">加权续航天数</span>
+            <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">预计最早耗尽时间</span>
             <Hourglass className="size-4 text-amber-500" />
           </div>
           <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums">
-            {total?.runway_days != null ? (
+            {shortest?.days != null ? (
               (() => {
                 const runwayThresholds = getServerSettings().monitoring.runway
                 return (
                   <span
                     className={
-                      total.runway_days < runwayThresholds.dangerDays
+                      shortest.days < runwayThresholds.dangerDays
                         ? "text-rose-600 dark:text-rose-400"
-                        : total.runway_days < runwayThresholds.warnDays
+                        : shortest.days < runwayThresholds.warnDays
                         ? "text-amber-600 dark:text-amber-400"
                         : "text-foreground"
                     }
                   >
-                    {total.runway_days.toFixed(1)}{" "}
-                    <span className="text-[14px] font-normal font-sans text-muted-foreground">天</span>
+                    {shortest.days.toFixed(1)}{" "}
+                    <span className="text-[14px] font-normal font-sans text-muted-foreground">天后耗尽</span>
                   </span>
                 )
               })()
@@ -266,20 +267,13 @@ export function CapitalView({
           </div>
           <div className="text-[12px] leading-[16px] text-muted-foreground mt-1 flex flex-col gap-0.5">
             <span>
-              {total?.accounts_counted !== undefined
-                ? `基于 ${total.accounts_counted} 个有消耗账户加权估算`
-                : "总可用余额 ÷ 7 日日均成本"}
+              {shortest
+                ? `最早耗尽上游账户: ${shortest.name}`
+                : "暂无上游账户消耗数据"}
             </span>
-            {shortest && (
-              (() => {
-                const runwayThresholds = getServerSettings().monitoring.runway
-                return (
-                  <span className={shortest.days < runwayThresholds.dangerDays ? "text-rose-600 dark:text-rose-400 font-medium" : shortest.days < runwayThresholds.warnDays ? "text-amber-600 dark:text-amber-400 font-medium" : "text-muted-foreground"}>
-                    最短: {shortest.days.toFixed(1)} 天 ({shortest.name})
-                  </span>
-                )
-              })()
-            )}
+            <span>
+              全站加权估算: {total?.runway_days != null ? `${total.runway_days.toFixed(1)} 天` : "—"}
+            </span>
           </div>
         </Card>
       </section>
@@ -295,7 +289,7 @@ export function CapitalView({
         <CardHeader className="p-0 pb-2.5 flex flex-row items-center justify-between space-y-0 shrink-0">
           <div className="flex items-center gap-2">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-              上游账户资金与续航明细
+              上游账户余额与预计耗尽时间
             </CardTitle>
             <Badge variant="secondary" className="text-[12px] leading-[16px] h-5 px-1.5 font-medium tabular-nums">
               {sortedRows.length} 个账户
@@ -340,7 +334,7 @@ export function CapitalView({
                       { key: "cost_range", label: "区间成本 ($)", isNum: true },
                       { key: "credits_range", label: "充值 ($)", isNum: true },
                       { key: "daily_avg_7d", label: "7日日均成本 ($)", isNum: true },
-                      { key: "runway_days", label: "续航天数", isNum: true },
+                      { key: "runway_days", label: "预计耗尽", isNum: true },
                       { key: "status", label: "状态", isNum: false },
                     ].map((col) => {
                       const sortAttrs = getSortHeaderAttrs(sortState, col.key)
@@ -403,16 +397,19 @@ export function CapitalView({
                       >
                         {/* 1. 账户 */}
                         <TableCell className="sticky left-0 bg-card z-10 border-r border-border/50 px-3 py-1 whitespace-nowrap min-w-[160px] sm:min-w-[200px]">
-                          <div className="flex flex-col justify-center min-w-0 leading-tight">
-                            <span
-                              className="font-medium text-foreground text-[14px] leading-[20px] truncate max-w-[220px]"
-                              title={row.name || row.account_id}
-                            >
-                              {row.name || row.account_id}
-                            </span>
-                            <span className="font-mono text-[12px] leading-[16px] text-muted-foreground">
-                              {row.account_id}
-                            </span>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <SiteLogo kind="account" id={row.account_id} label={row.name || row.account_id} size={18} />
+                            <div className="flex flex-col justify-center min-w-0 leading-tight">
+                              <span
+                                className="font-medium text-foreground text-[14px] leading-[20px] truncate max-w-[220px]"
+                                title={row.name || row.account_id}
+                              >
+                                {row.name || row.account_id}
+                              </span>
+                              <span className="font-mono text-[12px] leading-[16px] text-muted-foreground">
+                                {row.account_id}
+                              </span>
+                            </div>
                           </div>
                         </TableCell>
 

@@ -574,7 +574,7 @@ test('HTTP GET/HEAD /api/routes：DTO 完整、可缓存、无凭据', async (t)
   const body = await res.json();
   assert.deepEqual(Object.keys(body).sort(), [
     'abilities', 'accounts', 'available', 'channels', 'error',
-    'last_attempt_at', 'routes_available', 'routes_error', 'synced_at',
+    'last_attempt_at', 'near_1h', 'routes_available', 'routes_error', 'synced_at',
   ]);
   assert.equal(body.channels.length, 4);
   assert.equal(body.abilities.length, 3);

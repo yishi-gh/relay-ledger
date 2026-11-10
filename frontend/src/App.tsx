@@ -15,7 +15,6 @@ import { ModelsView } from "@/components/models-view"
 import { UpstreamsView } from "@/components/upstreams-view"
 import { CapitalView } from "@/components/capital-view"
 import { ChannelRoutesView } from "@/components/channel-routes-view"
-import { HealthView } from "@/components/health-view"
 import { QualityView } from "@/components/quality-view"
 import { SystemView } from "@/components/system-view"
 import { SettingsView } from "@/components/settings-view"
@@ -126,7 +125,6 @@ const VALID_VIEWS: ViewKey[] = [
   "upstreams",
   "capital",
   "routes",
-  "health",
   "quality",
   "system",
   "settings",
@@ -140,9 +138,8 @@ const VIEW_TITLES: Record<ViewKey, string> = {
   channels_detail: "渠道明细",
   groups_detail: "分组明细",
   upstreams: "上游账户",
-  capital: "资金与续航",
+  capital: "余额耗尽",
   routes: "渠道路由",
-  health: "渠道健康",
   quality: "数据质量",
   system: "系统状态",
   settings: "系统设置",
@@ -168,66 +165,46 @@ function beijingTrendBucket(ms: number, granularity: "hour" | "day"): string {
   return granularity === "hour" ? `${date} ${pad2(d.getUTCHours())}:00` : date
 }
 
-type DetailLevel = "channel" | "group"
-
 interface RouteState {
   view: ViewKey
-  level: DetailLevel
-}
-
-function normalizeLevel(value: string | null): DetailLevel {
-  return value === "group" ? "group" : "channel"
 }
 
 /**
  * 纯函数：只读 URL，不写 history，渲染期可安全调用。
  * 规范化（把老别名写回规范 view）统一放在挂载后的 effect 里做。
- * 旧的 tab=biz/perf/all 不再参与路由，只保留 tab=availability 转健康页的兼容。
+ * 旧健康页与 availability 入口统一回到对应明细页。
  */
 function parseRouteState(): RouteState {
   if (typeof window === "undefined") {
-    return { view: "overview", level: "channel" }
+    return { view: "overview" }
   }
 
   const params = new URLSearchParams(window.location.search)
   const rawView = params.get("view")?.replace(/-/g, "_")
-  const level = normalizeLevel(params.get("level"))
+  const detailView = params.get("level") === "group" ? "groups_detail" : "channels_detail"
 
   if (!rawView) {
-    return { view: "overview", level }
+    return { view: "overview" }
   }
 
-  if (rawView === "health") {
-    return { view: "health", level }
+  if (rawView === "health" || rawView === "details") {
+    return { view: detailView }
   }
 
   if (rawView === "quality") {
-    return { view: "quality", level }
+    return { view: "quality" }
   }
 
   if (rawView === "ops") {
-    return { view: "system", level }
-  }
-
-  // 老详情页的 availability 档已独立为渠道健康页
-  const legacyAvailability = params.get("tab") === "availability"
-
-  if (rawView === "details") {
-    if (legacyAvailability) return { view: "health", level }
-    return {
-      view: level === "group" ? "groups_detail" : "channels_detail",
-      level,
-    }
+    return { view: "system" }
   }
 
   if (rawView === "channels_detail" || rawView === "channels_table") {
-    if (legacyAvailability) return { view: "health", level: "channel" }
-    return { view: "channels_detail", level: "channel" }
+    return { view: "channels_detail" }
   }
 
   if (rawView === "groups_detail" || rawView === "groups_table") {
-    if (legacyAvailability) return { view: "health", level: "group" }
-    return { view: "groups_detail", level: "group" }
+    return { view: "groups_detail" }
   }
 
   if (
@@ -235,34 +212,35 @@ function parseRouteState(): RouteState {
     rawView === "channels_rank" ||
     rawView === "groups_rank"
   ) {
-    return { view: "rank", level }
+    return { view: "rank" }
   }
 
   if (VALID_VIEWS.includes(rawView as ViewKey)) {
-    return { view: rawView as ViewKey, level }
+    return { view: rawView as ViewKey }
   }
 
-  return { view: "overview", level }
+  return { view: "overview" }
 }
 
-/** 生成规范 URL：保留 preview 等既有参数，level 只留给健康页；废弃的 tab 一律清除。 */
+/** 生成规范 URL：保留 preview 等既有参数，废弃的 level/tab 一律清除。 */
 function buildViewUrl(
   href: string,
   view: ViewKey,
-  level: DetailLevel
 ): string {
   const url = new URL(href)
   url.searchParams.set("view", view)
 
-  if (view === "health" && level === "group") {
-    url.searchParams.set("level", "group")
-  } else {
-    url.searchParams.delete("level")
-  }
-
+  url.searchParams.delete("level")
   url.searchParams.delete("tab")
 
   return `${url.pathname}${url.search}${url.hash}`
+}
+
+function normalizeRouteUrl(route: RouteState) {
+  if (typeof window === "undefined" || !new URLSearchParams(window.location.search).has("view")) return
+  const canonical = buildViewUrl(window.location.href, route.view)
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  if (canonical !== current) window.history.replaceState({}, "", canonical)
 }
 
 function pushRoute(url: string) {
@@ -277,7 +255,6 @@ export function App() {
   const initialRoute = React.useMemo(() => parseRouteState(), [])
   const [timeRange, setTimeRange] = React.useState<RangeType>(getInitialTimeRange)
   const [currentView, setCurrentView] = React.useState<ViewKey>(initialRoute.view)
-  const [detailLevel, setDetailLevel] = React.useState<DetailLevel>(initialRoute.level)
   const [lastLoadedAt, setLastLoadedAt] = React.useState<number>(0)
   const [data, setData] = React.useState<DashboardData | null>(null)
   const [loading, setLoading] = React.useState(false)
@@ -285,18 +262,7 @@ export function App() {
 
   // 首次挂载把老别名 URL 规范化为新 view key；state 已由 parseRouteState 解析好
   React.useEffect(() => {
-    // 无 view 参数的裸 URL 保持干净，不额外写默认视图
-    if (!new URLSearchParams(window.location.search).has("view")) return
-
-    const canonical = buildViewUrl(
-      window.location.href,
-      initialRoute.view,
-      initialRoute.level
-    )
-    const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
-    if (canonical !== current) {
-      window.history.replaceState({}, "", canonical)
-    }
+    normalizeRouteUrl(initialRoute)
   }, [initialRoute])
 
   const timeRangeRef = React.useRef(timeRange)
@@ -375,17 +341,14 @@ export function App() {
 
   // 路由/视图同步 URL 查询参数：导航用 pushState，同 URL 不重复入栈
   const navigate = React.useCallback(
-    (view: ViewKey, extra?: { level?: DetailLevel }) => {
+    (view: ViewKey) => {
       // 侧栏重复点击当前视图不再压栈
-      if (view === currentView && !extra?.level) return
-
-      const level = extra?.level ?? (view === "groups_detail" ? "group" : "channel")
+      if (view === currentView) return
 
       setCurrentView(view)
-      setDetailLevel(level)
 
       if (typeof window !== "undefined") {
-        pushRoute(buildViewUrl(window.location.href, view, level))
+        pushRoute(buildViewUrl(window.location.href, view))
       }
     },
     [currentView]
@@ -395,7 +358,7 @@ export function App() {
     const handlePopState = () => {
       const route = parseRouteState()
       setCurrentView(route.view)
-      setDetailLevel(route.level)
+      normalizeRouteUrl(route)
     }
 
     window.addEventListener("popstate", handlePopState)
@@ -557,7 +520,7 @@ export function App() {
         className="min-h-screen lg:h-screen lg:max-h-screen lg:overflow-hidden"
         style={
           {
-            "--sidebar-width": "15rem", // 240px
+            "--sidebar-width": "13rem", // 208px
             "--sidebar-width-icon": "3.5rem", // 56px
           } as React.CSSProperties
         }
@@ -663,7 +626,6 @@ export function App() {
                     dateRange={data?.range ?? null}
                     channels={currentChannels?.rows || []}
                     groups={currentGroups?.groups || []}
-                    initialLevel={detailLevel}
                     fixedLevel={currentView === "groups_detail" ? "group" : "channel"}
                   />
                 )}
@@ -685,20 +647,6 @@ export function App() {
 
                 {currentView === "routes" && (
                   <ChannelRoutesView refreshKey={lastLoadedAt} />
-                )}
-
-                {currentView === "health" && (
-                  <HealthView
-                    timeRange={timeRange}
-                    dateRange={data?.range ?? null}
-                    initialLevel={detailLevel}
-                    onLevelChange={(level) => {
-                      setDetailLevel(level)
-                      if (typeof window !== "undefined") {
-                        pushRoute(buildViewUrl(window.location.href, "health", level))
-                      }
-                    }}
-                  />
                 )}
 
                 {currentView === "quality" && (

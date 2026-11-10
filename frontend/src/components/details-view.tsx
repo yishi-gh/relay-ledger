@@ -39,6 +39,7 @@ import {
 import { ColPicker, type ColumnItem } from "@/components/col-picker"
 import { CacheRateCell, LatencyP95Cell } from "@/components/table-visualizers"
 import { HealthView } from "@/components/health-view"
+import { SiteLogo } from "@/components/site-logo"
 import type { DateRange } from "@/lib/api"
 import type { ChannelRowData } from "@/components/channels-rank-view"
 import type { GroupRowData } from "@/components/groups-rank-view"
@@ -624,7 +625,7 @@ export function DetailsView({
         </CardHeader>
 
         <CardContent className="p-0 flex flex-col">
-          <div className="rounded-lg border border-border bg-card overflow-hidden [&_[data-slot=table-container]]:max-h-[clamp(180px,calc((100dvh-320px)/2),420px)] [&_[data-slot=table-container]]:overflow-y-auto max-md:[&_[data-slot=table-container]]:max-h-none">
+          <div className="rounded-lg border border-border bg-card overflow-hidden [&_[data-slot=table-container]]:h-[clamp(180px,calc((100dvh-320px)/2),420px)] [&_[data-slot=table-container]]:overflow-y-auto max-md:[&_[data-slot=table-container]]:h-auto max-md:[&_[data-slot=table-container]]:max-h-none">
             <Table className="table-fixed text-sm" style={{ width: "100%", minWidth: `${totalMinPx}px` }}>
               <colgroup>
                 {visibleCols.map((col) => (
@@ -739,6 +740,7 @@ export function DetailsView({
                             case "channel":
                               content = (
                                 <div className="flex items-center gap-1.5 min-w-0">
+                                  <SiteLogo kind="channel" id={row.channel_id} label={row.channel_name} size={16} />
                                   <span className="font-mono text-[12px] text-muted-foreground shrink-0">
                                     #{row.channel_id}
                                   </span>

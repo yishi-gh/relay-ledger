@@ -16,6 +16,7 @@ import {
 } from "@/components/table-utils"
 import type { ChannelRowData } from "@/components/channels-rank-view"
 import type { GroupRowData } from "@/components/groups-rank-view"
+import { SiteLogo } from "@/components/site-logo"
 import { cn } from "@/lib/utils"
 
 interface RankViewProps {
@@ -276,6 +277,7 @@ export function RankView({
 
                         {/* 渠道名称与 ID */}
                         <div className="w-28 sm:w-40 md:w-48 shrink-0 flex items-center gap-1.5 text-[14px] leading-[20px] min-w-0">
+                          <SiteLogo kind="channel" id={item.id} label={item.name} size={16} />
                           <span className="font-mono text-[12px] leading-[16px] text-muted-foreground shrink-0">
                             #{item.id}
                           </span>
