@@ -7,13 +7,12 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AppSidebar, type ViewKey } from "@/components/app-sidebar"
 import { TopBar } from "@/components/top-bar"
-import { OverviewView, type KpiData, type TrafficChartPoint } from "@/components/overview-view"
+import { OverviewView, type KpiData } from "@/components/overview-view"
 import { ProfitView } from "@/components/profit-view"
 import { DetailsView } from "@/components/details-view"
 import { RankView } from "@/components/rank-view"
 import { ModelsView } from "@/components/models-view"
 import { UpstreamsView } from "@/components/upstreams-view"
-import { CapitalView } from "@/components/capital-view"
 import { ChannelRoutesView } from "@/components/channel-routes-view"
 import { QualityView } from "@/components/quality-view"
 import { SystemView } from "@/components/system-view"
@@ -21,11 +20,13 @@ import { SettingsView } from "@/components/settings-view"
 import {
   loadDashboard,
   type DashboardData,
-  type ProfitData,
+  type DateRange,
   type RangeType,
 } from "@/lib/api"
-import { getInitialTimeRange, rememberTimeRange, useSettings } from "@/lib/settings"
+import { getInitialTimeRangeSelection, rememberTimeRange, useSettings } from "@/lib/settings"
 import { startAutoRefresh } from "@/lib/refresh"
+import { aggregateProfitBuckets, buildTrafficChartData } from "@/lib/dashboard-data"
+import { bucketLabel, getTimeRangeKey, validateCustomRange } from "@/lib/time-range"
 
 // 全局稳定的站点颜色映射表：首次出现的 account_id 按字典序分配固定色位，之后跨刷新/切窗口都不跳色
 const SITE_COLOR_MAP: Record<string, string> = {}
@@ -42,79 +43,6 @@ function getSiteColor(accountId: string): string {
   return SITE_COLOR_MAP[accountId] || "var(--chart-1)"
 }
 
-type ProfitBucketRow = {
-  label: string
-  fullLabel: string
-  revenue: number | null
-  cost: number | null
-  profit: number | null
-  margin: number | null
-  sites: number
-}
-
-/**
- * 逐桶只汇总「售出与成本都有值且 kind !== 'external'」的同一批站点。
- * 拿全量售出去减子集成本（某些账户缺快照）会把毛利率抬成 100%，属于 METRICS.md 禁止的部分求和。
- */
-function aggregateProfitBuckets(profit: ProfitData, timeRange: RangeType) {
-  const revBySite = profit.series.revenue_by_site
-  const costBySite = profit.series.cost_by_site
-  const accountIds = profit.sites.filter((s) => s.kind !== "external").map((s) => s.account_id)
-
-  let totalRevenue = 0
-  let totalCost = 0
-  let coveredBuckets = 0
-
-  const rows: ProfitBucketRow[] = profit.buckets.map((bucket, index) => {
-    const label =
-      timeRange === "24h" ? bucket.label.split(" ")[1] ?? bucket.label : bucket.label.slice(5)
-
-    let revenue = 0
-    let cost = 0
-    let used = 0
-    for (const siteId of accountIds) {
-      const rev = revBySite[siteId]?.[index]
-      const bucketCost = costBySite[siteId]?.[index]
-      if (rev == null || bucketCost == null) continue
-      revenue += rev
-      cost += bucketCost
-      used += 1
-    }
-
-    if (used === 0) {
-      return { label, fullLabel: bucket.label, revenue: null, cost: null, profit: null, margin: null, sites: 0 }
-    }
-
-    coveredBuckets += 1
-    totalRevenue += revenue
-    totalCost += cost
-    const profit = revenue - cost
-    return {
-      label,
-      fullLabel: bucket.label,
-      revenue,
-      cost,
-      profit,
-      margin: revenue > 0 ? profit / revenue : null,
-      sites: used,
-    }
-  })
-
-  const totals =
-    coveredBuckets === 0
-      ? null
-      : {
-          revenue: totalRevenue,
-          cost: totalCost,
-          profit: totalRevenue - totalCost,
-          margin: totalRevenue > 0 ? (totalRevenue - totalCost) / totalRevenue : null,
-          coveredBuckets,
-          bucketCount: rows.length,
-        }
-
-  return { rows, totals }
-}
-
 const VALID_VIEWS: ViewKey[] = [
   "overview",
   "profit",
@@ -123,7 +51,6 @@ const VALID_VIEWS: ViewKey[] = [
   "channels_detail",
   "groups_detail",
   "upstreams",
-  "capital",
   "routes",
   "quality",
   "system",
@@ -138,31 +65,10 @@ const VIEW_TITLES: Record<ViewKey, string> = {
   channels_detail: "渠道明细",
   groups_detail: "分组明细",
   upstreams: "上游账户",
-  capital: "余额耗尽",
   routes: "渠道路由",
   quality: "数据质量",
   system: "系统状态",
   settings: "系统设置",
-}
-
-const HOUR_MS = 3600000
-const DAY_MS = 86400000
-const BEIJING_OFFSET_MS = 8 * HOUR_MS
-
-/** 北京时间日界（与后端 beijingDayStart 一致） */
-function beijingDayStart(ms: number): number {
-  return Math.floor((ms + BEIJING_OFFSET_MS) / DAY_MS) * DAY_MS - BEIJING_OFFSET_MS
-}
-
-function pad2(value: number): string {
-  return String(value).padStart(2, "0")
-}
-
-/** 与 /api/trend 的 bucket 字符串一致：hour=YYYY-MM-DD HH:00，day=YYYY-MM-DD */
-function beijingTrendBucket(ms: number, granularity: "hour" | "day"): string {
-  const d = new Date(ms + BEIJING_OFFSET_MS)
-  const date = `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`
-  return granularity === "hour" ? `${date} ${pad2(d.getUTCHours())}:00` : date
 }
 
 interface RouteState {
@@ -199,6 +105,10 @@ function parseRouteState(): RouteState {
     return { view: "system" }
   }
 
+  if (rawView === "capital") {
+    return { view: "upstreams" }
+  }
+
   if (rawView === "channels_detail" || rawView === "channels_table") {
     return { view: "channels_detail" }
   }
@@ -225,10 +135,10 @@ function parseRouteState(): RouteState {
 /** 生成规范 URL：保留 preview 等既有参数，废弃的 level/tab 一律清除。 */
 function buildViewUrl(
   href: string,
-  view: ViewKey,
+  view: ViewKey | "capital",
 ): string {
   const url = new URL(href)
-  url.searchParams.set("view", view)
+  url.searchParams.set("view", view === "capital" ? "upstreams" : view)
 
   url.searchParams.delete("level")
   url.searchParams.delete("tab")
@@ -240,7 +150,7 @@ function normalizeRouteUrl(route: RouteState) {
   if (typeof window === "undefined" || !new URLSearchParams(window.location.search).has("view")) return
   const canonical = buildViewUrl(window.location.href, route.view)
   const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
-  if (canonical !== current) window.history.replaceState({}, "", canonical)
+  if (canonical !== current) window.history.replaceState(window.history.state, "", canonical)
 }
 
 function pushRoute(url: string) {
@@ -251,39 +161,41 @@ function pushRoute(url: string) {
 }
 
 export function App() {
-  const { preferences } = useSettings()
+  const { preferences, timeRangeError } = useSettings()
   const initialRoute = React.useMemo(() => parseRouteState(), [])
-  const [timeRange, setTimeRange] = React.useState<RangeType>(getInitialTimeRange)
+  const [selection, setSelection] = React.useState(getInitialTimeRangeSelection)
+  const { type: timeRange, customRange } = selection
   const [currentView, setCurrentView] = React.useState<ViewKey>(initialRoute.view)
   const [lastLoadedAt, setLastLoadedAt] = React.useState<number>(0)
   const [data, setData] = React.useState<DashboardData | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [loadFailure, setLoadFailure] = React.useState<string | null>(null)
+  const [rangeFailure, setRangeFailure] = React.useState<string | null>(null)
 
   // 首次挂载把老别名 URL 规范化为新 view key；state 已由 parseRouteState 解析好
   React.useEffect(() => {
     normalizeRouteUrl(initialRoute)
   }, [initialRoute])
 
-  const timeRangeRef = React.useRef(timeRange)
+  const selectionRef = React.useRef(selection)
   const loadingRef = React.useRef(false)
   const requestSeqRef = React.useRef(0)
-  const requestedRangeRef = React.useRef<RangeType | null>(null)
+  const requestedRangeRef = React.useRef<string | null>(null)
   const lastLoadedAtRef = React.useRef(0)
 
   React.useEffect(() => {
-    timeRangeRef.current = timeRange
-  }, [timeRange])
+    selectionRef.current = selection
+  }, [selection])
 
   const performLoad = React.useCallback(
-    async (range: RangeType, options?: { clear?: boolean }) => {
+    async (range: RangeType, custom?: DateRange | null, options?: { clear?: boolean }) => {
       const seq = ++requestSeqRef.current
       loadingRef.current = true
       setLoading(true)
       if (options?.clear) setData(null)
 
       try {
-        const result = await loadDashboard(range)
+        const result = await loadDashboard(range, custom ?? undefined)
         if (seq !== requestSeqRef.current) return
         if (!result.meta || result.errors.includes("meta")) {
           // 后端不可用时不伪造数据：有旧数据就留住，没有就走致命错误卡。
@@ -309,22 +221,35 @@ export function App() {
     []
   )
 
-  // 首次加载与 24h/7d 切换：每次都只请求当前窗口，切换时清掉旧窗口数据
+  // 自定义起止也参与窗口标识；同为 custom 的两次选择必须清除旧窗口并重新加载。
   React.useEffect(() => {
-    if (requestedRangeRef.current === timeRange) return
-    requestedRangeRef.current = timeRange
-    void performLoad(timeRange, { clear: true })
-  }, [performLoad, timeRange])
+    const key = getTimeRangeKey(timeRange, customRange)
+    if (requestedRangeRef.current === key) return
+    requestedRangeRef.current = key
+    void performLoad(timeRange, customRange, { clear: true })
+  }, [performLoad, timeRange, customRange])
 
   const handleRefresh = React.useCallback(() => {
     if (loadingRef.current) return
-    void performLoad(timeRangeRef.current)
+    const current = selectionRef.current
+    void performLoad(current.type, current.customRange)
   }, [performLoad])
 
-  const handleTimeRangeChange = React.useCallback((range: RangeType) => {
-    timeRangeRef.current = range
-    rememberTimeRange(range)
-    setTimeRange(range)
+  const handleTimeRangeChange = React.useCallback((range: RangeType, custom?: DateRange) => {
+    try {
+      const next = { type: range, customRange: range === "custom" ? validateCustomRange(custom) : null }
+      setRangeFailure(null)
+      rememberTimeRange(range, next.customRange ?? undefined)
+      if (getTimeRangeKey(next.type, next.customRange) === getTimeRangeKey(selectionRef.current.type, selectionRef.current.customRange)) return
+      // 选择生效时立即使旧异步请求过期，防止新 effect 开始前写回旧窗口。
+      requestSeqRef.current += 1
+      selectionRef.current = next
+      setData(null)
+      setLoadFailure(null)
+      setSelection(next)
+    } catch (error) {
+      setRangeFailure(error instanceof Error ? error.message : String(error))
+    }
   }, [])
 
   // 偏好变化时清理旧计时器；读取 ref 保证异步刷新始终使用最新窗口。
@@ -335,7 +260,10 @@ export function App() {
     }, {
       isLoading: () => loadingRef.current,
       getLastLoadedAt: () => lastLoadedAtRef.current,
-      refresh: () => performLoad(timeRangeRef.current),
+      refresh: () => {
+        const current = selectionRef.current
+        return performLoad(current.type, current.customRange)
+      },
     })
   }, [performLoad, preferences.refresh.intervalMinutes, preferences.refresh.pauseWhenHidden])
 
@@ -373,11 +301,12 @@ export function App() {
   const currentGroups = data?.groups ?? null
   const currentUsers = data?.users ?? null
   const currentUpstreams = data?.upstreams ?? null
+  const currentQuality = data?.quality ?? null
 
   // 1. KPI 逻辑计算（1 张主卡 + 3 张辅卡）
   const profitAgg = React.useMemo(
-    () => (currentProfit ? aggregateProfitBuckets(currentProfit, timeRange) : null),
-    [currentProfit, timeRange]
+    () => (currentProfit ? aggregateProfitBuckets(currentProfit) : null),
+    [currentProfit]
   )
 
   const kpiData: KpiData = React.useMemo(() => {
@@ -438,10 +367,7 @@ export function App() {
   const trendChartData = React.useMemo(() => {
     if (!currentProfit) return []
     return currentProfit.buckets.map((bucket, index) => {
-      const label =
-        timeRange === "24h"
-          ? bucket.label.split(" ")[1] ?? bucket.label
-          : bucket.label.slice(5) // MM-DD
+      const label = bucketLabel(bucket.label, currentProfit.granularity)
 
       const pointData: Record<string, string | number> = {
         label,
@@ -459,49 +385,13 @@ export function App() {
 
       return pointData
     })
-  }, [currentProfit, timeRange])
+  }, [currentProfit])
 
   // 调用流量：独立于 profit，按实际查询范围生成稠密北京桶；缺桶是真实零请求
-  const trafficChartData = React.useMemo<TrafficChartPoint[]>(() => {
-    if (!currentTrend) return []
-
-    const granularity: "hour" | "day" = timeRange === "24h" ? "hour" : "day"
-    const labelOf = (bucket: string) =>
-      granularity === "hour" ? bucket.split(" ")[1] ?? bucket : bucket.slice(5)
-    const pointOf = (bucket: string, point?: (typeof currentTrend.points)[number]): TrafficChartPoint => {
-      if (!point) {
-        return { label: labelOf(bucket), fullLabel: bucket, requests: 0, tokens: 0, cacheRate: null }
-      }
-      return {
-        label: labelOf(bucket),
-        fullLabel: bucket,
-        requests: typeof point.requests === "number" ? point.requests : null,
-        tokens: typeof point.tokens === "number" ? point.tokens : null,
-        cacheRate: typeof point.cache_rate === "number" ? point.cache_rate : null,
-      }
-    }
-
-    const range = data?.range
-    if (!range) {
-      // 没有 range 时至少保留接口返回的真实桶，不补零
-      return currentTrend.points.map((point) => pointOf(point.bucket, point))
-    }
-
-    const byBucket = new Map(currentTrend.points.map((point) => [point.bucket, point]))
-    const buckets: string[] = []
-    if (granularity === "hour") {
-      const start = Math.floor(range.from / HOUR_MS) * HOUR_MS
-      for (let t = start; t <= range.to; t += HOUR_MS) {
-        buckets.push(beijingTrendBucket(t, "hour"))
-      }
-    } else {
-      const start = beijingDayStart(range.from)
-      for (let t = start; t <= range.to; t += DAY_MS) {
-        buckets.push(beijingTrendBucket(t, "day"))
-      }
-    }
-    return buckets.map((bucket) => pointOf(bucket, byBucket.get(bucket)))
-  }, [currentTrend, data?.range, timeRange])
+  const trafficChartData = React.useMemo(
+    () => buildTrafficChartData(currentTrend, data?.range),
+    [currentTrend, data?.range]
+  )
 
   // 3. 上游账户盈利图表数据（成本柱 + 利润实线 + 毛利率虚线）
   const profitChartData = profitAgg?.rows ?? []
@@ -537,12 +427,20 @@ export function App() {
             maxT={meta?.max_t ?? undefined}
             rows={meta?.rows}
             timeRange={timeRange}
+            customRange={customRange}
             onTimeRangeChange={handleTimeRangeChange}
             onRefresh={handleRefresh}
             refreshing={loading}
           />
 
           <main className="flex-1 min-h-0 lg:overflow-y-auto flex flex-col p-3.5 md:p-4 xl:p-4.5 min-w-0">
+            {(rangeFailure || timeRangeError) && (
+              <Alert variant="destructive" className="mb-4 shrink-0">
+                <AlertTriangle />
+                <AlertTitle>时间范围异常</AlertTitle>
+                <AlertDescription>{rangeFailure || timeRangeError}</AlertDescription>
+              </Alert>
+            )}
             {errorNames.length > 0 && (
               <Alert variant="destructive" className="mb-4 shrink-0">
                 <AlertTriangle />
@@ -586,6 +484,9 @@ export function App() {
                     getSiteColor={getSiteColor}
                     capital={data?.capital ?? null}
                     accounts={currentUpstreams?.accounts || []}
+                    profitData={currentProfit}
+                    quality={currentQuality}
+                    channels={currentChannels?.rows || []}
                   />
                 )}
 
@@ -605,6 +506,9 @@ export function App() {
                     channels={currentChannels?.rows || []}
                     groups={currentGroups?.groups || []}
                     users={currentUsers?.users || []}
+                    profitSites={currentProfit?.sites || []}
+                    dateRange={data?.range ?? null}
+                    refreshKey={lastLoadedAt}
                     onNavigateChannelsDetail={() => navigate("channels_detail")}
                     onNavigateGroupsDetail={() => navigate("groups_detail")}
                   />
@@ -634,14 +538,11 @@ export function App() {
                   <UpstreamsView
                     timeRange={timeRange}
                     accounts={currentUpstreams?.accounts || []}
-                  />
-                )}
-
-                {currentView === "capital" && (
-                  <CapitalView
-                    timeRange={timeRange}
+                    capital={data?.capital ?? null}
+                    profitSites={currentProfit?.sites || []}
+                    quality={currentProfit?.quality}
                     dateRange={data?.range ?? null}
-                    previewMode={import.meta.env.DEV && Boolean(meta?.preview)}
+                    refreshKey={lastLoadedAt}
                   />
                 )}
 

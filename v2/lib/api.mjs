@@ -1953,6 +1953,52 @@ export function createApi({
   }
 
   /**
+   * 上游错误采集覆盖度（near_1h / status 共用）：
+   * 只认最新 upstream-errors 真正成功且 finish 在 30 分钟内；缺表/无记录/失败 → false。
+   * errors_since 是信息性的全表最早错误，不代表区间有完整历史覆盖。
+   */
+  function errorCoverage(nowMs = Date.now()) {
+    const tableExists = upstreamErrorTableExists();
+    let errorsSince = null;
+    if (tableExists) {
+      try {
+        const row = dashboard.prepare('SELECT MIN(t_ms) AS t FROM upstream_error').get();
+        errorsSince = row && typeof row.t === 'number' ? row.t : null;
+      } catch (err) {
+        if (!isMissingTableError(err)) throw err;
+      }
+    }
+    let errorsAvailable = false;
+    let errorsLastCollectedAt = null;
+    try {
+      const latest = dashboard.prepare(
+        `SELECT status, finished_at
+           FROM job_runs
+          WHERE job = 'upstream-errors'
+          ORDER BY COALESCE(finished_at, started_at, 0) DESC, id DESC
+          LIMIT 1`,
+      ).get();
+      const lastOk = dashboard.prepare(
+        "SELECT MAX(finished_at) AS t FROM job_runs WHERE job = 'upstream-errors' AND status = 'ok'",
+      ).get();
+      errorsLastCollectedAt = lastOk && typeof lastOk.t === 'number' ? lastOk.t : null;
+      errorsAvailable = tableExists
+        && Boolean(latest)
+        && latest.status === 'ok'
+        && typeof latest.finished_at === 'number'
+        && nowMs - latest.finished_at <= 30 * 60 * 1000;
+    } catch (err) {
+      if (!isMissingTableError(err)) throw err;
+    }
+    return {
+      table_exists: tableExists,
+      errors_since: errorsSince,
+      errors_available: errorsAvailable,
+      errors_last_collected_at: errorsLastCollectedAt,
+    };
+  }
+
+  /**
    * 渠道/分组健康：成功请求来自站点库 logs（LOCAL_FILTER），错误来自看板库 upstream_error。
    *
    * 两边按同一粒度分桶：bucket=15m（900000ms，对齐北京整点 0/15/30/45 分）或
@@ -2155,9 +2201,8 @@ export function createApi({
       totalErrors += component.errors;
     }
 
-    const since = upstreamErrorTableExists()
-      ? dashboard.prepare('SELECT MIN(t_ms) AS min_t FROM upstream_error').get()?.min_t ?? null
-      : null;
+    // 错误覆盖只认最近一次成功的 upstream-errors；errors_since 仅作信息
+    const coverage = errorCoverage(Date.now());
 
     return {
       from: range.from,
@@ -2172,7 +2217,11 @@ export function createApi({
           ? round6(totalRequests / (totalRequests + totalErrors))
           : null,
       },
-      coverage: { errors_since: typeof since === 'number' ? since : null },
+      coverage: {
+        errors_since: coverage.errors_since,
+        errors_available: coverage.errors_available,
+        errors_last_collected_at: coverage.errors_last_collected_at,
+      },
       health_rules: {
         minSamples: healthRules.minSamples,
         failErrorRate: healthRules.failErrorRate,
@@ -2278,10 +2327,9 @@ export function createApi({
       requestRows = [];
     }
 
+    const coverage = errorCoverage(asOf);
     let errorRows = [];
-    let errorsAvailable = false;
-    let errorsLastCollectedAt = null;
-    let errorsTable = upstreamErrorTableExists();
+    let errorsTable = coverage.table_exists;
     if (errorsTable) {
       try {
         errorRows = dashboard.prepare(
@@ -2296,28 +2344,8 @@ export function createApi({
         errorRows = [];
       }
     }
-    try {
-      const latest = dashboard.prepare(
-        `SELECT status, finished_at
-           FROM job_runs
-          WHERE job = 'upstream-errors'
-          ORDER BY COALESCE(finished_at, started_at, 0) DESC, id DESC
-          LIMIT 1`,
-      ).get();
-      const lastOk = dashboard.prepare(
-        "SELECT MAX(finished_at) AS t FROM job_runs WHERE job = 'upstream-errors' AND status = 'ok'",
-      ).get();
-      errorsLastCollectedAt = lastOk && typeof lastOk.t === 'number' ? lastOk.t : null;
-      errorsAvailable = errorsTable
-        && Boolean(latest)
-        && latest.status === 'ok'
-        && typeof latest.finished_at === 'number'
-        && asOf - latest.finished_at <= 30 * 60 * 1000;
-    } catch (err) {
-      if (!isMissingTableError(err)) throw err;
-      errorsAvailable = false;
-      errorsLastCollectedAt = null;
-    }
+    const errorsAvailable = errorsTable && coverage.errors_available;
+    const errorsLastCollectedAt = coverage.errors_last_collected_at;
 
     const requestsByChannel = new Map();
     for (const row of requestRows) {

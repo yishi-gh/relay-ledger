@@ -694,9 +694,9 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
             <Info className="size-3.5 shrink-0 text-muted-foreground" />
             <span
               className="truncate cursor-help"
-              title={`来自 NewAPI 当前路由配置（不随 24h/7d 变动）\n最近同步：${data?.synced_at ? formatTimestamp(data.synced_at) : "从未同步"}${data?.last_attempt_at && data.last_attempt_at !== data.synced_at ? `\n最近尝试：${formatTimestamp(data.last_attempt_at)}` : ""}\n统计：${data?.channels.length ?? 0} 个渠道 · ${data?.abilities.length ?? 0} 条规则 · ${allGroups.length} 个分组`}
+              title={`来自 NewAPI 当前路由配置（不随查询区间变化）\n最近同步：${data?.synced_at ? formatTimestamp(data.synced_at) : "从未同步"}${data?.last_attempt_at && data.last_attempt_at !== data.synced_at ? `\n最近尝试：${formatTimestamp(data.last_attempt_at)}` : ""}\n统计：${data?.channels.length ?? 0} 个渠道 · ${data?.abilities.length ?? 0} 条规则 · ${allGroups.length} 个分组`}
             >
-              配置快照: {data?.synced_at ? formatTimestamp(data.synced_at) : "待同步"}
+              实时配置 · {data?.synced_at ? formatTimestamp(data.synced_at) : "待同步"}
             </span>
           </div>
 
@@ -788,7 +788,7 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
       {loading && !data && (
         <div className="rounded-lg border border-border bg-card p-12 text-center text-muted-foreground text-[13px] flex flex-col items-center justify-center gap-2">
           <RefreshCw className="size-5 animate-spin text-muted-foreground" />
-          <span>正在加载渠道路由配置快照...</span>
+          <span>加载快照中…</span>
         </div>
       )}
 
@@ -810,7 +810,7 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
         <div className="rounded-lg border border-border bg-muted/30 p-8 text-center text-muted-foreground text-[13px] flex flex-col items-center justify-center gap-1.5">
           <Info className="size-5 text-muted-foreground shrink-0" />
           <span className="font-medium text-foreground">尚无可用快照</span>
-          <span>{data.error ? `同步异常：${data.error}` : "后台首次采集同步完成后将展示当前拓扑。"}</span>
+          <span>{data.error ? `同步异常：${data.error}` : "等待首次同步"}</span>
           {data.last_attempt_at && (
             <span className="text-[12px]">最近尝试时间：{formatTimestamp(data.last_attempt_at)}</span>
           )}
@@ -820,7 +820,7 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
       {/* 合法空渠道状态 */}
       {data?.available && data.channels.length === 0 && (
         <div className="rounded-lg border border-border bg-muted/20 p-8 text-center text-muted-foreground text-[13px]">
-          当前没有配置渠道。请在 NewAPI 中添加渠道后重新同步。
+          暂无已配置渠道
         </div>
       )}
 

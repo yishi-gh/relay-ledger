@@ -20,7 +20,6 @@ import {
   Radio,
   Layers,
   Server,
-  Wallet,
   ShieldCheck,
   Activity,
   Route,
@@ -37,12 +36,11 @@ export type ViewKey =
   | "groups_detail"
   | "routes"
   | "upstreams"
-  | "capital"
   | "quality"
   | "system"
   | "settings"
 
-export type CompatibleViewKey = ViewKey | "health" | "details" | "ops"
+export type CompatibleViewKey = ViewKey | "capital" | "health" | "details" | "ops"
 
 interface NavItem {
   key: ViewKey
@@ -72,7 +70,6 @@ const NAV_GROUPS: NavGroup[] = [
       { key: "groups_detail", title: "分组", icon: Layers },
       { key: "routes", title: "路由", icon: Route },
       { key: "upstreams", title: "上游", icon: Server },
-      { key: "capital", title: "余额", icon: Wallet },
     ],
   },
   {
@@ -127,7 +124,7 @@ export function AppSidebar({
         </div>
       </SidebarHeader>
 
-      {/* 侧栏导航分组：经营分析 / 运营与资产 / 系统与运维 (共 11 个业务页) */}
+      {/* 侧栏导航分组：经营分析 / 运营资产 / 系统运维 */}
       <SidebarContent>
         {NAV_GROUPS.map((group) => (
           <SidebarGroup key={group.label} className="py-2">

@@ -151,17 +151,48 @@ function bucketState(counts) {
 }
 
 /**
- * @param {{dashboard: object, settings: object, collector: object|null, now?: number, range?: string}} input
+ * @param {{dashboard: object, settings: object, collector: object|null, now?: number,
+ *   range?: string, from?: number|null, to?: number|null}} input
  */
-export function buildServiceHealth({ dashboard, settings, collector, now = Date.now(), range = '24h' }) {
-  const spec = SERVICE_RANGES[range] ?? SERVICE_RANGES['24h'];
-  const bucketMs = spec.bucketMs;
-  const end = Math.floor(now / bucketMs) * bucketMs + bucketMs;
-  const from = end - spec.count * bucketMs;
-  const to = end;
+export function buildServiceHealth({
+  dashboard,
+  settings,
+  collector,
+  now = Date.now(),
+  range = '24h',
+  from = null,
+  to = null,
+}) {
+  let spec;
+  let rangeFrom;
+  let rangeTo;
+  let start;
+  let bucketMs;
+  let count;
+  if (from != null || to != null) {
+    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || from >= to) {
+      throw new RangeError('from 必须是小于 to 的毫秒时间戳');
+    }
+    if (to - from > 31 * 24 * 60 * 60 * 1000) {
+      throw new RangeError('自定义区间不能超过 31 天');
+    }
+    bucketMs = to - from <= 36 * 60 * 60 * 1000 ? 15 * 60 * 1000 : 60 * 60 * 1000;
+    start = Math.floor(from / bucketMs) * bucketMs;
+    count = Math.ceil((to - start) / bucketMs);
+    rangeFrom = from;
+    rangeTo = to;
+  } else {
+    spec = SERVICE_RANGES[range] ?? SERVICE_RANGES['24h'];
+    bucketMs = spec.bucketMs;
+    count = spec.count;
+    const end = Math.floor(now / bucketMs) * bucketMs + bucketMs;
+    start = end - count * bucketMs;
+    rangeFrom = start;
+    rangeTo = end;
+  }
 
   const latest = latestRuns(dashboard);
-  const counts = bucketCounts(dashboard, from, to, bucketMs);
+  const counts = bucketCounts(dashboard, rangeFrom, rangeTo, bucketMs);
 
   const services = SERVICE_DEFINITIONS.map((service) => {
     const intervalMinutes = intervalFor(service, settings, collector);
@@ -176,8 +207,8 @@ export function buildServiceHealth({ dashboard, settings, collector, now = Date.
     });
 
     const buckets = [];
-    for (let i = 0; i < spec.count; i += 1) {
-      const bucketFrom = from + i * bucketMs;
+    for (let i = 0; i < count; i += 1) {
+      const bucketFrom = start + i * bucketMs;
       const bucketTo = bucketFrom + bucketMs;
       const entry = counts.get(`${service.id}:${bucketFrom}`) ?? null;
       buckets.push({
@@ -206,8 +237,8 @@ export function buildServiceHealth({ dashboard, settings, collector, now = Date.
 
   return {
     generated_at: now,
-    from,
-    to,
+    from: rangeFrom,
+    to: rangeTo,
     bucket_ms: bucketMs,
     collector: collector ?? null,
     services,

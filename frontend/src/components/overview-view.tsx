@@ -1,5 +1,5 @@
 import { FundingStrip } from "@/components/funding-strip"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
   Tooltip,
@@ -33,6 +33,9 @@ import {
 } from "@/lib/formatters"
 import { formatTokenCn } from "@/components/table-utils"
 import { getPreferences } from "@/lib/settings"
+import type { ProfitData, RangeType } from "@/lib/api"
+import type { ChannelRowData } from "@/components/channels-rank-view"
+import type { QualityData } from "@/components/quality-view"
 
 export interface KpiData {
   revenue: number | null
@@ -65,7 +68,7 @@ export type TrafficChartPoint = {
 }
 
 interface OverviewViewProps {
-  timeRange: "24h" | "7d"
+  timeRange: RangeType
   kpiData: KpiData
   activeSites: ActiveSite[]
   trendChartData: TrendChartItem[]
@@ -73,6 +76,9 @@ interface OverviewViewProps {
   getSiteColor: (accountId: string) => string
   capital?: import("@/lib/api").CapitalPayload | null
   accounts?: { name?: string; last_sync?: number | null }[]
+  profitData?: ProfitData | null
+  quality?: QualityData | null
+  channels?: ChannelRowData[]
 }
 
 export function OverviewView({
@@ -84,6 +90,9 @@ export function OverviewView({
   getSiteColor,
   capital,
   accounts,
+  profitData,
+  quality,
+  channels,
 }: OverviewViewProps) {
   // 判断是否需要显示可核算售出差异说明
   const showRevenueClarification =
@@ -94,6 +103,14 @@ export function OverviewView({
   const isRawUnit = getPreferences().display.unitSystem === "raw"
   // raw 模式大数（如 1,400,000,000）留足 >=104px 宽度，避免左侧截断；非 raw 保持 54px
   const tokenAxisWidth = isRawUnit ? 108 : 54
+  const ledgerAccounts = profitData?.sites.filter((site) => site.kind !== "external")
+  const coveredAccounts = ledgerAccounts?.filter((site) => site.status === "complete").length
+  const missingAccounts = profitData ? profitData.quality?.accounts_missing_balance?.length ?? 0 : undefined
+  const collectionErrors = quality?.collect_errors?.filter((error) => error.reason !== "not_configured")
+  const rankedChannels = channels?.filter((channel) => channel.revenue != null && Number.isFinite(channel.revenue) && channel.revenue > 0).sort((a, b) => b.revenue! - a.revenue!)
+  const channelRevenue = rankedChannels?.reduce((sum, channel) => sum + channel.revenue!, 0) ?? 0
+  const leadingChannel = rankedChannels?.[0]
+  const leadingShare = leadingChannel && channelRevenue > 0 ? leadingChannel.revenue! / channelRevenue : null
 
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
@@ -258,9 +275,6 @@ export function OverviewView({
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               售出结构
             </CardTitle>
-            <CardDescription className="text-[12px] leading-[16px] text-muted-foreground mt-0.5">
-              按上游账户
-            </CardDescription>
           </CardHeader>
 
           <CardContent className="p-0 pb-2 flex-1 min-h-[220px] flex flex-col w-full">
@@ -347,8 +361,7 @@ export function OverviewView({
                         name={site.name}
                         stackId="revenue"
                         fill={getSiteColor(site.account_id)}
-                        stroke="var(--card)"
-                        strokeWidth={1}
+                        stroke="none"
                         maxBarSize={timeRange === "24h" ? 20 : 42}
                         isAnimationActive={false}
                       />
@@ -385,9 +398,6 @@ export function OverviewView({
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               调用流量
             </CardTitle>
-            <CardDescription className="text-[12px] leading-[16px] text-muted-foreground mt-0.5">
-              Token 消耗 (左轴) · 缓存命中率 (右轴)
-            </CardDescription>
           </CardHeader>
 
           <CardContent className="p-0 pb-2 flex-1 min-h-[220px] flex flex-col w-full">
@@ -533,6 +543,30 @@ export function OverviewView({
       </section>
 
       <FundingStrip capital={capital} accounts={accounts} />
+      <section className="grid shrink-0 grid-cols-1 gap-4 md:grid-cols-2">
+        <Card className="min-w-0 gap-2 p-4 shadow-xs">
+          <CardHeader className="flex flex-row items-center justify-between p-0">
+            <CardTitle className="text-[14px] font-medium">核算覆盖</CardTitle>
+            <span className="text-[12px] text-muted-foreground">当前区间</span>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-baseline gap-x-5 gap-y-1 p-0 text-[12px] text-muted-foreground">
+            <span>已核算 <strong className="text-[20px] font-semibold tabular-nums text-foreground">{coveredAccounts ?? "—"}<span className="text-[13px] font-normal text-muted-foreground"> / {ledgerAccounts?.length ?? "—"}</span></strong></span>
+            <span>缺快照 <strong className="tabular-nums text-foreground">{missingAccounts ?? "—"}</strong></span>
+            <span title={collectionErrors?.map((error) => error.reason).join("；")}>采集异常 <strong className={collectionErrors?.length ? "text-destructive" : "text-foreground"}>{quality ? collectionErrors?.length ?? 0 : "—"}</strong></span>
+          </CardContent>
+        </Card>
+        <Card className="min-w-0 gap-2 p-4 shadow-xs">
+          <CardHeader className="flex flex-row items-center justify-between p-0">
+            <CardTitle className="text-[14px] font-medium">渠道集中</CardTitle>
+            <span className="text-[12px] text-muted-foreground">在售渠道</span>
+          </CardHeader>
+          <CardContent className="flex min-w-0 items-center gap-3 p-0">
+            <span className="min-w-0 flex-1 truncate text-[13px]" title={leadingChannel?.channel_name}>{leadingChannel?.channel_name || (leadingChannel ? `渠道 #${leadingChannel.channel_id}` : "暂无售出")}</span>
+            <span className="h-1 w-24 shrink-0 overflow-hidden rounded-full bg-muted" aria-hidden="true"><span className="block h-full rounded-full bg-primary/60" style={{ width: `${(leadingShare ?? 0) * 100}%` }} /></span>
+            <span className="text-[20px] font-semibold tabular-nums">{formatPercent(leadingShare)}</span>
+          </CardContent>
+        </Card>
+      </section>
     </div>
   )
 }

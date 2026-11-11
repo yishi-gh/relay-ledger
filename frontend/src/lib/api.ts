@@ -4,12 +4,9 @@ import type { UpstreamAccount } from "@/components/upstreams-view"
 import type { QualityData } from "@/components/quality-view"
 import type { UserRowData } from "@/components/table-utils"
 import type { CollectorStatus } from "./settings"
+import { beijingDayStart, DAY_MS, getRangeGranularity, HOUR_MS, validateCustomRange } from "./time-range"
 
-const HOUR_MS = 3600000
-const DAY_MS = 86400000
-const BEIJING_OFFSET_MS = 8 * HOUR_MS
-
-export type RangeType = "24h" | "7d"
+export type RangeType = "24h" | "7d" | "today" | "custom"
 
 export interface DateRange {
   from: number
@@ -300,16 +297,22 @@ export interface ServicesPayload {
   }>
 }
 
-export function fetchServices(timeRange: RangeType, options?: { signal?: AbortSignal }): Promise<ServicesPayload> {
+export async function fetchServices(timeRange: RangeType, options?: { signal?: AbortSignal; dateRange?: DateRange }): Promise<ServicesPayload> {
+  if (timeRange === "today" || timeRange === "custom") {
+    const dateRange = timeRange === "custom"
+      ? validateCustomRange(options?.dateRange)
+      : options?.dateRange ?? computeRange({ max_t: null, rows: 0 }, "today")
+    return fetchJson<ServicesPayload>("/api/services", { from: dateRange.from, to: dateRange.to }, options)
+  }
   return fetchJson<ServicesPayload>("/api/services", { range: timeRange }, options)
 }
 
-/** 北京时间自然日 00:00 的 UTC 毫秒时间戳 */
-function beijingDayStart(ms: number): number {
-  return Math.floor((ms + BEIJING_OFFSET_MS) / DAY_MS) * DAY_MS - BEIJING_OFFSET_MS
-}
-
-export function computeRange(meta: Meta, rangeType: RangeType): DateRange {
+export function computeRange(meta: Meta, rangeType: RangeType, customRange?: DateRange, now = Date.now()): DateRange {
+  if (rangeType === "custom") return validateCustomRange(customRange, now)
+  if (rangeType === "today") {
+    if (!Number.isFinite(now)) throw new RangeError("当前时间无效")
+    return { from: beijingDayStart(now), to: now }
+  }
   const maxT = meta.max_t
   if (typeof maxT !== "number" || !Number.isFinite(maxT)) {
     throw new RangeError("meta.max_t 不是有效时间戳")
@@ -345,7 +348,9 @@ function settledValue<T>(result: PromiseSettledResult<T>): T | null {
   return result.status === "fulfilled" ? result.value : null
 }
 
-export async function loadDashboard(rangeType: RangeType): Promise<DashboardData> {
+export async function loadDashboard(rangeType: RangeType, customRange?: DateRange, now?: number): Promise<DashboardData> {
+  // 自定义输入先校验，避免损坏的记忆值触发任何接口请求。
+  if (rangeType === "custom") validateCustomRange(customRange, now)
   let meta: Meta
   try {
     meta = await fetchJson<Meta>("/api/meta")
@@ -353,12 +358,12 @@ export async function loadDashboard(rangeType: RangeType): Promise<DashboardData
     return emptyDashboard(["meta"])
   }
 
-  if (typeof meta.max_t !== "number" || !Number.isFinite(meta.max_t)) {
+  if ((rangeType === "24h" || rangeType === "7d") && (typeof meta.max_t !== "number" || !Number.isFinite(meta.max_t))) {
     return emptyDashboard(["meta"])
   }
 
-  const range = computeRange(meta, rangeType)
-  const granularity = rangeType === "24h" ? "hour" : "day"
+  const range = computeRange(meta, rangeType, customRange, now)
+  const granularity = getRangeGranularity(rangeType, range)
   const rangeParams = { from: range.from, to: range.to }
 
   const [
@@ -392,6 +397,7 @@ export async function loadDashboard(rangeType: RangeType): Promise<DashboardData
     usersResult,
     upstreamsResult,
     qualityResult,
+    capitalResult,
   ] as const
   const names = [
     "overview",
@@ -402,6 +408,7 @@ export async function loadDashboard(rangeType: RangeType): Promise<DashboardData
     "users",
     "upstreams",
     "quality",
+    "capital",
   ] as const
 
   const errors: string[] = []
@@ -567,6 +574,8 @@ export interface StatusPayload {
   }
   coverage: {
     errors_since: number | null
+    errors_available?: boolean
+    errors_last_collected_at?: number | null
   }
 }
 

@@ -1,9 +1,13 @@
+import * as React from "react"
 import { useTheme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { SidebarTrigger } from "@/components/ui/sidebar"
-import { Moon, RefreshCw, Sun } from "lucide-react"
-import { formatNumber } from "@/lib/formatters"
+import { Input } from "@/components/ui/input"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
+import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar"
+import { CalendarDays, ChevronDown, Moon, RefreshCw, Sun } from "lucide-react"
+import type { DateRange, RangeType } from "@/lib/api"
+import { parseBeijingDateTime, formatBeijingDateTimeInput, validateCustomRange } from "@/lib/time-range"
 
 export function formatBeijingTime(ms: number | null | undefined): string {
   if (!ms) return "—"
@@ -29,8 +33,9 @@ interface TopBarProps {
   title: string
   maxT?: number
   rows?: number
-  timeRange: "24h" | "7d"
-  onTimeRangeChange: (range: "24h" | "7d") => void
+  timeRange: RangeType
+  customRange: DateRange | null
+  onTimeRangeChange: (range: RangeType, custom?: DateRange) => void
   onRefresh?: () => void
   refreshing?: boolean
 }
@@ -38,13 +43,39 @@ interface TopBarProps {
 export function TopBar({
   title,
   maxT,
-  rows,
   timeRange,
+  customRange = null,
   onTimeRangeChange,
   onRefresh,
   refreshing = false,
 }: TopBarProps) {
   const { theme, setTheme } = useTheme()
+  const { isMobile } = useSidebar()
+  const [rangeOpen, setRangeOpen] = React.useState(false)
+  const [fromInput, setFromInput] = React.useState("")
+  const [toInput, setToInput] = React.useState("")
+  const [rangeError, setRangeError] = React.useState<string | null>(null)
+  const rangeLabel = timeRange === "today" ? "今日" : timeRange === "7d" ? "近7天" : timeRange === "custom" ? "自定义" : "近24小时"
+
+  const openRange = () => {
+    const now = Date.now()
+    setFromInput(formatBeijingDateTimeInput(customRange?.from ?? now - 24 * 3600000))
+    setToInput(formatBeijingDateTimeInput(customRange?.to ?? now))
+    setRangeError(null)
+    setRangeOpen(true)
+  }
+
+  const applyCustomRange = (event: React.FormEvent) => {
+    event.preventDefault()
+    try {
+      const range = validateCustomRange({ from: parseBeijingDateTime(fromInput), to: parseBeijingDateTime(toInput) })
+      onTimeRangeChange("custom", range)
+      setRangeOpen(false)
+      setRangeError(null)
+    } catch (error) {
+      setRangeError(error instanceof Error ? error.message : String(error))
+    }
+  }
 
   return (
     <header className="sticky top-0 z-20 flex min-h-12 w-full items-center justify-between gap-x-2 sm:gap-x-4 border-b border-border/80 bg-background/95 px-3 sm:px-4 py-2 backdrop-blur-xs">
@@ -56,32 +87,49 @@ export function TopBar({
         </h1>
       </div>
 
-      {/* 右侧：数据截止时间 + 24h/7d + 主题切换 */}
+      {/* 右侧：数据截止时间、时间范围与全局操作 */}
       <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
         <span className="hidden md:inline text-[12px] leading-[16px] text-muted-foreground font-mono whitespace-nowrap">
-          数据截止 {formatBeijingTime(maxT)} · {formatNumber(rows)} 条记录
+          数据截止 {formatBeijingTime(maxT)}
         </span>
 
         <div className="hidden md:block h-3.5 w-px bg-border/70 mx-0.5" />
 
-        <ToggleGroup
-          value={[timeRange]}
-          onValueChange={(vals) => {
-            if (vals && vals.length > 0) {
-              onTimeRangeChange(vals[0] as "24h" | "7d")
-            }
-          }}
-          variant="outline"
-          size="sm"
-          className="shrink-0"
-        >
-          <ToggleGroupItem value="24h" className="text-[12px] leading-[16px] px-2.5 sm:px-3 h-8 sm:h-7.5">
-            近 24 小时
-          </ToggleGroupItem>
-          <ToggleGroupItem value="7d" className="text-[12px] leading-[16px] px-2.5 sm:px-3 h-8 sm:h-7.5">
-            近 7 天
-          </ToggleGroupItem>
-        </ToggleGroup>
+        <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5 text-[12px]" onClick={openRange} aria-label="选择时间范围" title={timeRange === "custom" && customRange ? `${formatBeijingTime(customRange.from)} 至 ${formatBeijingTime(customRange.to)}` : rangeLabel}>
+          <CalendarDays data-icon="inline-start" />
+          {rangeLabel}
+          <ChevronDown data-icon="inline-end" />
+        </Button>
+        <Sheet open={rangeOpen} onOpenChange={setRangeOpen}>
+          <SheetContent side={isMobile ? "bottom" : "right"} className="max-h-[90dvh] overflow-y-auto p-5 sm:w-[420px] sm:max-w-[420px]">
+            <SheetHeader className="p-0 pr-8">
+              <SheetTitle>时间范围</SheetTitle>
+              <SheetDescription>北京时间</SheetDescription>
+            </SheetHeader>
+            <ToggleGroup value={timeRange === "custom" ? [] : [timeRange]} onValueChange={(values) => {
+              const value = values[0]
+              if (value === "today" || value === "24h" || value === "7d") {
+                onTimeRangeChange(value)
+                setRangeOpen(false)
+              }
+            }} variant="outline" className="grid w-full grid-cols-3">
+              <ToggleGroupItem value="today" className="min-w-0 text-[13px]">今日</ToggleGroupItem>
+              <ToggleGroupItem value="24h" className="min-w-0 text-[13px]">近24小时</ToggleGroupItem>
+              <ToggleGroupItem value="7d" className="min-w-0 text-[13px]">近7天</ToggleGroupItem>
+            </ToggleGroup>
+            <form onSubmit={applyCustomRange} className="flex min-w-0 flex-col gap-4 border-t border-border pt-4">
+              <span className="text-[14px] font-medium">自定义</span>
+              <label className="flex min-w-0 flex-col gap-1.5 text-[13px]">开始时间
+                <Input type="datetime-local" value={fromInput} onChange={(event) => setFromInput(event.target.value)} required className="min-w-0 w-full" aria-label="自定义开始时间" />
+              </label>
+              <label className="flex min-w-0 flex-col gap-1.5 text-[13px]">结束时间
+                <Input type="datetime-local" value={toInput} onChange={(event) => setToInput(event.target.value)} required className="min-w-0 w-full" aria-label="自定义结束时间" />
+              </label>
+              {rangeError && <p role="alert" className="text-[13px] text-destructive">{rangeError}</p>}
+              <Button type="submit" className="self-end">应用时间范围</Button>
+            </form>
+          </SheetContent>
+        </Sheet>
 
         {onRefresh && (
           <Button

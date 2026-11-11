@@ -101,6 +101,7 @@ export function ModelsView({
 }: ModelsViewProps) {
   const [data, setData] = React.useState<ModelsPayload | null>(null)
   const [notReady, setNotReady] = React.useState(false)
+  const [fetchError, setFetchError] = React.useState<string | null>(null)
   const [visibleKeys, setVisibleKeys] = React.useState<string[]>(getInitialVisibleKeys)
   const [sortState, setSortState] = React.useState<SortState | null>(null)
 
@@ -129,8 +130,9 @@ export function ModelsView({
         if (cancelled) return
         setData(res)
         setNotReady(false)
+        setFetchError(null)
       })
-      .catch(() => {
+      .catch((error) => {
         if (cancelled) return
         if (previewMode) {
           setData(getMockModels())
@@ -138,6 +140,7 @@ export function ModelsView({
         } else {
           setNotReady(true)
           setData(null)
+          setFetchError(error instanceof Error ? error.message : String(error))
         }
       })
 
@@ -165,7 +168,7 @@ export function ModelsView({
     })
   }, [])
 
-  const rows = data?.models || []
+  const rows = React.useMemo(() => data?.models ?? [], [data])
 
   const sortedRows = React.useMemo(() => {
     return sortRows(rows, sortState, MODEL_ACCESSORS)
@@ -197,11 +200,8 @@ export function ModelsView({
             <Cpu className="size-4 text-emerald-600 dark:text-emerald-400" />
           </div>
           <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
-            {totals.modelCount} <span className="text-[14px] font-normal font-sans text-muted-foreground">个</span>
+            {data ? totals.modelCount : "—"} <span className="text-[14px] font-normal font-sans text-muted-foreground">个</span>
           </div>
-          <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-            当前时间窗口内产生调用的模型
-          </span>
         </Card>
 
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">
@@ -210,11 +210,8 @@ export function ModelsView({
             <DollarSign className="size-4" />
           </div>
           <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
-            {formatCurrency(totals.revenue)}
+            {formatCurrency(data ? totals.revenue : null)}
           </div>
-          <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-            {timeRange === "24h" ? "近 24 小时累计售出额" : "近 7 天累计售出额"}
-          </span>
         </Card>
 
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">
@@ -223,10 +220,10 @@ export function ModelsView({
             <Activity className="size-4 text-indigo-500" />
           </div>
           <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
-            {formatTokenCn(totals.tokens)}
+            {formatTokenCn(data ? totals.tokens : null)}
           </div>
           <span className="text-[12px] leading-[16px] text-muted-foreground mt-1 tabular-nums font-mono">
-            {formatNumber(totals.tokens)}
+            {formatNumber(data ? totals.tokens : null)}
           </span>
         </Card>
 
@@ -238,9 +235,6 @@ export function ModelsView({
           <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
             {formatCurrency(totals.avgPer1e8)}
           </div>
-          <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-            总售出额 ÷ (总 Token ÷ 1 亿)
-          </span>
         </Card>
       </section>
 
@@ -255,7 +249,7 @@ export function ModelsView({
         <CardHeader className="p-0 pb-2.5 flex flex-row items-center justify-between space-y-0 shrink-0">
           <div className="flex items-center gap-2">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-              模型经营表现明细
+              模型明细
             </CardTitle>
             <Badge variant="secondary" className="text-[12px] leading-[16px] h-5 px-1.5 font-medium tabular-nums">
               {sortedRows.length} 个模型
@@ -276,11 +270,9 @@ export function ModelsView({
             <div className="flex flex-col items-center justify-center py-16 text-center border border-dashed border-border rounded-lg bg-muted/20">
               <AlertCircle className="size-8 text-muted-foreground mb-2" />
               <span className="text-[14px] leading-[20px] font-medium text-foreground">
-                接口未就绪
+                模型数据暂不可用
               </span>
-              <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-                后端 /api/models 接口未上线或连接失败，单接口异常不影响整页其它功能
-              </span>
+              {fetchError && <span role="alert" className="mt-1 max-w-full break-words text-[12px] text-destructive">{fetchError}</span>}
             </div>
           ) : (
             <div
@@ -361,9 +353,6 @@ export function ModelsView({
                           <Inbox className="size-8 text-muted-foreground/40" />
                           <span className="text-[14px] leading-[20px] font-medium">
                             所选时间窗口内暂无模型记录
-                          </span>
-                          <span className="text-[12px] leading-[16px] text-muted-foreground">
-                            可切换为「近 7 天」查看更多记录
                           </span>
                         </div>
                       </TableCell>

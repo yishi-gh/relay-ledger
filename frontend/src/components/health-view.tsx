@@ -84,6 +84,7 @@ export function HealthView({
   const [internalLevel, setInternalLevel] = React.useState<StatusLevel>(fixedLevel ?? initialLevel)
   const [data, setData] = React.useState<StatusPayload | null>(null)
   const [notReady, setNotReady] = React.useState(false)
+  const [fetchError, setFetchError] = React.useState<string | null>(null)
 
   const level: StatusLevel = fixedLevel ?? internalLevel
 
@@ -100,11 +101,12 @@ export function HealthView({
     onLevelChange?.(newLevel)
   }
 
-  const bucketSize: StatusBucketSize = timeRange === "24h" ? "15m" : "1h"
+  const bucketSize: StatusBucketSize = timeRange === "7d" || (timeRange === "custom" && dateRange != null && dateRange.to - dateRange.from > 36 * 3600000) ? "1h" : "15m"
 
   // 健康页窗口对齐桶粒度：24h = 96 个 15 分钟桶，7d = 168 个 1 小时桶。
   const range = React.useMemo<DateRange | null>(() => {
     if (!dateRange) return null
+    if (timeRange === "today" || timeRange === "custom") return { from: dateRange.from, to: dateRange.to }
     const to = dateRange.to
     if (timeRange === "24h") {
       const slotStart = Math.floor(to / (15 * 60_000)) * (15 * 60_000)
@@ -125,10 +127,12 @@ export function HealthView({
         if (cancelled) return
         setData(res)
         setNotReady(false)
-      } catch {
+        setFetchError(null)
+      } catch (error) {
         if (cancelled) return
         setNotReady(true)
         setData(null)
+        setFetchError(error instanceof Error ? error.message : String(error))
       }
     }
 
@@ -142,6 +146,7 @@ export function HealthView({
   const components = data?.components ?? []
   const overall = data?.overall ?? null
   const coverageSince = data?.coverage?.errors_since ?? null
+  const errorsAvailable = data?.coverage?.errors_available === true
   // 维度或窗口切换时旧数据还在路上：显示旧表并标注加载中，避免整页闪空
   const loading =
     !notReady &&
@@ -149,6 +154,7 @@ export function HealthView({
       !range ||
       data.from !== range.from ||
       data.level !== level ||
+      data.to !== range.to ||
       (data.bucket && data.bucket !== bucketSize))
 
   const healthRules =
@@ -165,7 +171,7 @@ export function HealthView({
     const attempts = req + err
     if (attempts <= 0 || uptime == null || !Number.isFinite(uptime)) return "text-muted-foreground"
     if (attempts < healthRules.minSamples) return "text-muted-foreground" // 样本不足与后端一致保持中性
-    if (err <= 0) return "text-emerald-600 dark:text-emerald-400 font-medium"
+    if (err <= 0) return errorsAvailable ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-muted-foreground"
     if (err / attempts < healthRules.failErrorRate) return "text-amber-600 dark:text-amber-400 font-medium"
     return "text-rose-600 dark:text-rose-400 font-semibold"
   }
@@ -177,7 +183,7 @@ export function HealthView({
         <div className="flex-1 flex flex-col items-center justify-center gap-1.5 py-10 text-muted-foreground">
           <AlertTriangle className="size-5 opacity-50" />
           <span className="text-[14px] leading-[20px] font-medium">健康数据接口不可用</span>
-          <span className="text-[12px] leading-[16px]">请确认后端已启动并完成一次上游错误同步</span>
+          {fetchError && <span role="alert" className="max-w-full break-words px-3 text-[12px] text-destructive">{fetchError}</span>}
         </div>
       )
     }
@@ -199,12 +205,14 @@ export function HealthView({
       )
     }
 
-    const matrixColWidthPx = timeRange === "24h" ? 480 : 540
-    const matrixContentMinPx = timeRange === "24h" ? 380 : 480
-    const healthTableMinPx = timeRange === "24h" ? 912 : 972
+    const maxBucketCount = components.reduce((max, component) => Math.max(max, component.buckets.length), 0)
+    const bucketMinWidthPx = maxBucketCount > 168 ? 3 : 2
+    const matrixContentMinPx = Math.max(bucketSize === "15m" ? 380 : 480, maxBucketCount * bucketMinWidthPx + Math.max(0, maxBucketCount - 1))
+    const matrixColWidthPx = Math.max(bucketSize === "15m" ? 480 : 540, matrixContentMinPx + 16)
+    const healthTableMinPx = matrixColWidthPx + 155 + 72 + 65 + 60 + 80
 
     return (
-      <div className="flex flex-col gap-2">
+      <div className="flex min-w-0 max-w-full flex-col gap-2">
         <div className="rounded-lg border border-border bg-card overflow-hidden [&_[data-slot=table-container]]:h-[clamp(180px,calc((100dvh-320px)/2),420px)] [&_[data-slot=table-container]]:overflow-y-auto max-md:[&_[data-slot=table-container]]:h-auto max-md:[&_[data-slot=table-container]]:max-h-none">
           <Table className="table-fixed text-sm" style={{ width: "100%", minWidth: `${healthTableMinPx}px` }}>
             <colgroup>
@@ -221,9 +229,7 @@ export function HealthView({
                   {level === "channel" ? "渠道" : "分组"}
                 </TableHead>
                 <TableHead className="h-8 px-2 text-[12px] leading-[16px] font-medium text-muted-foreground whitespace-nowrap" style={{ width: `${matrixColWidthPx}px` }}>
-                  {timeRange === "24h"
-                    ? "24 小时状态（每格 15 分钟）"
-                    : "7 天状态（每格 1 小时）"}
+                  分时状态（{maxBucketCount} 格 · 每格 {bucketSize === "15m" ? "15 分钟" : "1 小时"}）
                 </TableHead>
                 <TableHead className="h-8 px-2 text-[12px] leading-[16px] font-medium text-muted-foreground text-right whitespace-nowrap" style={{ width: "72px" }}>
                   Uptime
@@ -279,7 +285,8 @@ export function HealthView({
                             attempts > 0
                               ? ((total / attempts) * 100).toFixed(2)
                               : null
-                          const state: StatusState = bucket.state ?? "none"
+                          const rawState: StatusState = bucket.state ?? "none"
+                          const state: StatusState = rawState === "ok" && !errorsAvailable ? "unknown" : rawState
                           const topErrors = bucket.top_errors ?? []
 
                           return (
@@ -288,7 +295,8 @@ export function HealthView({
                                 render={
                                   <span
                                     className={cn(
-                                      "flex-1 basis-0 min-w-[1px] h-3.5 rounded-[1px] transition-opacity hover:opacity-80 cursor-pointer",
+                                      "flex-1 basis-0 h-3.5 rounded-[1px] transition-opacity hover:opacity-80 cursor-pointer",
+                                      bucketMinWidthPx === 3 ? "min-w-[3px]" : "min-w-[2px]",
                                       state === "unknown" && "health-pattern-unknown",
                                       state === "none" && "shadow-[inset_0_0_0_1px_var(--border)]"
                                     )}
@@ -314,7 +322,7 @@ export function HealthView({
                                       )}
                                       style={{ backgroundColor: STATE_COLOR[state] }}
                                     />
-                                    <span>{STATE_LABEL[state]}</span>
+                                    <span>{rawState === "ok" && !errorsAvailable ? "错误采集未就绪" : STATE_LABEL[state]}</span>
                                   </span>
                                 </div>
                                 <div className="text-[12px] opacity-85 leading-tight">
@@ -423,7 +431,7 @@ export function HealthView({
             ))}
           </div>
           <span className="text-muted-foreground/80">
-            注：样本不足（调用 &lt; {healthRules.minSamples} 次）与无请求不参与状态判定
+            样本门槛 {healthRules.minSamples} 次{!errorsAvailable ? " · 错误采集未就绪" : ""}
           </span>
         </div>
       </div>
@@ -433,11 +441,11 @@ export function HealthView({
   // 嵌入模式：作为卡片挂在明细下方，卡头含整体 3 指标紧凑摘要，无独立 3 大卡，自然纵向展开
   if (embedded) {
     return (
-      <Card className="shadow-xs overflow-hidden flex flex-col p-3 pb-2.5 gap-0 shrink-0">
+      <Card className="shadow-xs overflow-hidden flex min-w-0 flex-col p-3 pb-2.5 gap-0 shrink-0">
         <CardHeader className="p-0 pb-1.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 space-y-0 shrink-0 flex-wrap">
           <div className="flex items-center gap-2.5 flex-wrap">
             <CardTitle className="text-[15px] leading-[22px] font-medium text-foreground">
-              {level === "channel" ? "渠道可用性健康" : "分组可用性健康"}
+              {level === "channel" ? "渠道健康" : "分组健康"}
             </CardTitle>
             <Badge
               variant="secondary"
@@ -475,6 +483,7 @@ export function HealthView({
               </span>
             </div>
             <span className="text-border">·</span>
+            {!errorsAvailable && <span className="text-amber-600 dark:text-amber-400">错误采集未就绪</span>}
             {coverageSince !== null ? (
               <span className="text-muted-foreground whitespace-nowrap">
                 错误自 {formatBeijingShort(coverageSince)} 起
@@ -496,7 +505,7 @@ export function HealthView({
 
   // 独立健康页模式：顶部 3 张独立 KPI 卡 + 主表卡
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
+    <div className="flex-1 min-h-0 min-w-0 flex flex-col gap-4 overflow-y-auto pr-1">
       {/* 1. 顶部 3 张 KPI：整体 uptime、总请求、总错误 */}
       <section className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 shrink-0">
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">
@@ -508,7 +517,7 @@ export function HealthView({
             {formatUptime(overall?.uptime ?? null)}
           </div>
           <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-            有请求的记录里未出错的比例
+            观测成功率
           </span>
         </Card>
 
@@ -522,7 +531,7 @@ export function HealthView({
             <span className="text-[14px] font-normal font-sans text-muted-foreground"> 次</span>
           </div>
           <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-            {timeRange === "24h" ? "近 24 小时成功消费" : "近 7 天成功消费"}
+            区间成功请求
           </span>
         </Card>
 

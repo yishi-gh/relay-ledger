@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react"
 import sharedDefaults from "../../../shared/settings-defaults.json"
-import { ApiError, getApiBaseUrl, type RangeType } from "./api"
+import { ApiError, getApiBaseUrl, type DateRange, type RangeType } from "./api"
+import { validateCustomRange } from "./time-range"
 
 export type PersonalPreferences = {
   display: {
@@ -12,7 +13,7 @@ export type PersonalPreferences = {
   refresh: {
     intervalMinutes: 0 | 5 | 15 | 30 | 60
     pauseWhenHidden: boolean
-    defaultRange: RangeType | "remember"
+    defaultRange: Exclude<RangeType, "custom"> | "remember"
   }
 }
 
@@ -37,6 +38,7 @@ export type SettingsSnapshot = {
   collector: CollectorStatus | null
   loading: boolean
   error: string | null
+  timeRangeError: string | null
   serverError: string | null
   saving: boolean
 }
@@ -80,7 +82,7 @@ export function validatePreferences(value: unknown): PersonalPreferences {
     throw new Error("自动刷新间隔必须是 0、5、15、30 或 60 分钟")
   }
   if (typeof refresh.pauseWhenHidden !== "boolean") throw new Error("后台暂停设置必须是布尔值")
-  if (refresh.defaultRange !== "24h" && refresh.defaultRange !== "7d" && refresh.defaultRange !== "remember") {
+  if (refresh.defaultRange !== "24h" && refresh.defaultRange !== "7d" && refresh.defaultRange !== "today" && refresh.defaultRange !== "remember") {
     throw new Error("默认时间范围无效")
   }
   return {
@@ -114,6 +116,7 @@ function errorMessage(error: unknown): string {
 }
 
 let preferenceError: string | null = null
+let timeRangeError: string | null = null
 let serverError: string | null = null
 
 function readPreferences(raw?: string | null): PersonalPreferences {
@@ -137,6 +140,7 @@ let snapshot: SettingsSnapshot = {
   collector: null,
   loading: false,
   error: preferenceError,
+  timeRangeError: null,
   serverError: null,
   saving: false,
 }
@@ -148,9 +152,9 @@ let pollTimer: number | undefined
 let pollGeneration = 0
 
 function publish(change: Partial<SettingsSnapshot> = {}) {
-  const next = { ...snapshot, ...change, serverError }
+  const next = { ...snapshot, ...change, serverError, timeRangeError }
   const collectorError = next.collector?.error ? `采集确认异常：${next.collector.error}` : null
-  snapshot = { ...next, error: [preferenceError, serverError, collectorError].filter(Boolean).join("；") || null }
+  snapshot = { ...next, error: [preferenceError, timeRangeError, serverError, collectorError].filter(Boolean).join("；") || null }
   for (const listener of listeners) listener()
 }
 
@@ -176,23 +180,53 @@ export function updatePreferences(next: PersonalPreferences): void {
   }
 }
 
-export function getInitialTimeRange(): RangeType {
+export type TimeRangeSelection = { type: RangeType; customRange: DateRange | null }
+let initialTimeRangeSelection: TimeRangeSelection | undefined
+
+/** 同一次初始化只读一次存储，避免类型与自定义起止来自不同的 selection。 */
+export function getInitialTimeRangeSelection(): TimeRangeSelection {
+  if (initialTimeRangeSelection) return initialTimeRangeSelection
   const defaultRange = snapshot.preferences.refresh.defaultRange
-  if (defaultRange !== "remember") return defaultRange
+  const fallback: TimeRangeSelection = { type: "24h", customRange: null }
   try {
-    return typeof window !== "undefined" && window.localStorage.getItem(LAST_RANGE_STORAGE_KEY) === "7d" ? "7d" : "24h"
+    if (defaultRange !== "remember") {
+      initialTimeRangeSelection = { type: defaultRange, customRange: null }
+    } else {
+      const stored = typeof window !== "undefined" ? window.localStorage.getItem(LAST_RANGE_STORAGE_KEY) : null
+      if (!stored) initialTimeRangeSelection = fallback
+      else if (stored === "24h" || stored === "7d" || stored === "today") {
+        initialTimeRangeSelection = { type: stored, customRange: null }
+      } else {
+        const selection = record(JSON.parse(stored), ["type", "from", "to"], "上次自定义时间范围")
+        if (selection.type !== "custom") throw new Error("上次时间范围类型无效")
+        const range = validateCustomRange({ from: selection.from as number, to: selection.to as number })
+        initialTimeRangeSelection = { type: "custom", customRange: range }
+      }
+    }
   } catch (error) {
-    preferenceError = `上次时间范围未能读取：${errorMessage(error)}`
-    snapshot = { ...snapshot, error: preferenceError }
-    return "24h"
+    timeRangeError = `上次时间范围未能读取，已恢复近 24 小时：${errorMessage(error)}`
+    snapshot = { ...snapshot, timeRangeError, error: [snapshot.error, timeRangeError].filter(Boolean).join("；") }
+    initialTimeRangeSelection = fallback
   }
+  return initialTimeRangeSelection
 }
 
-export function rememberTimeRange(range: RangeType): void {
+export function getInitialTimeRange(): RangeType {
+  return getInitialTimeRangeSelection().type
+}
+
+export function getInitialCustomRange(): DateRange | null {
+  return getInitialTimeRangeSelection().customRange
+}
+
+export function rememberTimeRange(range: RangeType, customRange?: DateRange): void {
   try {
-    window.localStorage.setItem(LAST_RANGE_STORAGE_KEY, range)
+    const stored = range === "custom" ? JSON.stringify({ type: range, ...validateCustomRange(customRange) }) : range
+    window.localStorage.setItem(LAST_RANGE_STORAGE_KEY, stored)
+    timeRangeError = null
+    publish()
   } catch (error) {
-    preferenceError = `时间范围未能记住：${errorMessage(error)}`
+    timeRangeError = `时间范围未能记住：${errorMessage(error)}`
     publish()
   }
 }

@@ -62,8 +62,8 @@ export interface SystemViewProps {
 }
 
 type ServicesSnapshot =
-  | { range: RangeType; status: "ready"; data: ServicesPayload; error: null }
-  | { range: RangeType; status: "error"; data: null; error: string }
+  | { rangeKey: string; status: "ready"; data: ServicesPayload; error: null }
+  | { rangeKey: string; status: "error"; data: null; error: string }
 
 type ErrorsSnapshot =
   | { rangeKey: string; status: "ready"; data: ErrorsPayload; error: null }
@@ -96,23 +96,27 @@ export function SystemView({
   const { collector } = useSettings()
 
   // 1. 服务状态数据 (/api/services)
+  const servicesFrom = timeRange === "today" || timeRange === "custom" ? dateRange?.from : undefined
+  const servicesTo = timeRange === "today" || timeRange === "custom" ? dateRange?.to : undefined
+  const servicesRangeKey = `${timeRange}:${servicesFrom ?? ""}:${servicesTo ?? ""}:${lastRefreshTime ?? ""}`
   const [servicesSnapshot, setServicesSnapshot] = React.useState<ServicesSnapshot | null>(null)
-  const servicesLoading = servicesSnapshot?.range !== timeRange
-  const servicesData = servicesSnapshot?.range === timeRange ? servicesSnapshot.data : null
-  const servicesError = servicesSnapshot?.range === timeRange ? servicesSnapshot.error : null
+  const servicesLoading = servicesSnapshot?.rangeKey !== servicesRangeKey
+  const servicesData = servicesSnapshot?.rangeKey === servicesRangeKey ? servicesSnapshot.data : null
+  const servicesError = servicesSnapshot?.rangeKey === servicesRangeKey ? servicesSnapshot.error : null
 
   React.useEffect(() => {
     const controller = new AbortController()
 
-    fetchServices(timeRange, { signal: controller.signal })
+    if ((timeRange === "today" || timeRange === "custom") && (servicesFrom == null || servicesTo == null)) return
+    fetchServices(timeRange, { signal: controller.signal, dateRange: servicesFrom != null && servicesTo != null ? { from: servicesFrom, to: servicesTo } : undefined })
       .then((res) => {
         if (controller.signal.aborted) return
-        setServicesSnapshot({ range: timeRange, status: "ready", data: res, error: null })
+        setServicesSnapshot({ rangeKey: servicesRangeKey, status: "ready", data: res, error: null })
       })
       .catch((e) => {
         if (controller.signal.aborted) return
         setServicesSnapshot({
-          range: timeRange,
+          rangeKey: servicesRangeKey,
           status: "error",
           data: null,
           error: e instanceof Error ? e.message : String(e),
@@ -122,11 +126,11 @@ export function SystemView({
     return () => {
       controller.abort()
     }
-  }, [timeRange, lastRefreshTime])
+  }, [timeRange, servicesFrom, servicesTo, servicesRangeKey])
 
   // 2. HTTP 错误数据快照 (/api/errors)
   const [errorsSnapshot, setErrorsSnapshot] = React.useState<ErrorsSnapshot | null>(null)
-  const errorsRangeKey = dateRange ? `${dateRange.from}:${dateRange.to}` : null
+  const errorsRangeKey = dateRange ? `${dateRange.from}:${dateRange.to}:${lastRefreshTime ?? ""}` : null
   const errorsLoading =
     errorsRangeKey !== null && errorsSnapshot?.rangeKey !== errorsRangeKey
   const errorsData =
@@ -213,31 +217,33 @@ export function SystemView({
   const chartData = React.useMemo(() => {
     if (!errorsData?.buckets) return []
     return errorsData.buckets.map((b) => {
-      const displayLabel =
-        timeRange === "24h"
-          ? b.label.split(" ")[1] ?? b.label
-          : b.label.slice(5)
+      const displayLabel = b.label.includes(" ") ? `${b.label.slice(5, 10)} ${b.label.split(" ")[1]}` : b.label.slice(5)
       return {
         ...b,
         displayLabel,
       }
     })
-  }, [errorsData, timeRange])
+  }, [errorsData])
 
   const services = servicesData?.services ?? []
-  const matrixColWidthPx = timeRange === "24h" ? 480 : 540
+  const serviceSlots = services.reduce((max, service) => Math.max(max, service.buckets.length), 0)
+  const bucketMinWidthPx = serviceSlots > 168 ? 3 : 2
+  const matrixContentMinPx = Math.max(360, serviceSlots * bucketMinWidthPx + Math.max(0, serviceSlots - 1))
+  const matrixColWidthPx = Math.max(servicesData?.bucket_ms === 15 * 60000 ? 480 : 540, matrixContentMinPx + 24)
+  const servicesTableMinPx = matrixColWidthPx + 160 + 110 + 130 + 90
+  const bucketMinutes = servicesData?.bucket_ms ? servicesData.bucket_ms / 60000 : null
 
   const currentCollector = servicesData?.collector ?? collector
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
+    <div className="flex-1 min-h-0 min-w-0 flex flex-col gap-4 overflow-y-auto pr-1">
       {/* 1. 后台任务服务健康概览卡片 (替代原静态 API 职责表) */}
-      <Card className="shadow-xs overflow-hidden flex flex-col p-4 shrink-0 gap-0">
+      <Card className="shadow-xs overflow-hidden flex min-w-0 flex-col p-4 shrink-0 gap-0">
         <CardHeader className="p-0 pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-0 shrink-0 gap-2">
           <div className="flex items-center gap-2.5 flex-wrap">
             <Server className="size-4 text-muted-foreground" />
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-              后台服务与调度任务概览
+              后台任务
             </CardTitle>
             {currentCollector?.error ? (
               <Badge variant="destructive" className="text-[12px] h-5 px-1.5 font-medium">
@@ -309,7 +315,7 @@ export function SystemView({
 
         <CardContent className="p-0 flex flex-col">
           <div className="rounded-lg border border-border bg-card overflow-hidden [&_[data-slot=table-container]]:max-h-[380px] [&_[data-slot=table-container]]:overflow-y-auto">
-            <Table className="table-fixed text-sm" style={{ width: "100%", minWidth: "860px" }}>
+            <Table className="table-fixed text-sm" style={{ width: "100%", minWidth: `${servicesTableMinPx}px` }}>
               <colgroup>
                 <col style={{ width: "160px" }} />
                 <col style={{ width: "110px" }} />
@@ -332,7 +338,7 @@ export function SystemView({
                     当前状态
                   </TableHead>
                   <TableHead className="h-8 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground text-left whitespace-nowrap">
-                    分时状态条 ({timeRange === "24h" ? "96 个 15 分钟槽位" : "168 个 1 小时槽位"})
+                    分时状态（{serviceSlots} 格{bucketMinutes != null ? ` · 每格 ${bucketMinutes} 分钟` : ""}）
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -394,14 +400,15 @@ export function SystemView({
                         </TableCell>
 
                         <TableCell className="px-3 py-1 align-middle">
-                          <div className="flex items-center gap-[1px] h-4.5 w-full min-w-[360px]" role="img" aria-label={`${svc.label} 运行分时状态`}>
+                          <div className="flex items-center gap-[1px] h-4.5 w-full" style={{ minWidth: `${matrixContentMinPx}px` }} role="img" aria-label={`${svc.label} 运行分时状态`}>
                             {svc.buckets.map((b, idx) => (
                               <Tooltip key={b.from ?? idx}>
                                 <TooltipTrigger
                                   render={
                                     <span
                                       className={cn(
-                                        "flex-1 basis-0 min-w-[1px] h-3.5 rounded-[1px] transition-opacity hover:opacity-80 cursor-pointer",
+                                        "flex-1 basis-0 h-3.5 rounded-[1px] transition-opacity hover:opacity-80 cursor-pointer",
+                                        bucketMinWidthPx === 3 ? "min-w-[3px]" : "min-w-[2px]",
                                         b.state === "none" && "shadow-[inset_0_0_0_1px_var(--border)]",
                                         b.state === "unknown" && "health-pattern-unknown"
                                       )}
@@ -451,7 +458,7 @@ export function SystemView({
               ))}
             </div>
             <span className="text-muted-foreground/80">
-              注：空白格表示未记录运行，不能据此判断任务成功或失败
+              空白：未记录运行
             </span>
           </div>
         </CardContent>
@@ -463,10 +470,10 @@ export function SystemView({
           <div className="flex items-center gap-2">
             <Activity className="size-4 text-muted-foreground" />
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-              入口 HTTP 状态码分布 (Nginx 4xx / 5xx)
+              入口错误
             </CardTitle>
             <Badge variant="outline" className="text-[12px] leading-[16px] h-5 px-1.5 font-medium text-muted-foreground border-border bg-muted/30">
-              {timeRange === "24h" ? "24 小时小时分桶" : "7 天自然日分桶"}
+              Nginx 4xx / 5xx
             </Badge>
           </div>
 
@@ -496,7 +503,7 @@ export function SystemView({
             ) : chartData.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-1.5">
                 <Inbox className="size-5 opacity-40" />
-                <span className="text-[13px]">所选窗口内暂无 Nginx 4xx/5xx 错误记录</span>
+                <span className="text-[13px]">{errorsError ? "入口错误数据暂不可用" : errorsData?.available === false ? "尚未采集入口错误" : "所选区间暂无入口错误"}</span>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
@@ -515,7 +522,7 @@ export function SystemView({
                     tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
                     tickFormatter={(val) => (val >= 1000 ? `${(val / 1000).toFixed(0)}k` : String(val))}
                   />
-                  <RechartsTooltip
+                  <RechartsTooltip cursor={{ fill: "var(--muted)", fillOpacity: 0.35, stroke: "none" }}
                     content={({ active, payload }) => {
                       if (!active || !payload || !payload.length) return null
                       const point = payload[0].payload
@@ -542,8 +549,8 @@ export function SystemView({
                       )
                     }}
                   />
-                  <Bar dataKey="c4xx" name="4xx 客户端错误" stackId="err" fill="var(--chart-3)" radius={[0, 0, 0, 0]} isAnimationActive={false} />
-                  <Bar dataKey="c5xx" name="5xx 服务端错误" stackId="err" fill="var(--chart-5)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                  <Bar dataKey="c4xx" name="4xx 客户端错误" stackId="err" fill="var(--chart-3)" stroke="none" radius={[0, 0, 0, 0]} isAnimationActive={false} />
+                  <Bar dataKey="c5xx" name="5xx 服务端错误" stackId="err" fill="var(--chart-5)" stroke="none" radius={[2, 2, 0, 0]} isAnimationActive={false} />
                 </BarChart>
               </ResponsiveContainer>
             )}

@@ -10,7 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { Wallet, CheckCircle2, CreditCard, Percent } from "lucide-react"
+import { Wallet, Hourglass, CreditCard, Percent, AlertCircle } from "lucide-react"
 import {
   formatCurrency,
   formatPercent,
@@ -26,6 +26,8 @@ import {
 } from "@/lib/table-sort"
 import { ColPicker, type ColumnItem } from "@/components/col-picker"
 import { cn } from "@/lib/utils"
+import type { CapitalAccount, CapitalPayload, DateRange, ProfitQuality, ProfitSite, RangeType } from "@/lib/api"
+import { getServerSettings } from "@/lib/settings"
 
 export type UpstreamViewMode = "biz" | "audit" | "all"
 
@@ -58,36 +60,58 @@ export interface UpstreamAccount {
   profit?: number | null
 }
 
-const UPSTREAMS_STORAGE_KEY = "relay-ledger-cols-upstreams"
+interface MergedUpstreamAccount extends UpstreamAccount {
+  funding?: CapitalAccount
+  ledger?: ProfitSite
+}
+
+const UPSTREAMS_STORAGE_KEY = "relay-ledger:upstreams-columns:v2"
+const UPSTREAMS_LEGACY_STORAGE_KEY = "relay-ledger-cols-upstreams"
 
 export const UPSTREAMS_ALL_COLUMNS: ColumnItem[] = [
   { key: "account", label: "账户", locked: true, group: "biz" },
   { key: "enabled", label: "启用状态", group: "biz" },
-  { key: "balance", label: "当前余额", group: "biz" },
+  { key: "latest_balance", label: "最新余额", group: "biz" },
+  { key: "runway_days", label: "预计耗尽", group: "biz" },
+  { key: "daily_avg_7d", label: "7日日均", group: "biz" },
+  { key: "revenue", label: "售出", group: "biz" },
+  { key: "balance", label: "期末余额", group: "audit" },
   { key: "credits", label: "充值", group: "biz" },
   { key: "cost", label: "成本", group: "biz" },
   { key: "profit", label: "利润", group: "biz" },
   { key: "margin_pct", label: "毛利率", group: "biz" },
-  { key: "status", label: "状态", group: "biz" },
-  { key: "reported_spend", label: "上报消费", group: "audit" },
+  { key: "status", label: "账本状态", group: "biz" },
+  { key: "profit_status", label: "利润状态", group: "biz" },
+  { key: "funding_status", label: "资金状态", group: "audit" },
+  { key: "funding_cost", label: "资金区间成本", group: "audit" },
+  { key: "reported_spend", label: "区间上报", group: "audit" },
+  { key: "reported_today", label: "今日上报", group: "audit" },
   { key: "consumption", label: "推导消费", group: "audit" },
   { key: "channels", label: "渠道（x/y）", group: "audit" },
   { key: "last_sync", label: "最后同步", group: "audit" },
 ]
 
 const UPSTREAMS_DEFAULT_KEYS: Record<UpstreamViewMode, string[]> = {
-  biz: ["account", "enabled", "balance", "credits", "cost", "profit", "margin_pct", "status"],
-  audit: ["account", "reported_spend", "consumption", "channels", "last_sync"],
+  biz: ["account", "latest_balance", "runway_days", "daily_avg_7d", "revenue", "credits", "cost", "profit", "margin_pct", "status"],
+  audit: ["account", "enabled", "balance", "reported_spend", "consumption", "channels", "last_sync"],
   all: [
     "account",
     "enabled",
+    "latest_balance",
+    "runway_days",
+    "daily_avg_7d",
+    "revenue",
     "balance",
     "credits",
     "cost",
     "profit",
     "margin_pct",
     "status",
+    "profit_status",
+    "funding_status",
     "reported_spend",
+    "reported_today",
+    "consumption",
     "channels",
     "last_sync",
   ],
@@ -97,6 +121,10 @@ const UPSTREAMS_COL_WEIGHTS: Record<string, number> = {
   account: 20,
   enabled: 9,
   balance: 13,
+  latest_balance: 12,
+  runway_days: 11,
+  daily_avg_7d: 11,
+  revenue: 11,
   credits: 11,
   cost: 12,
   profit: 12,
@@ -178,53 +206,50 @@ function getChannelStatusRank(a: UpstreamAccount): number {
   }
 }
 
-const UPSTREAM_ACCESSORS: AccessorMap<UpstreamAccount> = {
+const UPSTREAM_ACCESSORS: AccessorMap<MergedUpstreamAccount> = {
   account: (a) => a.name || a.id,
   enabled: (a) => getChannelStatusRank(a),
   balance: (a) => a.closing_balance ?? null,
+  latest_balance: (a) => a.funding?.balance ?? null,
+  runway_days: (a) => a.funding?.runway_days != null && Number.isFinite(a.funding.runway_days) ? a.funding.runway_days : null,
+  daily_avg_7d: (a) => a.funding?.daily_avg_7d ?? null,
+  revenue: (a) => a.ledger?.revenue ?? null,
   credits: (a) => a.credits ?? null,
-  cost: (a) => a.consumption ?? null,
-  profit: (a) => a.margin ?? null,
-  margin_pct: (a) => a.margin_pct ?? null,
+  cost: (a) => a.ledger?.cost ?? null,
+  profit: (a) => a.ledger?.profit ?? null,
+  margin_pct: (a) => a.ledger?.margin ?? null,
   status: (a) => a.status || "",
-  reported_spend: (a) => (a.reported_spend_range ?? a.reported_consumption) ?? null,
+  profit_status: (a) => a.ledger?.status ?? null,
+  funding_status: (a) => a.funding?.status ?? null,
+  funding_cost: (a) => a.funding?.cost_range ?? null,
+  reported_spend: (a) => a.reported_spend_range ?? null,
+  reported_today: (a) => a.reported_consumption ?? null,
   consumption: (a) => a.consumption ?? null,
   channels: (a) => a.channels_live ?? a.channels?.length ?? null,
   last_sync: (a) => a.last_sync ?? null,
 }
 
 interface UpstreamsViewProps {
-  timeRange: "24h" | "7d"
+  timeRange: RangeType
   accounts: UpstreamAccount[]
+  capital?: CapitalPayload | null
+  profitSites?: ProfitSite[]
+  quality?: ProfitQuality | null
+  dateRange?: DateRange | null
+  refreshKey?: number
 }
 
-// 默认排序活跃组：仅依据 NewAPI 渠道状态（enabled / partial 为活跃），忽略本地 enabled 与 external 开关
-function isChannelActive(a: UpstreamAccount): boolean {
-  const status = getChannelStatus(a)
-  return status.type === "enabled" || status.type === "partial"
-}
-
-/**
- * 默认行序：渠道活跃且有余额（余额升序）→ 渠道活跃无余额 → 其余状态（名称升序）
- */
-function getDefaultSortedRows(accounts: UpstreamAccount[]): UpstreamAccount[] {
-  const group1 = accounts
-    .filter((a) => isChannelActive(a) && a.closing_balance != null)
-    .sort((a, b) => (a.closing_balance ?? 0) - (b.closing_balance ?? 0))
-
-  const group2 = accounts
-    .filter((a) => isChannelActive(a) && a.closing_balance == null)
-    .sort((a, b) =>
-      (a.name || a.id).localeCompare(b.name || b.id, "zh-Hans-CN", { numeric: true })
-    )
-
-  const group3 = accounts
-    .filter((a) => !isChannelActive(a))
-    .sort((a, b) =>
-      (a.name || a.id).localeCompare(b.name || b.id, "zh-Hans-CN", { numeric: true })
-    )
-
-  return [...group1, ...group2, ...group3]
+function getDefaultSortedRows(accounts: MergedUpstreamAccount[]): MergedUpstreamAccount[] {
+  return [...accounts].sort((a, b) => {
+    const left = a.funding?.runway_days
+    const right = b.funding?.runway_days
+    const leftValid = left != null && Number.isFinite(left)
+    const rightValid = right != null && Number.isFinite(right)
+    if (leftValid && rightValid) return left - right
+    if (leftValid) return -1
+    if (rightValid) return 1
+    return 0
+  })
 }
 
 function loadVisibleMap(
@@ -232,25 +257,47 @@ function loadVisibleMap(
   defaults: Record<UpstreamViewMode, string[]>
 ): Record<UpstreamViewMode, string[]> {
   if (typeof window === "undefined") return defaults
+  const validKeys = new Set(UPSTREAMS_ALL_COLUMNS.map((column) => column.key))
+  const readMap = (saved: string): Record<UpstreamViewMode, string[]> => {
+    try {
+      const parsed: unknown = JSON.parse(saved)
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return defaults
+      const record = parsed as Record<string, unknown>
+      const readKeys = (mode: UpstreamViewMode) => {
+        const value = record[mode]
+        if (!Array.isArray(value)) return defaults[mode]
+        const keys = value.filter((item): item is string => typeof item === "string" && validKeys.has(item))
+        return keys.length > 0 ? [...new Set(["account", ...keys])] : defaults[mode]
+      }
+      return { biz: readKeys("biz"), audit: readKeys("audit"), all: readKeys("all") }
+    } catch {
+      return defaults
+    }
+  }
   try {
     const saved = localStorage.getItem(key)
-    if (saved) {
-      const parsed = JSON.parse(saved)
-      if (parsed && typeof parsed === "object") {
-        return {
-          biz: Array.isArray(parsed.biz) && parsed.biz.length > 0 ? parsed.biz : defaults.biz,
-          audit: Array.isArray(parsed.audit) && parsed.audit.length > 0 ? parsed.audit : defaults.audit,
-          all: Array.isArray(parsed.all) && parsed.all.length > 0 ? parsed.all : defaults.all,
-        }
-      }
+    if (saved !== null) return readMap(saved)
+    const legacy = localStorage.getItem(UPSTREAMS_LEGACY_STORAGE_KEY)
+    if (legacy === null) return defaults
+    // 只迁移列选择，不重映射旧列名，balance 仍表示期末余额。
+    const migrated = readMap(legacy)
+    try {
+      localStorage.setItem(key, JSON.stringify(migrated))
+    } catch {
+      // 存储不可写时，本次仍使用迁移后的列选择。
     }
+    return migrated
   } catch {
-    // fallback
+    return defaults
   }
-  return defaults
 }
 
-export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
+export function UpstreamsView({ timeRange, accounts, capital, profitSites, quality, dateRange }: UpstreamsViewProps) {
+  const mergedAccounts = React.useMemo<MergedUpstreamAccount[]>(() => {
+    const fundingMap = new Map(capital?.accounts.map((account) => [account.account_id, account]))
+    const ledgerMap = new Map(profitSites?.map((account) => [account.account_id, account]))
+    return accounts.map((account) => ({ ...account, funding: fundingMap.get(account.id), ledger: ledgerMap.get(account.id) }))
+  }, [accounts, capital, profitSites])
   const [viewMode, setViewMode] = React.useState<UpstreamViewMode>("biz")
 
   // 可见列按视图保存
@@ -259,9 +306,10 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
   )
 
   const [sortState, setSortState] = React.useState<SortState | null>(null)
-  const [prevTimeRange, setPrevTimeRange] = React.useState(timeRange)
-  if (prevTimeRange !== timeRange) {
-    setPrevTimeRange(timeRange)
+  const rangeKey = `${timeRange}:${dateRange?.from ?? ""}:${dateRange?.to ?? ""}`
+  const [prevTimeRange, setPrevTimeRange] = React.useState(rangeKey)
+  if (prevTimeRange !== rangeKey) {
+    setPrevTimeRange(rangeKey)
     setSortState(null)
   }
 
@@ -302,46 +350,34 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
 
   // KPI 汇总计算
   const kpiData = React.useMemo(() => {
-    const activeAccounts = accounts.filter((a) => a.enabled !== false && !a.external)
-    const totalBalance = activeAccounts.reduce(
-      (sum, a) => sum + (a.closing_balance ?? 0),
-      0
-    )
-
-    const enabledAccounts = accounts.filter((a) => a.enabled !== false)
-    const completeCount = enabledAccounts.filter((a) => a.status === "complete").length
-    const partialCount = enabledAccounts.filter((a) => a.status === "partial").length
-    const missingCount = enabledAccounts.filter(
-      (a) => a.status === "unavailable" || a.status === "unconfigured"
-    ).length
-
-    const totalCredits = accounts.reduce((sum, a) => sum + (a.credits ?? 0), 0)
-
-    const totalMargin = accounts.reduce((sum, a) => sum + (a.margin ?? 0), 0)
-    const totalLocalRevenue = accounts.reduce((sum, a) => sum + (a.local_revenue ?? 0), 0)
-    const weightedMargin = totalLocalRevenue > 0 ? totalMargin / totalLocalRevenue : null
-
+    const eligible = profitSites?.filter((site) => site.kind !== "external") ?? []
+    const covered = eligible.filter((site) => site.cost != null && site.profit != null && Number.isFinite(site.cost) && Number.isFinite(site.profit))
+    const allCovered = eligible.length > 0 && covered.length === eligible.length
+    const revenue = allCovered ? covered.reduce((sum, site) => sum + site.revenue, 0) : null
+    const profit = allCovered ? covered.reduce((sum, site) => sum + site.profit!, 0) : null
+    const shortest = (capital?.accounts ?? []).filter((account) => account.channels_live !== 0 && account.runway_days != null && Number.isFinite(account.runway_days)).reduce<CapitalAccount | null>((current, account) => !current || account.runway_days! < current.runway_days! ? account : current, null)
     return {
-      totalBalance,
-      completeCount,
-      partialCount,
-      missingCount,
-      enabledTotal: enabledAccounts.length,
-      totalCredits,
-      weightedMargin,
-      totalMargin,
-      totalLocalRevenue,
-      activeCount: activeAccounts.length,
+      totalBalance: capital?.total.balance,
+      totalCredits: capital?.total.credits_range,
+      weightedMargin: revenue != null && revenue > 0 && profit != null ? profit / revenue : null,
+      coveredCount: covered.length,
+      accountCount: eligible.length,
+      shortest,
     }
-  }, [accounts])
+  }, [capital, profitSites])
+  const runwayThresholds = getServerSettings().monitoring.runway
+  const shortestDays = kpiData.shortest?.runway_days
+  const totalRunwayDays = capital?.total.runway_days
+  const missingAccountIds = quality?.accounts_missing_balance ?? []
+  const missingAccountNames = missingAccountIds.map((id) => accounts.find((account) => account.id === id)?.name || id)
 
   // 排序行
   const sortedRows = React.useMemo(() => {
     if (!effectiveSort) {
-      return getDefaultSortedRows(accounts)
+      return getDefaultSortedRows(mergedAccounts)
     }
-    return sortRows(accounts, effectiveSort, UPSTREAM_ACCESSORS)
-  }, [accounts, effectiveSort])
+    return sortRows(mergedAccounts, effectiveSort, UPSTREAM_ACCESSORS)
+  }, [mergedAccounts, effectiveSort])
 
   const visibleCols = UPSTREAMS_ALL_COLUMNS.filter((c) => activeKeys.includes(c.key))
 
@@ -351,61 +387,61 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
   }, [visibleCols])
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
+    <div className="flex-1 min-h-0 min-w-0 flex flex-col gap-4 overflow-y-auto pr-1">
       {/* 顶部 4 张 KPI 卡（等高） */}
-      <section className="grid grid-cols-2 md:grid-cols-4 gap-3.5 shrink-0">
+      <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5 shrink-0 [&>[data-slot=card]]:min-w-0">
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">
-              账户余额合计
+              最新余额
             </span>
             <Wallet className="size-4" />
           </div>
           <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
             {formatCurrency(kpiData.totalBalance)}
           </div>
-          <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-            {kpiData.activeCount} 个在用账户余额
+          <span className="text-[12px] leading-[16px] text-muted-foreground mt-1" title={capital?.total.accounts_counted != null ? `${capital.total.accounts_counted} 个账户参与估算` : undefined}>
+            7日日均 {formatCurrency(capital?.total.daily_avg_7d)}
           </span>
         </Card>
 
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">
-              已核算账户
+              最早耗尽
             </span>
-            <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />
+            <Hourglass className="size-4 text-amber-500" />
           </div>
-          <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
-            {kpiData.completeCount} / {kpiData.enabledTotal}
-            <span className="text-[14px] font-normal font-sans text-muted-foreground ml-1">
-              个
+          <div className="mt-1.5 flex min-w-0 flex-col gap-1 text-[22px] leading-[28px] font-semibold tabular-nums">
+            <span className="truncate" title={kpiData.shortest?.name}>{kpiData.shortest?.name ?? "—"}</span>
+            <span className={cn(shortestDays != null && shortestDays < runwayThresholds.dangerDays ? "text-rose-600 dark:text-rose-400" : shortestDays != null && shortestDays < runwayThresholds.warnDays ? "text-amber-600 dark:text-amber-400" : "text-foreground")}>
+              {shortestDays != null ? shortestDays.toFixed(1) : "—"}<span className="ml-1 text-[13px] font-normal text-muted-foreground">天后耗尽</span>
             </span>
           </div>
           <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-            部分数据 {kpiData.partialCount} · 缺快照 {kpiData.missingCount}
+            综合 {totalRunwayDays != null && Number.isFinite(totalRunwayDays) ? `${totalRunwayDays.toFixed(1)} 天` : "—"}
           </span>
         </Card>
 
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">
-              本期充值合计
+              区间充值
             </span>
             <CreditCard className="size-4 text-indigo-500" />
           </div>
           <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
             {formatCurrency(kpiData.totalCredits)}
           </div>
-          <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-            {timeRange === "24h" ? "近 24 小时充值入账" : "近 7 天充值入账"}
+          <span className="text-[12px] leading-[16px] text-muted-foreground mt-1" title="资金口径；可能仅含部分时段">
+            区间成本 {formatCurrency(capital?.total.cost_range)}
           </span>
         </Card>
 
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">
-              加权毛利率
+              核算毛利
             </span>
             <Percent className="size-4 text-amber-500" />
           </div>
@@ -413,10 +449,14 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
             {formatPercent(kpiData.weightedMargin)}
           </div>
           <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-            Σ利润 {formatCurrency(kpiData.totalMargin)} ÷ Σ售出 {formatCurrency(kpiData.totalLocalRevenue)}
+            已核算 {kpiData.coveredCount} / {kpiData.accountCount} 个账户
           </span>
         </Card>
       </section>
+
+      {!capital && <div role="alert" className="flex shrink-0 items-center gap-2 text-[12px] text-muted-foreground"><AlertCircle className="size-4 shrink-0" />余额数据暂不可用</div>}
+
+      {missingAccountIds.length > 0 && <div role="alert" className="flex shrink-0 items-start gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-[12px] text-muted-foreground"><AlertCircle className="size-4 shrink-0" /><span>缺快照：{missingAccountNames.join("、")}</span></div>}
 
       {/* 下方表卡 */}
       <Card
@@ -426,7 +466,7 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
         <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0 gap-3 flex-wrap">
           <div className="flex items-center gap-2.5 flex-wrap">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-              上游账户明细
+              上游账户
             </CardTitle>
 
             {/* 经营/核算/全部视图切换 */}
@@ -452,7 +492,7 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
                 value="audit"
                 className="text-[12px] leading-[16px] px-2.5 h-7 font-medium cursor-pointer data-[state=on]:bg-accent data-[state=on]:text-accent-foreground"
               >
-                核算
+                对账
               </ToggleGroupItem>
               <ToggleGroupItem
                 value="all"
@@ -485,8 +525,8 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
             className="rounded-lg border border-border bg-card overflow-hidden flex-1 min-h-[300px] lg:min-h-0"
           >
             <Table className={cn(
-              "text-sm table-auto lg:table-fixed",
-              visibleCols.length <= 8 ? "min-w-[760px] lg:min-w-full" : "min-w-[960px] lg:min-w-full"
+              "text-sm table-auto",
+              visibleCols.length <= 8 ? "min-w-[760px]" : "min-w-[1100px]"
             )}>
               <colgroup className="hidden lg:table-column-group">
                 {visibleCols.map((col) => (
@@ -499,15 +539,21 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
                     const isLocked = col.key === "account"
                     const isNum = [
                       "balance",
+                      "latest_balance",
+                      "runway_days",
+                      "daily_avg_7d",
+                      "revenue",
                       "credits",
                       "cost",
+                      "funding_cost",
                       "profit",
                       "margin_pct",
                       "reported_spend",
+                      "reported_today",
                       "consumption",
                       "channels",
                     ].includes(col.key)
-                    const sortAttrs = getSortHeaderAttrs(effectiveSort, col.key)
+                    const sortAttrs = getSortHeaderAttrs(effectiveSort ?? { key: "runway_days", dir: "asc" }, col.key)
 
                     return (
                       <TableHead
@@ -555,11 +601,17 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
                       const isLocked = col.key === "account"
                       const isNum = [
                         "balance",
+                        "latest_balance",
+                        "runway_days",
+                        "daily_avg_7d",
+                        "revenue",
                         "credits",
                         "cost",
+                        "funding_cost",
                         "profit",
                         "margin_pct",
                         "reported_spend",
+                        "reported_today",
                         "consumption",
                         "channels",
                       ].includes(col.key)
@@ -651,6 +703,20 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
                           }
                           break
                         }
+                        case "latest_balance":
+                          content = <span className="font-semibold" title={row.funding?.status === "missing_balance" ? "缺失最新余额" : undefined}>{formatCurrency(row.funding?.balance)}</span>
+                          break
+                        case "runway_days": {
+                          const days = row.funding?.runway_days
+                          content = days != null && Number.isFinite(days) ? <span className={cn(days < runwayThresholds.dangerDays ? "text-rose-600 dark:text-rose-400" : days < runwayThresholds.warnDays ? "text-amber-600 dark:text-amber-400" : "text-foreground")}>{days.toFixed(1)} 天</span> : "—"
+                          break
+                        }
+                        case "daily_avg_7d":
+                          content = formatCurrency(row.funding?.daily_avg_7d)
+                          break
+                        case "revenue":
+                          content = formatCurrency(row.ledger?.revenue)
+                          break
                         case "balance":
                           content = (
                             <span className="font-semibold text-foreground">
@@ -665,62 +731,43 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
                               : formatCurrency(row.credits)
                           break
                         case "cost":
-                          content = formatCurrency(row.consumption)
+                          content = formatCurrency(row.ledger?.cost)
+                          break
+                        case "funding_cost":
+                          content = <span title="资金口径；可能仅含部分时段">{formatCurrency(row.funding?.cost_range)}</span>
                           break
                         case "profit":
-                          content = formatCurrency(row.margin)
+                          content = <span className={row.ledger?.profit != null && row.ledger.profit < 0 ? "text-rose-600 dark:text-rose-400" : undefined}>{formatCurrency(row.ledger?.profit)}</span>
                           break
                         case "margin_pct":
                           content = (
                             <span
                               className={cn(
                                 "font-mono tabular-nums text-[13px] leading-[18px]",
-                                row.margin_pct != null && row.margin_pct > 0
+                                row.ledger?.margin != null && row.ledger.margin > 0
                                   ? "text-emerald-600 dark:text-emerald-400 font-medium"
-                                  : row.margin_pct != null && row.margin_pct < 0
+                                : row.ledger?.margin != null && row.ledger.margin < 0
                                   ? "text-rose-600 dark:text-rose-400 font-medium"
                                   : "text-muted-foreground"
                               )}
                             >
-                              {formatPercent(row.margin_pct)}
+                              {formatPercent(row.ledger?.margin)}
                             </span>
                           )
                           break
                         case "status":
-                          content =
-                            row.status === "complete" ? (
-                              <Badge
-                                variant="outline"
-                                className="text-[12px] leading-[16px] h-5 px-1.5 whitespace-nowrap font-medium text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
-                              >
-                                已核算
-                              </Badge>
-                            ) : row.status === "partial" ? (
-                              <Badge
-                                variant="outline"
-                                title={row.reason || "部分数据"}
-                                className="text-[12px] leading-[16px] h-5 px-1.5 whitespace-nowrap font-medium text-amber-600 dark:text-amber-400 border-amber-500/30 bg-amber-500/10"
-                              >
-                                部分数据
-                              </Badge>
-                            ) : row.status === "unavailable" ? (
-                              <Badge
-                                variant="outline"
-                                className="text-[12px] leading-[16px] h-5 px-1.5 whitespace-nowrap font-medium text-muted-foreground border-border bg-muted/30"
-                              >
-                                缺快照
-                              </Badge>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="text-[12px] leading-[16px] h-5 px-1.5 whitespace-nowrap font-medium text-muted-foreground border-border bg-muted/30"
-                              >
-                                未配置
-                              </Badge>
-                            )
+                        case "profit_status":
+                        case "funding_status": {
+                          const status = col.key === "profit_status" ? row.ledger?.status : col.key === "funding_status" ? row.funding?.status : row.status
+                          const labels: Record<string, string> = { complete: "已核算", partial: "部分数据", missing_balance: "缺余额", unavailable: "缺快照", unconfigured: "未配置", no_cost: "无成本源", no_revenue: "无售出", disabled_account: "已停用", ok: "余额已采集" }
+                          content = status ? <Badge variant="outline" title={[col.key === "status" ? row.reason : null, col.key === "profit_status" && row.ledger ? `覆盖 ${row.ledger.covered_buckets}/${row.ledger.bucket_count}` : null].filter(Boolean).join("；")} className={cn("whitespace-nowrap text-[12px]", status === "complete" ? "text-emerald-600 dark:text-emerald-400" : status === "partial" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>{col.key === "profit_status" && status === "missing_balance" ? "缺快照" : labels[status] ?? status}</Badge> : "—"
                           break
+                        }
                         case "reported_spend":
-                          content = formatCurrency(row.reported_spend_range ?? row.reported_consumption)
+                          content = formatCurrency(row.reported_spend_range)
+                          break
+                        case "reported_today":
+                          content = formatCurrency(row.reported_consumption)
                           break
                         case "consumption":
                           content = formatCurrency(row.consumption)

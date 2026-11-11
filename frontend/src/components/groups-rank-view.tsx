@@ -5,6 +5,7 @@ import { DollarSign, Layers, TrendingUp, ChevronRight, Inbox } from "lucide-reac
 import { formatCurrency, formatPercent } from "@/lib/formatters"
 import { getDeterministicChartColor } from "@/components/table-utils"
 import { cn } from "@/lib/utils"
+import type { RangeType } from "@/lib/api"
 
 export interface GroupRowData {
   group_name: string
@@ -32,7 +33,7 @@ export interface GroupRowData {
 }
 
 interface GroupsRankViewProps {
-  timeRange: "24h" | "7d"
+  timeRange: RangeType
   groups: GroupRowData[]
   onNavigateDetail: () => void
 }
@@ -115,7 +116,7 @@ export function GroupsRankView({
               </CardDescription>
             </div>
             <Badge variant="outline" className="tabular-nums text-xs text-muted-foreground">
-              {timeRange === "24h" ? "近 24 小时" : "近 7 天"}
+              {timeRange === "today" ? "今日" : timeRange === "24h" ? "近 24 小时" : timeRange === "7d" ? "近 7 天" : "自定义"}
             </Badge>
           </CardHeader>
 
@@ -234,7 +235,7 @@ export function GroupsRankView({
               {formatCurrency(totalRevenue)}
             </div>
             <p className="mt-auto pt-2 text-[13px] text-muted-foreground leading-normal">
-              {timeRange === "24h" ? "近 24 小时各分组售出汇总" : "近 7 天各分组售出汇总"}
+              区间分组售出
             </p>
           </Card>
 

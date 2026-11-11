@@ -94,7 +94,6 @@ export function FundingStrip({ capital, accounts = [], now, className }: Funding
           <Metric
             label="7 日日均成本"
             value={formatCurrency(total?.daily_avg_7d ?? null)}
-            hint="按自然日摊分"
           />
           <Metric
             label="最早预计耗尽"
@@ -114,9 +113,8 @@ export function FundingStrip({ capital, accounts = [], now, className }: Funding
             tone={runwayTone}
           />
           <Metric
-            label="7 日充值"
-            value={formatCurrency(total?.credits ?? null)}
-            hint="含赠额"
+            label="区间充值"
+            value={formatCurrency(total?.credits_range ?? null)}
           />
         </CardContent>
       </Card>

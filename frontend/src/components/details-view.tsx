@@ -42,7 +42,7 @@ import {
 import { ColPicker, type ColumnItem } from "@/components/col-picker"
 import { HealthView } from "@/components/health-view"
 import { SiteLogo } from "@/components/site-logo"
-import type { DateRange } from "@/lib/api"
+import type { DateRange, RangeType } from "@/lib/api"
 import type { ChannelRowData } from "@/components/channels-rank-view"
 import type { GroupRowData } from "@/components/groups-rank-view"
 import { cn } from "@/lib/utils"
@@ -293,7 +293,7 @@ function renderUpstreamStatusBadge(status?: string) {
 }
 
 export interface DetailsViewProps {
-  timeRange: "24h" | "7d"
+  timeRange: RangeType
   channels: ChannelRowData[]
   groups: GroupRowData[]
   dateRange?: DateRange | null
@@ -478,9 +478,7 @@ export function DetailsView({
               {formatCurrency(totals.revenue)}
             </span>
             <span className="text-[12px] text-muted-foreground truncate">
-              {timeRange === "24h"
-                ? level === "channel" ? "24h累计" : "24h累计"
-                : level === "channel" ? "7d累计" : "7d累计"}
+              区间累计
             </span>
           </div>
         </Card>

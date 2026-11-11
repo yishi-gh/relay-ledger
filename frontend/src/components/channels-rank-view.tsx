@@ -5,6 +5,7 @@ import { DollarSign, Radio, TrendingUp, ChevronRight, Inbox } from "lucide-react
 import { formatCurrency, formatPercent } from "@/lib/formatters"
 import { getDeterministicChartColor } from "@/components/table-utils"
 import { cn } from "@/lib/utils"
+import type { RangeType } from "@/lib/api"
 
 export interface ChannelRowData {
   channel_id: number
@@ -36,7 +37,7 @@ export interface ChannelRowData {
 }
 
 interface ChannelsRankViewProps {
-  timeRange: "24h" | "7d"
+  timeRange: RangeType
   rows: ChannelRowData[]
   onNavigateDetail: () => void
 }
@@ -119,7 +120,7 @@ export function ChannelsRankView({
               </CardDescription>
             </div>
             <Badge variant="outline" className="tabular-nums text-xs text-muted-foreground">
-              {timeRange === "24h" ? "近 24 小时" : "近 7 天"}
+              {timeRange === "today" ? "今日" : timeRange === "24h" ? "近 24 小时" : timeRange === "7d" ? "近 7 天" : "自定义"}
             </Badge>
           </CardHeader>
 
@@ -243,7 +244,7 @@ export function ChannelsRankView({
               {formatCurrency(totalRevenue)}
             </div>
             <p className="mt-auto pt-2 text-[13px] text-muted-foreground leading-normal">
-              {timeRange === "24h" ? "近 24 小时各渠道售出汇总" : "近 7 天各渠道售出汇总"}
+              区间渠道售出
             </p>
           </Card>
 

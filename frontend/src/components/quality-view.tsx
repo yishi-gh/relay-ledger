@@ -67,7 +67,7 @@ export function QualityView({
         <Card className="shadow-xs p-4 flex flex-col justify-between">
           <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-              数据源连接与状态
+              数据源
             </CardTitle>
             <Database className="size-4 text-muted-foreground" />
           </CardHeader>
@@ -77,12 +77,12 @@ export function QualityView({
                 variant="outline"
                 className={cn(
                   "text-[12px] leading-[16px] h-5 px-1.5 font-medium",
-                  quality.schema_ok
+                  quality.schema_ok === true
                     ? "text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
-                    : "text-rose-600 dark:text-rose-400 border-rose-500/30 bg-rose-500/10"
+                    : quality.schema_ok === false ? "text-rose-600 dark:text-rose-400 border-rose-500/30 bg-rose-500/10" : "text-muted-foreground"
                 )}
               >
-                {quality.schema_ok ? "Schema 正常" : "Schema 异常"}
+                {quality.schema_ok === true ? "结构正常" : quality.schema_ok === false ? "结构异常" : "未确认"}
               </Badge>
               <span className="text-[12px] leading-[16px] text-muted-foreground font-mono tabular-nums">
                 {quality.checked_at
@@ -118,7 +118,7 @@ export function QualityView({
           <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0">
             <div className="flex items-center gap-2">
               <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-                上游余额采集告警
+                采集异常
               </CardTitle>
               {errors.length > 0 && (
                 <Badge variant="destructive" className="text-[12px] leading-[16px] h-5 px-1.5 font-medium tabular-nums">
@@ -133,9 +133,6 @@ export function QualityView({
               <div className="flex flex-col justify-center flex-1 py-4 text-center">
                 <span className="text-[14px] leading-[20px] font-medium text-foreground">
                   暂无采集异常记录
-                </span>
-                <span className="text-[12px] leading-[16px] text-muted-foreground mt-0.5">
-                  所有上游账户余额采集任务最近均成功执行
                 </span>
               </div>
             ) : (
@@ -156,9 +153,6 @@ export function QualityView({
                 ))}
               </ul>
             )}
-            <div className="text-[12px] leading-[16px] text-muted-foreground border-t border-border/70 pt-2">
-              包含网络连接超时、鉴权失败及上游接口错误
-            </div>
           </CardContent>
         </Card>
 
@@ -168,7 +162,7 @@ export function QualityView({
             <div className="flex items-center justify-between w-full">
               <div className="flex items-center gap-2">
                 <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-                  缺失快照账户
+                  缺快照
                 </CardTitle>
                 <Badge
                   variant="outline"
@@ -184,17 +178,14 @@ export function QualityView({
             <div className="rounded-lg border border-border/70 bg-muted/30 p-2.5 flex items-start gap-2 shrink-0">
               <Info className="size-4 text-muted-foreground shrink-0 mt-0.5" />
               <div className="text-[12px] leading-[16px] text-muted-foreground font-normal">
-                快照缺失仅影响成本核算，不影响售出统计
+                仅影响成本核算
               </div>
             </div>
 
             <div className="flex-1 min-h-0 flex flex-col justify-start">
-              <div className="text-[12px] leading-[16px] text-muted-foreground font-medium mb-1.5 shrink-0">
-                缺失快照账户全名单：
-              </div>
               {unavailableAccounts.length === 0 ? (
                 <div className="text-[13px] leading-[18px] text-muted-foreground py-1">
-                  当前周期内所有上游账户均具备有效快照
+                  暂无缺快照记录
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-1.5 overflow-y-auto max-h-[90px] p-0.5">

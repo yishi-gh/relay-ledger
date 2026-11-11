@@ -1,10 +1,11 @@
 import { DetailsView } from "@/components/details-view"
 import type { GroupRowData } from "@/components/groups-rank-view"
+import type { RangeType } from "@/lib/api"
 
 export type { GroupRowData }
 
 interface GroupsDetailViewProps {
-  timeRange: "24h" | "7d"
+  timeRange: RangeType
   groups: GroupRowData[]
 }
 

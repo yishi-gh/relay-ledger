@@ -33,6 +33,7 @@ import {
 } from "@/lib/table-sort"
 import { cn } from "@/lib/utils"
 import * as React from "react"
+import type { RangeType } from "@/lib/api"
 
 export interface ProfitBucketRow {
   label: string
@@ -235,7 +236,7 @@ const PROFIT_TABLE_ACCESSORS: AccessorMap<SiteProfitItem> = {
 }
 
 interface ProfitViewProps {
-  timeRange: "24h" | "7d"
+  timeRange: RangeType
   profitChartData: ProfitBucketRow[]
   tableData: SiteProfitItem[]
   quality?: ProfitQuality
@@ -350,13 +351,13 @@ export function ProfitView({
 
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
-      {/* 图表与表：内容密度比例 1 : 1.15，自然适应高度，<1280 上下堆叠 */}
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_1.15fr] gap-4 items-stretch min-h-[300px] xl:flex-1 xl:min-h-0">
-        {/* 左卡：账户盈利 (1fr, p-4) */}
+      {/* 趋势与账户核算上下排列，桌面表内滚动。 */}
+      <div className="grid grid-cols-1 gap-4 items-stretch xl:grid-rows-[minmax(360px,2fr)_minmax(260px,3fr)] xl:flex-1 xl:min-h-[640px]">
+        {/* 上方：盈利趋势 */}
         <Card className="col-span-1 h-full max-xl:h-auto shadow-xs overflow-hidden flex flex-col justify-between min-w-0 p-4">
           <CardHeader className="p-0 pb-2.5 shrink-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-              账户盈利
+              盈利趋势
             </CardTitle>
           </CardHeader>
 
@@ -402,7 +403,7 @@ export function ProfitView({
                     tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
                     tickFormatter={formatAxisPercent}
                   />
-                  <RechartsTooltip
+                  <RechartsTooltip cursor={{ fill: "var(--muted)", fillOpacity: 0.35, stroke: "none" }}
                     content={({ active, payload }) => {
                       if (!active || !payload || !payload.length) return null
                       const point = payload[0].payload
@@ -450,6 +451,7 @@ export function ProfitView({
                     dataKey="cost"
                     name="成本"
                     fill="var(--chart-cost)"
+                    stroke="none"
                     radius={[2, 2, 0, 0]}
                     maxBarSize={timeRange === "24h" ? 18 : 42}
                     isAnimationActive={false}
@@ -501,12 +503,12 @@ export function ProfitView({
           </div>
         </Card>
 
-        {/* 右卡：账户汇总 (1.15fr, px-4 py-3, 等高内滚) */}
+        {/* 下方：账户核算 */}
         <Card className="col-span-1 h-full max-xl:h-auto shadow-xs overflow-hidden flex flex-col min-w-0 p-4">
           <CardHeader className="p-0 pb-2.5 flex flex-row items-center justify-between space-y-0">
             <div>
               <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-                账户汇总
+                账户核算
               </CardTitle>
             </div>
             <Badge variant="secondary" className="text-[12px] leading-[16px] h-5 px-1.5 font-medium tabular-nums">
@@ -522,7 +524,7 @@ export function ProfitView({
                     {[
                       { key: "name", label: "账户", align: "left", className: "sticky left-0 bg-muted/95 backdrop-blur-xs z-10 w-[110px] min-w-[95px] max-w-[120px] border-r border-border/60" },
                       { key: "revenue", label: "售出", align: "right" },
-                      { key: "credits", label: "充值", align: "right", className: "hidden 2xl:table-cell" },
+                      { key: "credits", label: "充值", align: "right" },
                       { key: "cost", label: "成本", align: "right" },
                       { key: "profit", label: "利润", align: "right" },
                       { key: "margin", label: "毛利率", align: "right" },
@@ -580,7 +582,7 @@ export function ProfitView({
                       <TableCell className="text-right font-mono tabular-nums text-[14px] leading-[20px] font-semibold text-foreground py-[9px] px-2">
                         {formatCurrency(site.revenue)}
                       </TableCell>
-                      <TableCell className="hidden 2xl:table-cell text-right font-mono tabular-nums text-muted-foreground text-[14px] leading-[20px] py-[9px] px-2">
+                      <TableCell className="text-right font-mono tabular-nums text-muted-foreground text-[14px] leading-[20px] py-[9px] px-2">
                         {formatCurrency(site.credits)}
                       </TableCell>
                       <TableCell className="text-right font-mono tabular-nums text-[14px] leading-[20px] font-semibold text-foreground py-[9px] px-2">
@@ -626,24 +628,10 @@ export function ProfitView({
           <AlertCircle className="size-4 text-muted-foreground mt-0.5" />
           <div>
             <AlertTitle className="text-[14px] font-semibold text-foreground">
-              快照数据质量说明
+              核算提示
             </AlertTitle>
             <AlertDescription className="text-[12px] leading-[16px] text-muted-foreground mt-0.5 leading-relaxed">
-              {timeRange === "24h" ? (
-                <>
-                  有 {missingAccounts.length} 个账户缺快照
-                  {missingNames ? `（${missingNames}）` : ""}
-                  ，成本核算已跳过缺失时段；另有 {completeCount} 个账户完整覆盖。
-                </>
-              ) : (
-                <>
-                  近 7 天窗口起点早于首条快照记录，
-                  <span className="font-medium text-foreground">
-                    {missingAccounts.length} 个账户
-                  </span>
-                  快照不完整（状态为缺快照）；成本与毛利率仅在具备快照的有效桶内计算呈现。
-                </>
-              )}
+              <span title={missingNames || undefined}>缺快照 {missingAccounts.length} 个账户</span>；完整覆盖 {completeCount} 个。缺失时段不计入核算。
               {unmappedRevenue > 0 && (
                 <span className="ml-2">
                   未映射渠道售出：

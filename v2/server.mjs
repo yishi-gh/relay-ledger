@@ -564,10 +564,42 @@ export function createRequestHandler({
           sendError(res, 405, 'method_not_allowed', '服务状态只支持 GET/HEAD', { head });
           return;
         }
-        const range = url.searchParams.get('range') ?? '24h';
-        if (range !== '24h' && range !== '7d') {
-          sendError(res, 400, 'bad_request', 'range 只能是 24h 或 7d', { head });
-          return;
+        for (const key of url.searchParams.keys()) {
+          if (key !== 'range' && key !== 'from' && key !== 'to') {
+            sendError(res, 400, 'bad_request', `不支持的参数 ${key}`, { head });
+            return;
+          }
+        }
+        const fromRaw = url.searchParams.get('from');
+        const toRaw = url.searchParams.get('to');
+        let range = '24h';
+        let from = null;
+        let to = null;
+        if (fromRaw != null || toRaw != null) {
+          if (url.searchParams.has('range')) {
+            sendError(res, 400, 'bad_request', 'range 与 from/to 不能同时使用', { head });
+            return;
+          }
+          if (fromRaw == null || fromRaw === '' || toRaw == null || toRaw === '') {
+            sendError(res, 400, 'bad_request', 'from/to 必须成对提供', { head });
+            return;
+          }
+          from = Number(fromRaw);
+          to = Number(toRaw);
+          if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || from >= to) {
+            sendError(res, 400, 'bad_request', 'from 必须是小于 to 的毫秒时间戳', { head });
+            return;
+          }
+          if (to - from > 31 * 24 * 60 * 60 * 1000) {
+            sendError(res, 400, 'bad_request', '自定义区间不能超过 31 天', { head });
+            return;
+          }
+        } else {
+          range = url.searchParams.get('range') ?? '24h';
+          if (range !== '24h' && range !== '7d') {
+            sendError(res, 400, 'bad_request', 'range 只能是 24h 或 7d', { head });
+            return;
+          }
         }
         if (!dashboard) {
           sendError(res, 500, 'internal_error', '服务状态不可用', { head });
@@ -582,6 +614,8 @@ export function createRequestHandler({
           collector,
           now: now(),
           range,
+          from,
+          to,
         });
         sendPayload(res, 200, JSON.stringify(payload), { head });
         return;

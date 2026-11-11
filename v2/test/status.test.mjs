@@ -296,7 +296,11 @@ test('status：coverage.errors_since 取全表最早一条；空库为 null', ()
     const payload = empty.api.status(params({ from: BASE, to: BASE + HOUR - 1 }));
     assert.deepEqual(payload.components, []);
     assert.deepEqual(payload.overall, { requests: 0, errors: 0, uptime: null });
-    assert.deepEqual(payload.coverage, { errors_since: null });
+    assert.deepEqual(payload.coverage, {
+      errors_since: null,
+      errors_available: false,
+      errors_last_collected_at: null,
+    });
   } finally {
     empty.close();
   }
