@@ -293,10 +293,6 @@ export function SystemView({
           </div>
         </CardHeader>
 
-        <div className="mb-2.5 text-[12px] leading-[16px] text-muted-foreground">
-          展示后台各独立采集任务的分时调度运行状态条与最近执行情况；空白格表示未记录运行，不能据此判断任务成功或失败。
-        </div>
-
         {currentCollector?.error && (
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-2.5 mb-2.5 text-destructive text-[12px] flex items-center gap-2">
             <AlertCircle className="size-4 shrink-0" />

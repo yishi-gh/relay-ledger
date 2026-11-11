@@ -51,6 +51,7 @@ export interface UpstreamAccount {
   channels?: number[]
   channels_live?: number
   channels_total?: number
+  auto_channels?: number[]
   enabled?: boolean
   external?: boolean
   cost?: number | null
@@ -566,14 +567,18 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
                       let content: React.ReactNode = null
 
                       switch (col.key) {
-                        case "account":
+                        case "account": {
+                          const autoCount = row.auto_channels?.length ?? 0
+                          const accountTitle = autoCount > 0
+                            ? `${row.name || row.id} (含 ${autoCount} 个自动关联渠道)`
+                            : (row.name || row.id)
                           content = (
-                            <div className="flex items-center gap-2 min-w-0">
+                            <div className="flex items-center gap-2 min-w-0" title={accountTitle}>
                               <SiteLogo kind="account" id={row.id} label={row.name || row.id} size={18} />
                               <div className="flex flex-col justify-center min-w-0 leading-tight">
                                 <span
                                   className="font-medium text-foreground text-[13px] leading-[18px] line-clamp-2"
-                                  title={row.name || row.id}
+                                  title={accountTitle}
                                 >
                                   {row.name || row.id}
                                 </span>
@@ -584,6 +589,7 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
                             </div>
                           )
                           break
+                        }
                         case "enabled": {
                           const status = getChannelStatus(row)
                           switch (status.type) {
@@ -719,12 +725,23 @@ export function UpstreamsView({ timeRange, accounts }: UpstreamsViewProps) {
                         case "consumption":
                           content = formatCurrency(row.consumption)
                           break
-                        case "channels":
-                          content =
+                        case "channels": {
+                          const autoCount = row.auto_channels?.length ?? 0
+                          const baseText =
                             row.channels_live != null
                               ? `${row.channels_live} / ${row.channels_total ?? row.channels?.length ?? 0}`
-                              : (row.channels?.length ?? 0)
+                              : String(row.channels?.length ?? 0)
+                          const autoTooltip = autoCount > 0
+                            ? `关联渠道: ${baseText} (含 ${autoCount} 个自动关联渠道)`
+                            : undefined
+
+                          content = (
+                            <span title={autoTooltip}>
+                              {baseText}
+                            </span>
+                          )
                           break
+                        }
                         case "last_sync":
                           content = (
                             <span className="text-muted-foreground">

@@ -142,6 +142,74 @@ test('siteLogoSource：单账户单网站回退生效', () => {
   }
 });
 
+test('siteLogoSource：多 owner 同一网站去重后唯一仍可回退', () => {
+  const dir = makeTempDir('v2-site-logo-shared-');
+  const sourceFile = path.join(dir, 'source.db');
+  makeSourceDb(sourceFile);
+  const source = new DatabaseSync(sourceFile, { readOnly: true });
+  const dashboard = openDashboardDb(path.join(dir, 'dashboard.db'));
+  try {
+    replaceRoutingSnapshot(dashboard, {
+      channels: [{ id: 60, name: 'x', status: 1, type: 1, base_url: null, model_mapping: null }],
+      abilities: [],
+      routesAvailable: true,
+      now: 1,
+    });
+    const api = createApi({
+      source,
+      dashboard,
+      config: {
+        accounts: [
+          { id: 'a', base_url: 'https://shared.example.com/one', channels: [60] },
+          { id: 'b', base_url: 'https://shared.example.com/two', channels: [60] },
+        ],
+      },
+      siteName: 't',
+      sourceLabel: 's',
+    });
+    assert.equal(api.siteLogoSource({ kind: 'channel', id: '60' }), 'https://shared.example.com');
+  } finally {
+    source.close();
+    dashboard.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('siteLogoSource：site/current 只来自注入的 siteBaseUrl，不读 dashboard', () => {
+  const dir = makeTempDir('v2-site-logo-site-');
+  const sourceFile = path.join(dir, 'source.db');
+  makeSourceDb(sourceFile);
+  const source = new DatabaseSync(sourceFile, { readOnly: true });
+  // 空 dashboard（无任何表）：证明 site 图标不依赖快照/看板库
+  const emptyDashboard = new DatabaseSync(path.join(dir, 'empty.db'));
+  try {
+    const api = createApi({
+      source,
+      dashboard: emptyDashboard,
+      config: { accounts: [] },
+      siteName: 't',
+      sourceLabel: 's',
+      siteBaseUrl: 'https://newapi.example.com/console?x=1#frag',
+    });
+    assert.equal(api.siteLogoSource({ kind: 'site', id: 'current' }), 'https://newapi.example.com');
+    assert.equal(api.siteLogoSource({ kind: 'site', id: 'other' }), null);
+    assert.equal(api.siteLogoSource({ kind: 'site' }), null);
+
+    const noSite = createApi({
+      source,
+      dashboard: emptyDashboard,
+      config: { accounts: [] },
+      siteName: 't',
+      sourceLabel: 's',
+    });
+    assert.equal(noSite.siteLogoSource({ kind: 'site', id: 'current' }), null);
+  } finally {
+    source.close();
+    emptyDashboard.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
@@ -180,6 +248,68 @@ test('HTTP /api/site-logo：成功返回二进制、缓存 86400、安全头齐�
   assert.equal(head.headers.get('content-type'), 'image/png');
   assert.equal(head.headers.get('cache-control'), 'private, max-age=86400');
   assert.equal(await head.text(), '');
+});
+
+test('HTTP /api/site-logo：site/current 使用注入服务，严格 id 与额外参数', async (t) => {
+  const calls = [];
+  const base = await startServer(t, async (input) => {
+    calls.push(input);
+    return input.kind === 'site' && input.id === 'current'
+      ? { body: PNG, contentType: 'image/png' }
+      : null;
+  });
+  const res = await fetch(`${base}/api/site-logo?kind=site&id=current`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'image/png');
+  assert.equal(res.headers.get('cache-control'), 'private, max-age=86400');
+  assert.deepEqual(calls, [{ kind: 'site', id: 'current' }]);
+
+  const head = await fetch(`${base}/api/site-logo?kind=site&id=current`, { method: 'HEAD' });
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), '');
+
+  assert.equal((await fetch(`${base}/api/site-logo?kind=site&id=other`)).status, 400);
+  assert.equal((await fetch(`${base}/api/site-logo?kind=site&id=current&url=https://evil.test`)).status, 400);
+  assert.equal((await fetch(`${base}/api/site-logo?kind=site`)).status, 400);
+});
+
+test('HTTP /api/site-logo：site 未找到同样 404 + 6 小时缓存', async (t) => {
+  const base = await startServer(t, async () => null);
+  const res = await fetch(`${base}/api/site-logo?kind=site&id=current`);
+  assert.equal(res.status, 404);
+  assert.equal(res.headers.get('cache-control'), 'private, max-age=21600');
+  assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(res.headers.get('content-security-policy'), /sandbox/);
+});
+
+test('HTTP /api/site-logo：v=2 与旧 URL 兼容，非法 v/额外参数拒绝', async (t) => {
+  const calls = [];
+  const base = await startServer(t, async (input) => {
+    calls.push(input);
+    return { body: PNG, contentType: 'image/png' };
+  });
+
+  const v2 = await fetch(`${base}/api/site-logo?kind=channel&id=10&v=2`);
+  assert.equal(v2.status, 200);
+  assert.equal(v2.headers.get('content-type'), 'image/png');
+  assert.deepEqual(calls[0], { kind: 'channel', id: '10' });
+
+  const legacy = await fetch(`${base}/api/site-logo?kind=channel&id=10`);
+  assert.equal(legacy.status, 200, '无 v 的旧 URL 仍兼容');
+
+  const site = await fetch(`${base}/api/site-logo?kind=site&id=current&v=2`);
+  assert.equal(site.status, 200);
+
+  const head = await fetch(`${base}/api/site-logo?kind=channel&id=10&v=2`, { method: 'HEAD' });
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), '');
+
+  for (const suffix of ['v=1', 'v=', 'v=2&v=3']) {
+    const res = await fetch(`${base}/api/site-logo?kind=channel&id=10&${suffix}`);
+    assert.equal(res.status, 400, suffix);
+  }
+  const extra = await fetch(`${base}/api/site-logo?kind=channel&id=10&v=2&url=https://evil.test`);
+  assert.equal(extra.status, 400, '任意 URL 入口仍然没有');
 });
 
 test('HTTP /api/site-logo：未找到 404 + 6 小时失败缓存 + 安全头', async (t) => {

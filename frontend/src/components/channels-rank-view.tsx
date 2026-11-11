@@ -115,7 +115,7 @@ export function ChannelsRankView({
                 </Badge>
               </div>
               <CardDescription className="text-[13px] text-muted-foreground mt-0.5">
-                按售出金额降序排列，点击任意渠道快速跳转明细表
+                点击渠道查看明细
               </CardDescription>
             </div>
             <Badge variant="outline" className="tabular-nums text-xs text-muted-foreground">

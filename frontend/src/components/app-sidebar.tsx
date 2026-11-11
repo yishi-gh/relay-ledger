@@ -11,6 +11,7 @@ import {
   SidebarMenuButton,
   useSidebar,
 } from "@/components/ui/sidebar"
+import { SiteLogo } from "@/components/site-logo"
 import {
   LayoutDashboard,
   TrendingUp,
@@ -61,24 +62,24 @@ const NAV_GROUPS: NavGroup[] = [
       { key: "overview", title: "总览", icon: LayoutDashboard },
       { key: "profit", title: "盈利", icon: TrendingUp },
       { key: "rank", title: "排行", icon: BarChart3 },
-      { key: "models", title: "模型经营", icon: Cpu },
+      { key: "models", title: "模型", icon: Cpu },
     ],
   },
   {
     label: "运营资产",
     items: [
-      { key: "channels_detail", title: "渠道明细", icon: Radio },
-      { key: "groups_detail", title: "分组明细", icon: Layers },
-      { key: "routes", title: "渠道路由", icon: Route },
-      { key: "upstreams", title: "上游账户", icon: Server },
-      { key: "capital", title: "余额耗尽", icon: Wallet },
+      { key: "channels_detail", title: "渠道", icon: Radio },
+      { key: "groups_detail", title: "分组", icon: Layers },
+      { key: "routes", title: "路由", icon: Route },
+      { key: "upstreams", title: "上游", icon: Server },
+      { key: "capital", title: "余额", icon: Wallet },
     ],
   },
   {
     label: "系统运维",
     items: [
-      { key: "quality", title: "数据质量", icon: ShieldCheck },
-      { key: "system", title: "系统状态", icon: Activity },
+      { key: "quality", title: "质量", icon: ShieldCheck },
+      { key: "system", title: "系统", icon: Activity },
     ],
   },
 ]
@@ -114,9 +115,7 @@ export function AppSidebar({
       {/* 侧栏顶标：站点名与简短定位 */}
       <SidebarHeader className="border-b border-sidebar-border px-3 py-3">
         <div className="flex items-center gap-2.5 overflow-hidden">
-          <div className="size-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-semibold text-[12px] tracking-wide shadow-xs shrink-0">
-            RL
-          </div>
+          <SiteLogo kind="site" id="current" label={siteName} size={32} className="rounded-lg shadow-xs" />
           <div className="flex flex-col min-w-0 group-data-[collapsible=icon]:hidden">
             <span className="text-[14px] leading-[20px] font-medium tracking-tight text-sidebar-foreground truncate capitalize">
               {siteName}

@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   Server,
   HardDrive,
@@ -18,6 +20,7 @@ import {
   RefreshCw,
   Activity,
   SlidersHorizontal,
+  Info,
 } from "lucide-react"
 import { formatRawNumber } from "@/lib/formatters"
 import { useTheme } from "@/components/theme-provider"
@@ -80,10 +83,21 @@ function ThresholdPairField({
   max?: number
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-[13px] font-medium text-foreground">{label}</label>
-      <div className="flex items-center gap-2">
-        <div className="flex-1">
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <div className="flex items-center gap-1.5 sm:min-h-9 text-[13px] font-medium text-foreground">
+        <span>{label}</span>
+        {hint && (
+          <Tooltip>
+            <TooltipTrigger render={<button type="button" aria-label={`${label}说明`} className="shrink-0 rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" />}>
+              <Info className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipContent className="max-w-64 text-[12px]">{hint}</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-2">
+        <div className="min-w-0 flex flex-col gap-1">
+          <span className="text-[12px] text-muted-foreground">{leftLabel}</span>
           <Input
             type="number"
             min={min}
@@ -91,14 +105,15 @@ function ThresholdPairField({
             step={step}
             value={leftValue}
             onChange={(e) => onLeftChange(e.target.value)}
-            className="h-8 text-[13px] font-mono"
+            className="h-8 min-w-0 text-[13px] font-mono tabular-nums"
             aria-label={`${label}${leftLabel}`}
             placeholder={leftLabel}
             aria-invalid={Boolean(error)}
           />
         </div>
-        <span className="text-muted-foreground text-[12px] font-mono select-none">{comparator}</span>
-        <div className="flex-1">
+        <span aria-hidden="true" className="pb-2 text-muted-foreground text-[12px] font-mono select-none">{comparator}</span>
+        <div className="min-w-0 flex flex-col gap-1">
+          <span className="text-[12px] text-muted-foreground">{rightLabel}</span>
           <Input
             type="number"
             min={min}
@@ -106,7 +121,7 @@ function ThresholdPairField({
             step={step}
             value={rightValue}
             onChange={(e) => onRightChange(e.target.value)}
-            className="h-8 text-[13px] font-mono"
+            className="h-8 min-w-0 text-[13px] font-mono tabular-nums"
             aria-label={`${label}${rightLabel}`}
             placeholder={rightLabel}
             aria-invalid={Boolean(error)}
@@ -115,8 +130,6 @@ function ThresholdPairField({
       </div>
       {error ? (
         <span className="text-[12px] leading-tight text-destructive">{error}</span>
-      ) : hint ? (
-        <span className="text-[12px] text-muted-foreground">{hint}</span>
       ) : null}
     </div>
   )
@@ -142,24 +155,34 @@ function NumberSettingField({
   max?: number
   step?: number | string
 }) {
+  const inputId = React.useId()
   return (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-[13px] font-medium text-foreground">{label}</label>
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <div className="flex items-center gap-1.5 sm:min-h-9 text-[13px] font-medium text-foreground">
+        <label htmlFor={inputId}>{label}</label>
+        {hint && (
+          <Tooltip>
+            <TooltipTrigger render={<button type="button" aria-label={`${label}说明`} className="shrink-0 rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" />}>
+              <Info className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipContent className="max-w-64 text-[12px]">{hint}</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
       <Input
+        id={inputId}
         type="number"
         min={min}
         max={max}
         step={step}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-8 text-[13px] font-mono"
+        className="h-8 min-w-0 text-[13px] font-mono tabular-nums"
         aria-label={label}
         aria-invalid={Boolean(error)}
       />
       {error ? (
         <span className="text-[12px] leading-tight text-destructive">{error}</span>
-      ) : hint ? (
-        <span className="text-[12px] text-muted-foreground">{hint}</span>
       ) : null}
     </div>
   )
@@ -365,7 +388,7 @@ export function SettingsView({ meta }: SettingsViewProps) {
   }, [collector, isStaleHeartbeat, isPendingRevision])
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
+    <div className="flex-1 min-h-0 min-w-0 flex flex-col gap-4 overflow-y-auto pr-1">
       {/* 顶部全局提示 / 错误条 */}
       {error && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3.5 py-2.5 flex items-start gap-2.5 shrink-0 text-destructive text-[13px] leading-[18px]">
@@ -394,111 +417,18 @@ export function SettingsView({ meta }: SettingsViewProps) {
         </div>
       )}
 
-      {/* 1. 实例基本信息卡片（去伪生产判断，保留 6 实例信息） */}
+      {/* 1. 显示领域设置 (本地即时生效) */}
       <Card className="shadow-xs p-4 shrink-0 gap-0">
-        <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0">
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-              实例配置信息
-            </CardTitle>
-            {meta?.preview && (
-              <Badge variant="secondary" className="text-[12px] leading-[16px] h-5 px-1.5 font-medium">
-                预览模式 (Preview)
-              </Badge>
-            )}
-          </div>
-          <Server className="size-4 text-muted-foreground" />
-        </CardHeader>
-
-        <CardContent className="p-0">
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2.5">
-            {/* 站点名 */}
-            <div className="rounded-lg border border-border/70 bg-muted/20 p-2.5 flex flex-col justify-center">
-              <div className="flex items-center gap-1.5 text-muted-foreground">
-                <Globe className="size-3.5" />
-                <span className="text-[12px] leading-[16px] font-medium">站点名称</span>
-              </div>
-              <span className="text-[14px] leading-[20px] font-medium text-foreground mt-1 truncate capitalize" title={meta?.site_name || meta?.site || "Madfu"}>
-                {meta?.site_name || meta?.site || "Madfu"}
-              </span>
-            </div>
-
-            {/* Base URL */}
-            <div className="rounded-lg border border-border/70 bg-muted/20 p-2.5 flex flex-col justify-center">
-              <div className="flex items-center gap-1.5 text-muted-foreground">
-                <Globe className="size-3.5" />
-                <span className="text-[12px] leading-[16px] font-medium">基础地址</span>
-              </div>
-              <span className="text-[14px] leading-[20px] font-mono text-foreground mt-1 truncate" title={meta?.base_url || "https://ai.aobzii.cn"}>
-                {meta?.base_url || "https://ai.aobzii.cn"}
-              </span>
-            </div>
-
-            {/* 数据目录 */}
-            <div className="rounded-lg border border-border/70 bg-muted/20 p-2.5 flex flex-col justify-center">
-              <div className="flex items-center gap-1.5 text-muted-foreground">
-                <HardDrive className="size-3.5" />
-                <span className="text-[12px] leading-[16px] font-medium">数据源目录</span>
-              </div>
-              <span className="text-[14px] leading-[20px] font-mono text-foreground mt-1 truncate" title={meta?.source || "./data"}>
-                {meta?.source || "./data"}
-              </span>
-            </div>
-
-            {/* 采集调度状态 */}
-            <div className="rounded-lg border border-border/70 bg-muted/20 p-2.5 flex flex-col justify-center">
-              <div className="flex items-center justify-between gap-1 text-muted-foreground">
-                <div className="flex items-center gap-1.5">
-                  <Clock className="size-3.5" />
-                  <span className="text-[12px] leading-[16px] font-medium">采集调度状态</span>
-                </div>
-                {collectorStateBadge}
-              </div>
-              <span className="text-[13px] leading-[18px] font-mono text-foreground mt-1 truncate" title={collectorDescription}>
-                {collectorDescription}
-              </span>
-            </div>
-
-            {/* 当前主题 */}
-            <div className="rounded-lg border border-border/70 bg-muted/20 p-2.5 flex flex-col justify-center">
-              <div className="flex items-center gap-1.5 text-muted-foreground">
-                <Palette className="size-3.5" />
-                <span className="text-[12px] leading-[16px] font-medium">当前主题</span>
-              </div>
-              <span className="text-[14px] leading-[20px] font-medium text-foreground mt-1 truncate">
-                {themeDisplay}
-              </span>
-            </div>
-
-            {/* 基准汇率 */}
-            <div className="rounded-lg border border-border/70 bg-muted/20 p-2.5 flex flex-col justify-center">
-              <div className="flex items-center gap-1.5 text-muted-foreground">
-                <Coins className="size-3.5" />
-                <span className="text-[12px] leading-[16px] font-medium">基准汇率</span>
-              </div>
-              <span className="text-[14px] leading-[20px] font-mono tabular-nums text-foreground mt-1 truncate">
-                1 {meta?.currency || "USD"} = {formatRawNumber(meta?.quota_per_unit || 500000)} Q
-              </span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* 2. 当前浏览器偏好：显示格式 (本地存储即时生效) */}
-      <Card className="shadow-xs p-4 shrink-0 gap-0">
-        <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0">
+        <CardHeader className="p-0 pb-4 flex flex-row items-start justify-between gap-3 flex-wrap space-y-0">
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-                显示格式设置
+                显示
               </CardTitle>
               <Badge variant="outline" className="text-[12px] h-5 px-1.5 font-medium text-muted-foreground border-border bg-muted/20">
-                当前浏览器生效
+                本机 · 即时保存
               </Badge>
             </div>
-            <p className="text-[12px] leading-[16px] text-muted-foreground mt-0.5">
-              控制全局数字计量单位与小数显示精度，修改立即同步
-            </p>
           </div>
           <Button variant="outline" size="sm" className="text-[12px] h-7 px-2.5" onClick={handleResetDisplayPreferences}>
             <RotateCcw className="size-3.5 mr-1" />
@@ -507,9 +437,9 @@ export function SettingsView({ meta }: SettingsViewProps) {
         </CardHeader>
 
         <CardContent className="p-0 pt-1">
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-5 gap-y-4">
             {/* 数量 / Token 计量单位 */}
-            <div className="flex flex-col gap-1.5">
+            <div className="col-span-full flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-5 border-b border-border/60 pb-4">
               <label className="text-[13px] font-medium text-foreground">数量 / Token 单位制</label>
               <ToggleGroup
                 value={[preferences.display.unitSystem]}
@@ -524,13 +454,12 @@ export function SettingsView({ meta }: SettingsViewProps) {
                 }}
                 variant="outline"
                 size="sm"
-                className="w-full flex"
+                className="w-full sm:max-w-sm flex"
               >
                 <ToggleGroupItem value="zh" className="flex-1 text-[12px] h-8">中文 (万/亿)</ToggleGroupItem>
                 <ToggleGroupItem value="en" className="flex-1 text-[12px] h-8">英文 (k/M/B)</ToggleGroupItem>
                 <ToggleGroupItem value="raw" className="flex-1 text-[12px] h-8">完整数值</ToggleGroupItem>
               </ToggleGroup>
-              <span className="text-[12px] text-muted-foreground">影响看板内 Token、请求量等指标显示方式</span>
             </div>
 
             {/* 金额小数位数 */}
@@ -572,7 +501,7 @@ export function SettingsView({ meta }: SettingsViewProps) {
             {/* 百分比小数位数 */}
             <NumberSettingField
               label="常规百分比小数位 (0 - 3)"
-              hint="注：健康成功率固定保留 2 位小数（避免 99.98% 误读为 100%）"
+              hint="健康成功率固定保留 2 位，避免 99.98% 显示为 100%"
               value={Number.isFinite(preferences.display.percentDecimals) ? preferences.display.percentDecimals : ""}
               min={0}
               max={3}
@@ -590,23 +519,20 @@ export function SettingsView({ meta }: SettingsViewProps) {
         </CardContent>
       </Card>
 
-      {/* 3. 当前浏览器偏好：刷新与时间范围 (本地存储即时生效) */}
+      {/* 2. 刷新领域设置 (本地即时生效) */}
       <Card className="shadow-xs p-4 shrink-0 gap-0">
-        <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0">
+        <CardHeader className="p-0 pb-4 flex flex-row items-start justify-between gap-3 flex-wrap space-y-0">
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-                刷新与默认范围
+                刷新
               </CardTitle>
               <Badge variant="outline" className="text-[12px] h-5 px-1.5 font-medium text-muted-foreground border-border bg-muted/20">
-                当前浏览器生效
+                本机 · 即时保存
               </Badge>
             </div>
-            <p className="text-[12px] leading-[16px] text-muted-foreground mt-0.5">
-              管理前端自动数据轮询周期与默认视图跨度
-            </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button variant="outline" size="sm" className="text-[12px] h-7 px-2.5" onClick={handleResetRefreshPreferences}>
               <RotateCcw className="size-3.5 mr-1" />
               恢复默认
@@ -618,10 +544,10 @@ export function SettingsView({ meta }: SettingsViewProps) {
         </CardHeader>
 
         <CardContent className="p-0 pt-1">
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-5 gap-y-4 [&>div]:min-w-0">
             {/* 自动刷新周期 */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-[13px] font-medium text-foreground">自动刷新间隔</label>
+              <label className="text-[13px] font-medium text-foreground sm:min-h-9 flex items-center">自动刷新间隔</label>
               <ToggleGroup
                 value={[String(preferences.refresh.intervalMinutes)]}
                 onValueChange={(vals) => {
@@ -648,14 +574,14 @@ export function SettingsView({ meta }: SettingsViewProps) {
               </ToggleGroup>
               <span className="text-[12px] text-muted-foreground">
                 {preferences.refresh.intervalMinutes === 0
-                  ? "已暂停自动拉取，仅支持顶部手动点击刷新"
-                  : `每 ${preferences.refresh.intervalMinutes} 分钟对齐槽位自动获取最新看板统计`}
+                  ? "已关闭，可手动刷新"
+                  : `每 ${preferences.refresh.intervalMinutes} 分钟刷新`}
               </span>
             </div>
 
             {/* 后台挂起暂停刷新 */}
-            <div className="flex flex-col justify-start gap-2 pt-1">
-              <label className="text-[13px] font-medium text-foreground">后台标签页优化</label>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[13px] font-medium text-foreground sm:min-h-9 flex items-center">后台刷新</label>
               <div className="flex items-center gap-2 pt-1">
                 <Checkbox
                   id="pauseWhenHidden"
@@ -675,15 +601,14 @@ export function SettingsView({ meta }: SettingsViewProps) {
                     preferences.refresh.intervalMinutes === 0 ? "opacity-50 cursor-not-allowed" : "text-foreground"
                   )}
                 >
-                  页面不可见时暂停刷新，切换回激活时按需立即补刷
+                  页面隐藏时暂停，返回时补刷
                 </label>
               </div>
-              <span className="text-[12px] text-muted-foreground">减少无操作时的服务器 API 负载与网络消耗</span>
             </div>
 
             {/* 默认时间范围 */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-[13px] font-medium text-foreground">启动默认时间跨度</label>
+              <label className="text-[13px] font-medium text-foreground sm:min-h-9 flex items-center">默认时间范围</label>
               <ToggleGroup
                 value={[preferences.refresh.defaultRange]}
                 onValueChange={(vals) => {
@@ -703,30 +628,26 @@ export function SettingsView({ meta }: SettingsViewProps) {
                 <ToggleGroupItem value="7d" className="flex-1 text-[12px] h-8">7 天</ToggleGroupItem>
                 <ToggleGroupItem value="remember" className="flex-1 text-[12px] h-8">记住上次选择</ToggleGroupItem>
               </ToggleGroup>
-              <span className="text-[12px] text-muted-foreground">进入看板时的初始查询窗口</span>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* 4 & 5. 全站共享设置：saving 时通过 fieldset 禁用所有共享输入与恢复默认，避免覆盖保存中用户新输入 */}
+      {/* 3 & 4. 全站共享设置：saving 时通过 fieldset 禁用所有共享输入与恢复默认，避免覆盖保存中用户新输入 */}
       <fieldset disabled={saving} className="contents m-0 p-0 border-0">
-        {/* 4. 全站共享设置：监控与告警阈值 (乐观锁持久化) */}
+        {/* 3. 告警领域设置 (全站共享) */}
         <Card className="shadow-xs p-4 shrink-0 gap-0">
-        <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0">
+        <CardHeader className="p-0 pb-4 flex flex-row items-start justify-between gap-3 flex-wrap space-y-0">
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-                监控与告警阈值
+                告警
               </CardTitle>
               <Badge variant="secondary" className="text-[12px] h-5 px-1.5 font-medium">
-                全站共享
+                全站 · 需保存
               </Badge>
               {loading && <RefreshCw className="size-3 animate-spin text-muted-foreground" />}
             </div>
-            <p className="text-[12px] leading-[16px] text-muted-foreground mt-0.5">
-              定义全站缓存命中率、延迟分档、账户余额耗尽时间与数据新鲜度警戒线
-            </p>
           </div>
           <Button variant="outline" size="sm" className="text-[12px] h-7 px-2.5" onClick={handleResetMonitoringDraft} disabled={saving || loading}>
             <RotateCcw className="size-3.5 mr-1" />
@@ -735,7 +656,7 @@ export function SettingsView({ meta }: SettingsViewProps) {
         </CardHeader>
 
         <CardContent className="p-0 pt-1">
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-6 gap-y-5">
             {/* 缓存命中率阈值 */}
             <ThresholdPairField
               label="缓存率阈值 (良好 / 警告 %)"
@@ -795,7 +716,7 @@ export function SettingsView({ meta }: SettingsViewProps) {
             {/* P95 延迟阈值 */}
             <ThresholdPairField
               label="P95 延迟分界 (良好 / 警告 秒)"
-              hint="默认 20s / 60s，P95 进度条以 warn 为上限归一"
+              hint="默认 20s / 60s，超过警告值显示严重色"
               comparator="<"
               leftLabel="良好 s"
               rightLabel="警告 s"
@@ -879,21 +800,18 @@ export function SettingsView({ meta }: SettingsViewProps) {
         </CardContent>
       </Card>
 
-      {/* 5. 全站共享设置：采集与健康判定 (乐观锁持久化) */}
+      {/* 4. 采集与健康判定，保留真实调度确认状态。 */}
       <Card className="shadow-xs p-4 shrink-0 gap-0">
-        <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0">
+        <CardHeader className="p-0 pb-4 flex flex-row items-start justify-between gap-3 flex-wrap space-y-0">
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-                采集与健康判定
+                采集
               </CardTitle>
               <Badge variant="secondary" className="text-[12px] h-5 px-1.5 font-medium">
-                全站共享
+                全站 · 需保存
               </Badge>
             </div>
-            <p className="text-[12px] leading-[16px] text-muted-foreground mt-0.5">
-              配置后端采集调度周期与各维度可用性故障判定门槛
-            </p>
           </div>
           <Button variant="outline" size="sm" className="text-[12px] h-7 px-2.5" onClick={handleResetCollectionAndHealthDraft} disabled={saving || loading}>
             <RotateCcw className="size-3.5 mr-1" />
@@ -902,7 +820,7 @@ export function SettingsView({ meta }: SettingsViewProps) {
         </CardHeader>
 
         <CardContent className="p-0 pt-1">
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-5 gap-y-4">
             {/* 日志采集间隔 */}
             <NumberSettingField
               label="日志采集间隔 (分钟)"
@@ -937,9 +855,6 @@ export function SettingsView({ meta }: SettingsViewProps) {
                   }))
                 }}
               />
-              <span className="text-[12px] leading-[16px] text-muted-foreground/90">
-                较长或不能整除 60 分钟的余额采集间隔，可能缺少核算边界前后 5 分钟内的快照，导致部分成本、利润无法核算；不会额外补采整点或北京零点。
-              </span>
             </div>
 
             {/* 健康最小样本数 */}
@@ -977,8 +892,15 @@ export function SettingsView({ meta }: SettingsViewProps) {
             />
           </div>
 
+          <Alert className="mt-4 bg-muted/30 border-border/70">
+            <AlertTriangle aria-hidden="true" />
+            <AlertDescription className="text-[12px] leading-[18px]">
+              余额间隔过长或不能整除 60 分钟，可能缺少边界 ±5 分钟快照，影响成本与利润核算；不额外补采整点或北京零点。
+            </AlertDescription>
+          </Alert>
+
           {/* 采集器确认与运行情况透传卡底 */}
-          <div className="mt-4 pt-3 border-t border-border/70 flex flex-col md:flex-row md:items-center justify-between gap-2 text-[12px] leading-[16px] text-muted-foreground">
+          <div className="mt-4 pt-3 border-t border-border/70 flex flex-col gap-2 text-[12px] leading-[16px] text-muted-foreground">
             <div className="flex items-center gap-3 flex-wrap">
               <span className="font-medium text-foreground flex items-center gap-1">
                 <Activity className="size-3.5 text-muted-foreground" />
@@ -986,7 +908,7 @@ export function SettingsView({ meta }: SettingsViewProps) {
               </span>
               <span>{collectorStateBadge}</span>
               {collector?.error && (
-                <Badge variant="destructive" className="text-[11px] h-4.5 px-1 font-medium">
+                <Badge variant="destructive" className="text-[11px] h-auto min-h-4.5 max-w-full whitespace-normal break-words px-1 font-medium">
                   采集确认异常: {collector.error}
                 </Badge>
               )}
@@ -1011,7 +933,7 @@ export function SettingsView({ meta }: SettingsViewProps) {
                 </Badge>
               )}
             </div>
-            <div className="flex items-center gap-2 font-mono text-[12px]">
+            <div className="flex items-center gap-x-2 gap-y-1 flex-wrap font-mono text-[12px]">
               <span className="text-foreground/90">
                 实际生效: 日志 {collector?.effective.logsMinutes != null ? `${collector.effective.logsMinutes}m` : "未上报"} · 余额 {collector?.effective.spendMinutes != null ? `${collector.effective.spendMinutes}m` : "未上报"}
               </span>
@@ -1063,7 +985,7 @@ export function SettingsView({ meta }: SettingsViewProps) {
             ) : null}
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-auto">
+          <div className="flex items-center gap-2.5 flex-wrap shrink-0 self-end sm:self-auto">
             {hasConflict ? (
               <Button
                 variant="outline"
@@ -1106,6 +1028,69 @@ export function SettingsView({ meta }: SettingsViewProps) {
           </div>
         </div>
       )}
+      {/* 实例信息置于设置末尾，避免打断表单。 */}
+      <Card className="shadow-xs p-4 shrink-0 gap-0">
+        <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between gap-2 space-y-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">实例</CardTitle>
+            {meta?.preview && (
+              <Badge variant="secondary" className="text-[12px] h-5 px-1.5 font-medium">预览模式</Badge>
+            )}
+          </div>
+          <Server className="size-4 text-muted-foreground shrink-0" />
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 [&>div]:min-w-0">
+            <div className="rounded-lg bg-muted/30 p-3 flex flex-col">
+              <div className="flex items-center gap-1.5 text-muted-foreground text-[12px]">
+                <Globe className="size-3.5" />站点名称
+              </div>
+              <span className="text-[14px] font-medium text-foreground mt-1 truncate capitalize" title={meta?.site_name || meta?.site || "Madfu"}>
+                {meta?.site_name || meta?.site || "Madfu"}
+              </span>
+            </div>
+            <div className="rounded-lg bg-muted/30 p-3 flex flex-col">
+              <div className="flex items-center gap-1.5 text-muted-foreground text-[12px]">
+                <Globe className="size-3.5" />基础地址
+              </div>
+              <span className="text-[14px] font-mono text-foreground mt-1 truncate" title={meta?.base_url || "https://ai.aobzii.cn"}>
+                {meta?.base_url || "https://ai.aobzii.cn"}
+              </span>
+            </div>
+            <div className="rounded-lg bg-muted/30 p-3 flex flex-col">
+              <div className="flex items-center gap-1.5 text-muted-foreground text-[12px]">
+                <HardDrive className="size-3.5" />数据源目录
+              </div>
+              <span className="text-[14px] font-mono text-foreground mt-1 truncate" title={meta?.source || "./data"}>
+                {meta?.source || "./data"}
+              </span>
+            </div>
+            <div className="rounded-lg bg-muted/30 p-3 flex flex-col">
+              <div className="flex items-center justify-between gap-2 flex-wrap text-muted-foreground text-[12px]">
+                <span className="flex items-center gap-1.5"><Clock className="size-3.5" />采集调度</span>
+                {collectorStateBadge}
+              </div>
+              <span className="text-[13px] font-mono text-foreground mt-1 break-words" title={collectorDescription}>
+                {collectorDescription}
+              </span>
+            </div>
+            <div className="rounded-lg bg-muted/30 p-3 flex flex-col">
+              <div className="flex items-center gap-1.5 text-muted-foreground text-[12px]">
+                <Palette className="size-3.5" />当前主题
+              </div>
+              <span className="text-[14px] font-medium text-foreground mt-1">{themeDisplay}</span>
+            </div>
+            <div className="rounded-lg bg-muted/30 p-3 flex flex-col">
+              <div className="flex items-center gap-1.5 text-muted-foreground text-[12px]">
+                <Coins className="size-3.5" />基准汇率
+              </div>
+              <span className="text-[14px] font-mono tabular-nums text-foreground mt-1 break-words">
+                1 {meta?.currency || "USD"} = {formatRawNumber(meta?.quota_per_unit || 500000)} Q
+              </span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

@@ -163,6 +163,8 @@ export interface ChannelRoutesPayload {
     state: "enabled" | "disabled" | "unknown"
     endpoint: string | null
     account_ids: string[]
+    owner_source?: "explicit" | "auto" | "unmatched" | "ambiguous"
+    owner_candidates?: string[]
     model_mapping: Record<string, string> | null
     mapping_error: string | null
   }>
@@ -171,6 +173,7 @@ export interface ChannelRoutesPayload {
     name: string
     website: string | null
     channel_ids: number[]
+    auto_channels?: number[]
   }>
   abilities: Array<{
     group: string

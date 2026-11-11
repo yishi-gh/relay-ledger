@@ -12,9 +12,10 @@ import {
   readLatestSnapshot,
   readSpendSum,
 } from '../store/dashboard.mjs';
+import crypto from 'node:crypto';
 import { readChannelStates, readLiveChannelIds } from '../store/channel-state.mjs';
 import { readRoutingSnapshot } from '../store/channel-routing.mjs';
-import { channelOwners } from './config.mjs';
+import { buildChannelAssociations, normalizeChannelOrigin } from './channel-associations.mjs';
 import {
   computeMargin,
   evaluateLedger,
@@ -90,6 +91,39 @@ function routingChannelState(status) {
 /** 只把「表不存在」当作可降级；库关闭/损坏等错误必须向上抛 */
 function isMissingTableError(err) {
   return /no such table/i.test(String(err?.message ?? ''));
+}
+
+const snapshotVersionMemo = new WeakMap();
+
+/**
+ * 轻量快照版本：只读 raw row，不做 payload 的 JSON parse/normalize。
+ * 摘要包含 payload + synced_at + last_attempt_at + last_error：
+ * 同一 synced_at 换 payload、或成功后再记录失败，都会换版本。
+ * 缺表 → 'none'；库关闭/损坏等其它错误向上抛。
+ * 同一连接上 raw 内容不变时复用摘要（HIT 路径不重复 hash）。
+ */
+export function readRoutingSnapshotVersion(db) {
+  let row;
+  try {
+    row = db.prepare(
+      'SELECT payload, synced_at, last_attempt_at, last_error FROM channel_routing_snapshot WHERE id = 1',
+    ).get() ?? null;
+  } catch (err) {
+    if (isMissingTableError(err)) return 'none';
+    throw err;
+  }
+  if (!row) return 'none';
+  const raw = [
+    row.synced_at == null ? '' : String(row.synced_at),
+    row.last_attempt_at == null ? '' : String(row.last_attempt_at),
+    row.last_error == null ? '' : String(row.last_error),
+    row.payload == null ? '' : String(row.payload),
+  ].join('\u0000');
+  const memo = snapshotVersionMemo.get(db);
+  if (memo && memo.raw === raw) return memo.version;
+  const version = crypto.createHash('sha256').update(raw).digest('hex').slice(0, 32);
+  snapshotVersionMemo.set(db, { raw, version });
+  return version;
 }
 
 /** /api/errors 的区间上限：nginx 聚合按小时存，超过 31 天分桶过密且多半没人看 */
@@ -644,11 +678,27 @@ export function createApi({
   sourceLabel,
   getHealthSettings = () => SHARED_DEFAULTS.health,
   now = Date.now,
+  siteBaseUrl = null,
 }) {
-  const owners = channelOwners(config);
   const columns = Object.fromEntries(
     Object.keys(REQUIRED_SOURCE_COLUMNS).map((t) => [t, tableColumns(source, t)]),
   );
+
+  /**
+   * 每次外层 API 调用只读一次快照并复用；显式配置永远优先，自动匹配只派生有效归属。
+   * 快照缺失/空 → 只有显式归属；损坏由 readRoutingSnapshot 返回 error（不静默），
+   * 关闭的库仍然抛出。
+   */
+  function loadAssociations() {
+    const snapshot = readRoutingSnapshot(dashboard);
+    const channels = Array.isArray(snapshot.payload?.channels) ? snapshot.payload.channels : [];
+    return buildChannelAssociations({ accounts: config.accounts ?? [], channels });
+  }
+
+  /** 快照身份：用于 API 缓存 key；raw payload/错误变化即失效，不做 JSON 解析 */
+  function cacheVersion() {
+    return readRoutingSnapshotVersion(dashboard);
+  }
   // 老库可能没有 group_name（不在 REQUIRED_SOURCE_COLUMNS 里）：整段归入未分组
   const hasGroupName = Boolean(columns.logs?.has('group_name'));
   const GROUP_KEY_SQL = hasGroupName ? "COALESCE(group_name, '')" : "''";
@@ -856,7 +906,7 @@ export function createApi({
     return (row?.revenue ?? 0) + archiveChannelCost(channels, range);
   }
 
-  function buildAccounts(range) {
+  function buildAccounts(range, associations) {
     const completeDay = isWholeDayRange(range.from, range.to);
     const now = Date.now();
     // 边界口径与盈利面板一致：期初/期末必须是贴着边界的快照（±5 分钟）。
@@ -892,7 +942,7 @@ export function createApi({
 
     // 不再过滤停用账户：面板要显示它们的「已禁用」状态并排在末尾。
     // 停用账户没有快照，账本自然是 unavailable，不影响别的账户。
-    return config.accounts
+    return associations.accounts
       .map((a) => {
         const snapshots = snapshotStmt
           .all(
@@ -966,6 +1016,7 @@ export function createApi({
           margin: margin.margin,
           margin_pct: margin.marginPct,
           channels: a.channels,
+          auto_channels: Array.isArray(a.auto_channels) ? a.auto_channels : [],
           // 前端要区分「已禁用」和「没有上游账户」（external），两者都显式下发。
           enabled: a.enabled !== false,
           external: a.kind === 'external',
@@ -1066,7 +1117,7 @@ export function createApi({
     const revenue = round6((agg.revenue ?? 0) + (archive?.cost ?? 0));
     // KPI 只统计真正参与成本核算的账户：停用账户和没有上游账户的（external）
     // 永远不可能有余额，放进去会把 margin_status 拉成 unavailable。
-    const costAccounts = buildAccounts(range).filter((a) => a.enabled && !a.external);
+    const costAccounts = buildAccounts(range, loadAssociations()).filter((a) => a.enabled && !a.external);
     const upstream = upstreamSummary(costAccounts, revenue);
 
     return {
@@ -1179,7 +1230,8 @@ export function createApi({
       throw new RangeError('granularity 只能是 day 或 hour');
     }
     const range = resolveRange(searchParams);
-    const accounts = config.accounts
+    const associations = loadAssociations();
+    const accounts = associations.accounts
       .map((a) => ({
         id: a.id,
         name: a.name,
@@ -1252,13 +1304,14 @@ export function createApi({
         GROUP BY channel_id, model`,
     ).all(range.from, range.to));
 
-    const accountRows = buildAccounts(range);
+    const associations = loadAssociations();
+    const accountRows = buildAccounts(range, associations);
     const accountStatus = new Map(accountRows.map((a) => [a.id, a.status]));
-    const accountNames = new Map(config.accounts.map((a) => [a.id, a.name]));
-    const enabledIds = new Set(config.accounts.filter((a) => a.enabled).map((a) => a.id));
+    const accountNames = new Map(associations.accounts.map((a) => [a.id, a.name]));
+    const enabledIds = new Set(associations.accounts.filter((a) => a.enabled).map((a) => a.id));
 
     const channelMeta = (channelId) => {
-      const accountIds = owners.get(channelId) ?? [];
+      const accountIds = associations.owners.get(channelId) ?? [];
       const shared = accountIds.length > 1;
       let marginStatus;
       if (!accountIds.length) marginStatus = 'unconfigured';
@@ -1530,6 +1583,7 @@ export function createApi({
    */
   function models(searchParams) {
     const range = resolveRange(searchParams);
+    const associations = loadAssociations();
     const agg = source.prepare(
       `SELECT model,
               channel_id,
@@ -1561,7 +1615,7 @@ export function createApi({
       // 配置的渠道 → 账户 id；一条渠道可能被多个账户配置，去重后排序
       const accountIds = new Set();
       for (const channelId of m.channels) {
-        for (const accountId of owners.get(channelId) ?? []) accountIds.add(accountId);
+        for (const accountId of associations.owners.get(channelId) ?? []) accountIds.add(accountId);
       }
       return {
         model: m.model,
@@ -1605,9 +1659,10 @@ export function createApi({
   function capital(searchParams) {
     const range = resolveRange(searchParams);
     const now = Date.now();
+    const associations = loadAssociations();
     const channelStates = readChannelStates(dashboard);
     const countsById = new Map();
-    const eligible = config.accounts
+    const eligible = associations.accounts
       .filter((a) => a.enabled !== false && a.kind !== 'external')
       .filter((a) => {
         // 回退：channel_state 为空时与改动前一致，不筛账户
@@ -1618,7 +1673,7 @@ export function createApi({
         countsById.set(a.id, counts);
         return true;
       });
-    const ledgerById = new Map(buildAccounts(range).map((a) => [a.id, a]));
+    const ledgerById = new Map(buildAccounts(range, associations).map((a) => [a.id, a]));
 
     // 日均固定看最近 7 个北京自然日（含当天），与 /api/profit 同一账本函数按日桶算；
     // 区间合计（cost_range）仍按请求的 from/to 给值，两者互不影响。
@@ -1735,7 +1790,7 @@ export function createApi({
   function upstreams(searchParams) {
     const range = resolveRange(searchParams);
     const channelStates = readChannelStates(dashboard);
-    const accounts = buildAccounts(range);
+    const accounts = buildAccounts(range, loadAssociations());
     // 不排除 0 live 的账户（前端自己标）；channel_state 为空时保持旧响应
     if (channelStates !== null) {
       for (const account of accounts) {
@@ -2163,41 +2218,40 @@ export function createApi({
   function routeGraph() {
     const snapshot = readRoutingSnapshot(dashboard);
     const payload = snapshot.payload ?? null;
-    const ownersByChannel = new Map();
-    const sourceAccounts = Array.isArray(config?.accounts) ? config.accounts : [];
-    const accounts = sourceAccounts.map((account) => {
+    const snapshotChannels = Array.isArray(payload?.channels) ? payload.channels : [];
+    // 与其它 API 共用同一套派生：显式优先，自动只补无显式 owner 的渠道
+    const associations = buildChannelAssociations({
+      accounts: config?.accounts ?? [],
+      channels: snapshotChannels,
+    });
+    const accounts = associations.accounts.map((account) => {
       const id = String(account?.id ?? '');
-      const channelIds = [];
-      for (const value of Array.isArray(account?.channels) ? account.channels : []) {
-        const channelId = Number(value);
-        if (!Number.isInteger(channelId) || channelIds.includes(channelId)) continue;
-        channelIds.push(channelId);
-        const owners = ownersByChannel.get(channelId) ?? [];
-        if (!owners.includes(id)) owners.push(id);
-        ownersByChannel.set(channelId, owners);
-      }
       return {
         id,
         name: account?.name == null ? id : String(account.name),
         // 静态配置里的 base_url 只取 origin，避免把接口路径当财务网站
         website: safeOrigin(account?.base_url),
-        channel_ids: channelIds,
+        channel_ids: (account.channels ?? []).map(Number).filter((value) => Number.isInteger(value)),
+        auto_channels: Array.isArray(account.auto_channels) ? account.auto_channels : [],
       };
     });
 
-    const channels = (Array.isArray(payload?.channels) ? payload.channels : []).map((channel) => {
+    const channels = snapshotChannels.map((channel) => {
       const id = Number(channel?.id);
       const status = typeof channel?.status === 'number' && Number.isFinite(channel.status)
         ? channel.status
         : null;
       const mapping = parseChannelModelMapping(channel?.model_mapping);
+      const owner = associations.sources.get(id) ?? { source: 'unmatched', candidates: [] };
       return {
         id,
         name: channel?.name == null ? `渠道 #${id}` : String(channel.name),
         status,
         state: routingChannelState(status),
         endpoint: safeOrigin(channel?.base_url),
-        account_ids: ownersByChannel.get(id) ?? [],
+        account_ids: associations.owners.get(id) ?? [],
+        owner_source: owner.source,
+        owner_candidates: owner.candidates,
         model_mapping: mapping.model_mapping,
         mapping_error: mapping.mapping_error,
       };
@@ -2324,7 +2378,18 @@ export function createApi({
   }
 
   function siteLogoSource({ kind, id } = {}) {
-    const accountList = Array.isArray(config?.accounts) ? config.accounts : [];
+    // 本站图标只认显式注入的 site.base_url；不读用户 URL，也不依赖 dashboard
+    if (kind === 'site') {
+      if (String(id) !== 'current') return null;
+      return safeOrigin(siteBaseUrl);
+    }
+    const snapshot = readRoutingSnapshot(dashboard);
+    const snapshotChannels = Array.isArray(snapshot.payload?.channels) ? snapshot.payload.channels : [];
+    const associations = buildChannelAssociations({
+      accounts: config?.accounts ?? [],
+      channels: snapshotChannels,
+    });
+    const accountList = associations.accounts;
     if (kind === 'account') {
       const account = accountList.find((item) => String(item?.id) === String(id));
       return account ? safeOrigin(account?.base_url) : null;
@@ -2332,15 +2397,13 @@ export function createApi({
     if (kind !== 'channel') return null;
     const channelId = Number(id);
     if (!Number.isInteger(channelId)) return null;
-    const snapshot = readRoutingSnapshot(dashboard);
-    const channel = (Array.isArray(snapshot.payload?.channels) ? snapshot.payload.channels : [])
-      .find((item) => Number(item?.id) === channelId);
+    const channel = snapshotChannels.find((item) => Number(item?.id) === channelId);
     const endpoint = channel ? safeOrigin(channel.base_url) : null;
     if (endpoint) return endpoint;
-    const websites = [...new Set(accountList
-      .filter((account) => (Array.isArray(account?.channels) ? account.channels : [])
-        .some((value) => Number(value) === channelId))
-      .map((account) => safeOrigin(account?.base_url))
+    // 无入口时才看归属：有效 owner 的网站去重后恰好一个才回退，多归属不猜
+    const owners = associations.owners.get(channelId) ?? [];
+    const websites = [...new Set(owners
+      .map((ownerId) => safeOrigin(accountList.find((item) => String(item?.id) === ownerId)?.base_url))
       .filter(Boolean))];
     return websites.length === 1 ? websites[0] : null;
   }
@@ -2362,5 +2425,6 @@ export function createApi({
     rows,
     routeGraph,
     siteLogoSource,
+    cacheVersion,
   };
 }

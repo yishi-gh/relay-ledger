@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
   Table,
@@ -187,9 +187,6 @@ export function ProfitView({
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               账户盈利
             </CardTitle>
-            <CardDescription className="text-[12px] leading-[16px] text-muted-foreground mt-0.5">
-              成本 · 利润 · 毛利率
-            </CardDescription>
           </CardHeader>
 
           <CardContent className="p-0 flex-1 flex flex-col min-h-0 w-full py-1.5">
@@ -336,9 +333,6 @@ export function ProfitView({
               <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
                 账户汇总
               </CardTitle>
-              <CardDescription className="text-[12px] leading-[16px] text-muted-foreground mt-0.5">
-                核算明细
-              </CardDescription>
             </div>
             <Badge variant="secondary" className="text-[12px] leading-[16px] h-5 px-1.5 font-medium tabular-nums">
               {tableData.length} 个账户

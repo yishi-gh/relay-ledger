@@ -28,3 +28,8 @@ node_modules/
 .openchamber/
 .DS_Store
 Thumbs.db
+
+# BEGIN oh-my-opencode-slim worktrees
+.slim/worktrees/
+.slim/worktrees.json
+# END oh-my-opencode-slim worktrees

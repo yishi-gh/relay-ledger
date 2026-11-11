@@ -343,7 +343,9 @@ export function respondApi({ api, cache, pathname, url }) {
   const handler = API_ROUTES[pathname];
   if (!handler) return null;
   const cacheable = pathname !== '/api/healthz';
-  const key = pathname + url.search;
+  // 归属随路由快照变化：key 带快照身份，旧 HIT 在快照更新后自动失效；TTL 与容量不变
+  const version = cacheable && typeof api?.cacheVersion === 'function' ? api.cacheVersion() : 'none';
+  const key = `${pathname}${url.search}|v=${version}`;
   if (cacheable) {
     const hit = cache.get(key);
     if (hit !== null) return { payload: hit, cache: 'HIT' };
@@ -357,6 +359,7 @@ export function respondApi({ api, cache, pathname, url }) {
 const LOGO_ID_PATTERN = {
   channel: /^\d{1,12}$/,
   account: /^[A-Za-z0-9._-]{1,128}$/,
+  site: /^current$/,
 };
 
 /** 设置请求体上限：16 KiB，足够放下三组阈值加 revision */
@@ -590,16 +593,21 @@ export function createRequestHandler({
           return;
         }
         for (const key of url.searchParams.keys()) {
-          if (key !== 'kind' && key !== 'id') {
+          if (key !== 'kind' && key !== 'id' && key !== 'v') {
             sendError(res, 400, 'bad_request', `不支持的参数 ${key}`, { head });
             return;
           }
         }
+        // v 仅作为缓存破坏版本：缺省兼容旧 URL，出现时只接受 2
+        if (url.searchParams.getAll('v').some((value) => value !== '2')) {
+          sendError(res, 400, 'bad_request', 'v 只接受 2', { head });
+          return;
+        }
         const kind = url.searchParams.get('kind');
         const id = url.searchParams.get('id');
-        const pattern = kind === 'channel' || kind === 'account' ? LOGO_ID_PATTERN[kind] : null;
+        const pattern = Object.hasOwn(LOGO_ID_PATTERN, kind) ? LOGO_ID_PATTERN[kind] : null;
         if (!pattern || !id || !pattern.test(id)) {
-          sendError(res, 400, 'bad_request', 'kind 只接受 channel/account，id 形态非法', { head });
+          sendError(res, 400, 'bad_request', 'kind 只接受 channel/account/site，id 形态非法', { head });
           return;
         }
         if (!logoService) {
@@ -747,6 +755,7 @@ function main() {
     siteName: opts.site,
     sourceLabel,
     getHealthSettings: () => settingsStore.read().settings.health,
+    siteBaseUrl: INSTANCE.site.base_url,
   });
   const cache = createApiCache();
 

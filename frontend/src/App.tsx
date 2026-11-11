@@ -520,7 +520,7 @@ export function App() {
         className="min-h-screen lg:h-screen lg:max-h-screen lg:overflow-hidden"
         style={
           {
-            "--sidebar-width": "13rem", // 208px
+            "--sidebar-width": "11rem", // 176px
             "--sidebar-width-icon": "3.5rem", // 56px
           } as React.CSSProperties
         }

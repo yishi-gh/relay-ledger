@@ -650,10 +650,23 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
         dotLabel = "正常"
       }
 
+      let ownerInfo: string | null = null
+      if (channel.owner_source === "auto") {
+        ownerInfo = "关联方式: 自动匹配"
+      } else if (channel.owner_source === "explicit") {
+        ownerInfo = "关联方式: 明确配置"
+      } else if (channel.owner_source === "ambiguous") {
+        const candidateNames = (channel.owner_candidates || [])
+          .map((id) => accountMap.get(id)?.name || id)
+          .join("、")
+        ownerInfo = candidateNames ? `待确认: 网址对应多个账户 (${candidateNames})` : "待确认: 网址对应多个账户"
+      }
+
       const tooltipText = [
         `${channel.name} (#${channel.id})`,
         `状态: ${dotLabel}`,
         `配置: ${isChanDisabled ? "已停用" : channel.state === "enabled" ? "已启用" : "状态未知"}`,
+        ownerInfo,
         near
           ? `近1h: 成功 ${near.requests} · 错误 ${near.errors} · 成功率 ${near.uptime != null ? `${(near.uptime * 100).toFixed(2)}%` : "—"}`
           : "近1h: 无调用记录",
@@ -669,7 +682,7 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
         tooltipText,
       }
     },
-    [nearChannelMap, data]
+    [nearChannelMap, data, accountMap]
   )
 
   return (
@@ -1051,7 +1064,14 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
                 {/* 所属财务账户 */}
                 <div className="rounded-lg border border-border/70 bg-muted/20 p-2 flex flex-col gap-0.5">
                   <span className="text-muted-foreground font-medium">关联财务账户</span>
-                  <span className="text-foreground truncate">
+                  <span
+                    className="text-foreground truncate"
+                    title={
+                      selectedChannel.account_ids && selectedChannel.account_ids.length > 0
+                        ? selectedChannel.account_ids.map((id) => accountMap.get(id)?.name || id).join("、")
+                        : "未关联财务账户"
+                    }
+                  >
                     {selectedChannel.account_ids && selectedChannel.account_ids.length > 0 ? (
                       selectedChannel.account_ids
                         .map((id) => accountMap.get(id)?.name || id)
@@ -1060,6 +1080,31 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
                       <span className="text-muted-foreground">未关联财务账户</span>
                     )}
                   </span>
+                  {selectedChannel.owner_source === "auto" && (
+                    <span className="text-[11px] leading-[15px] text-muted-foreground truncate" title="根据接口网址自动匹配关联财务账户">
+                      关联方式：自动匹配
+                    </span>
+                  )}
+                  {selectedChannel.owner_source === "explicit" && (
+                    <span className="text-[11px] leading-[15px] text-muted-foreground truncate" title="根据配置文件中明确指定的渠道归属">
+                      关联方式：明确配置
+                    </span>
+                  )}
+                  {selectedChannel.owner_source === "ambiguous" && (
+                    <span
+                      className="text-[11px] leading-[15px] text-amber-600 dark:text-amber-400 font-medium truncate"
+                      title={
+                        selectedChannel.owner_candidates && selectedChannel.owner_candidates.length > 0
+                          ? `待确认：网址对应多个账户，候选：${selectedChannel.owner_candidates.map((id) => accountMap.get(id)?.name || id).join("、")}`
+                          : "待确认：网址对应多个账户"
+                      }
+                    >
+                      待确认：网址对应多个账户
+                      {selectedChannel.owner_candidates && selectedChannel.owner_candidates.length > 0
+                        ? `（候选：${selectedChannel.owner_candidates.map((id) => accountMap.get(id)?.name || id).join("、")}）`
+                        : ""}
+                    </span>
+                  )}
                 </div>
 
                 {/* 模型重写 */}

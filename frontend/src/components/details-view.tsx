@@ -23,11 +23,14 @@ import {
   formatNumber,
   formatPercent,
 } from "@/lib/formatters"
+import { getServerSettings } from "@/lib/settings"
 import {
   formatLatency,
   formatTokenCn,
   formatTps,
   latencyP50ToneClass,
+  cacheToneClass,
+  latencyP95ToneClass,
 } from "@/components/table-utils"
 import {
   type SortState,
@@ -37,7 +40,6 @@ import {
   getSortHeaderAttrs,
 } from "@/lib/table-sort"
 import { ColPicker, type ColumnItem } from "@/components/col-picker"
-import { CacheRateCell, LatencyP95Cell } from "@/components/table-visualizers"
 import { HealthView } from "@/components/health-view"
 import { SiteLogo } from "@/components/site-logo"
 import type { DateRange } from "@/lib/api"
@@ -208,44 +210,26 @@ function loadVisibleKeys(
   return defaultKeys
 }
 
-/** 紧凑毛利率可视化：以 0 为轴正绿向右、负红向左、零中性，严格继承既有正负语义口径 */
+/** 毛利率沿用正绿、负红、零中性的色彩。 */
 function renderCompactMargin(value: number | null | undefined): React.ReactNode {
   if (value == null || isNaN(value)) {
     return <span className="text-muted-foreground">—</span>
   }
-  const absPct = Math.min(50, Math.max(0, Math.abs(value) * 50))
   const isPositive = value > 0
   const isNegative = value < 0
   return (
-    <div className="flex flex-col items-end justify-center w-full min-w-0 py-0.5 leading-none">
-      <span
-        className={cn(
-          "font-mono tabular-nums text-[13px] leading-[16px]",
-          isPositive
-            ? "text-emerald-600 dark:text-emerald-400 font-medium"
-            : isNegative
-            ? "text-rose-600 dark:text-rose-400 font-medium"
-            : "text-muted-foreground font-medium"
-        )}
-      >
-        {formatPercent(value)}
-      </span>
-      <div className="w-full max-w-[42px] h-[2px] bg-muted/40 rounded-full relative overflow-hidden mt-0.5">
-        <div className="absolute left-1/2 top-0 bottom-0 w-[1px] bg-muted-foreground/40 z-10" />
-        {isPositive && (
-          <div
-            className="absolute top-0 bottom-0 left-1/2 bg-emerald-500 rounded-r-full transition-all duration-300"
-            style={{ width: `${absPct}%` }}
-          />
-        )}
-        {isNegative && (
-          <div
-            className="absolute top-0 bottom-0 right-1/2 bg-rose-500 rounded-l-full transition-all duration-300"
-            style={{ width: `${absPct}%` }}
-          />
-        )}
-      </div>
-    </div>
+    <span
+      className={cn(
+        "font-mono tabular-nums text-[13px] leading-[18px]",
+        isPositive
+          ? "text-emerald-600 dark:text-emerald-400 font-medium"
+          : isNegative
+          ? "text-rose-600 dark:text-rose-400 font-medium"
+          : "text-muted-foreground font-medium"
+      )}
+    >
+      {formatPercent(value)}
+    </span>
   )
 }
 
@@ -429,24 +413,6 @@ export function DetailsView({
   const sortedGroups = React.useMemo(() => {
     return sortRows(groups, effectiveGroupsSort, GROUP_ACCESSORS)
   }, [groups, effectiveGroupsSort])
-
-  const maxChannelRevenue = React.useMemo(() => {
-    return Math.max(...channels.map((c) => c.revenue || 0), 0)
-  }, [channels])
-
-  const top1ChannelId = React.useMemo(() => {
-    if (!channels.length) return null
-    return [...channels].sort((a, b) => (b.revenue || 0) - (a.revenue || 0))[0]?.channel_id ?? null
-  }, [channels])
-
-  const maxGroupRevenue = React.useMemo(() => {
-    return Math.max(...groups.map((g) => g.revenue || 0), 0)
-  }, [groups])
-
-  const top1GroupName = React.useMemo(() => {
-    if (!groups.length) return null
-    return [...groups].sort((a, b) => (b.revenue || 0) - (a.revenue || 0))[0]?.group_name ?? null
-  }, [groups])
 
   // 顶部汇总统计（紧凑型卡片）
   const totals = React.useMemo(() => {
@@ -751,28 +717,14 @@ export function DetailsView({
                               )
                               break
                             case "revenue":
-                              if (row.revenue == null || isNaN(row.revenue)) {
-                                content = <span className="text-muted-foreground">—</span>
-                              } else {
-                                const pct = maxChannelRevenue > 0 ? Math.min(100, Math.max(0, (row.revenue / maxChannelRevenue) * 100)) : 0
-                                const isTop1 = top1ChannelId === row.channel_id
-                                content = (
-                                  <div className="flex flex-col items-end justify-center w-full min-w-0 leading-none py-0.5">
-                                    <span className="font-mono tabular-nums text-[13px] leading-[16px] font-semibold text-foreground">
-                                      {formatCurrency(row.revenue)}
-                                    </span>
-                                    <div className="w-full max-w-[54px] h-[2px] bg-muted/40 rounded-full overflow-hidden mt-0.5">
-                                      <div
-                                        className={cn(
-                                          "h-full rounded-full transition-all duration-300",
-                                          isTop1 ? "bg-primary font-semibold" : pct >= 20 ? "bg-primary/80" : "bg-primary/35"
-                                        )}
-                                        style={{ width: `${pct}%` }}
-                                      />
-                                    </div>
-                                  </div>
+                              content =
+                                row.revenue == null || isNaN(row.revenue) ? (
+                                  <span className="text-muted-foreground">—</span>
+                                ) : (
+                                  <span className="font-mono tabular-nums text-[13px] leading-[18px] font-semibold text-foreground">
+                                    {formatCurrency(row.revenue)}
+                                  </span>
                                 )
-                              }
                               break
                             case "requests":
                               content = formatNumber(row.requests)
@@ -802,13 +754,18 @@ export function DetailsView({
                                 formatTps(row.tps)
                               )
                               break
-                            case "cache":
-                              content = (
-                                <div className="w-full flex justify-end [&_.sm\:w-12]:w-10">
-                                  <CacheRateCell value={row.cache_rate} />
-                                </div>
-                              )
+                            case "cache": {
+                              const thresholds = getServerSettings().monitoring.cacheRate
+                              content =
+                                row.cache_rate != null && !isNaN(row.cache_rate) ? (
+                                  <span className={cn("text-[13px] leading-[18px] font-mono tabular-nums", cacheToneClass(row.cache_rate, thresholds))}>
+                                    {formatPercent(row.cache_rate)}
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )
                               break
+                            }
                             case "p50":
                               content = (
                                 <span className={latencyP50ToneClass(row.p50 ?? row.latency_p50)}>
@@ -816,13 +773,19 @@ export function DetailsView({
                                 </span>
                               )
                               break
-                            case "p95":
-                              content = (
-                                <div className="w-full flex justify-end [&_.sm\:w-12]:w-10">
-                                  <LatencyP95Cell value={row.p95 ?? row.latency_p95} />
-                                </div>
-                              )
+                            case "p95": {
+                              const val = row.p95 ?? row.latency_p95
+                              const thresholds = getServerSettings().monitoring.latencyP95
+                              content =
+                                val != null && !isNaN(val) && val >= 0 ? (
+                                  <span className={cn("text-[13px] leading-[18px] font-mono tabular-nums", latencyP95ToneClass(val, thresholds))}>
+                                    {formatLatency(val)}
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )
                               break
+                            }
                             case "per_1e8":
                               content = row.top_model?.per_1e8 != null ? (
                                 <span className="font-mono tabular-nums text-[13px] leading-[18px]" title={row.top_model.model}>
@@ -902,28 +865,14 @@ export function DetailsView({
                             )
                             break
                           case "revenue":
-                            if (group.revenue == null || isNaN(group.revenue)) {
-                              content = <span className="text-muted-foreground">—</span>
-                            } else {
-                              const pct = maxGroupRevenue > 0 ? Math.min(100, Math.max(0, (group.revenue / maxGroupRevenue) * 100)) : 0
-                              const isTop1 = top1GroupName === group.group_name
-                              content = (
-                                <div className="flex flex-col items-end justify-center w-full min-w-0 leading-none py-0.5">
-                                  <span className="font-mono tabular-nums text-[13px] leading-[16px] font-semibold text-foreground">
-                                    {formatCurrency(group.revenue)}
-                                  </span>
-                                  <div className="w-full max-w-[54px] h-[2px] bg-muted/40 rounded-full overflow-hidden mt-0.5">
-                                    <div
-                                      className={cn(
-                                        "h-full rounded-full transition-all duration-300",
-                                        isTop1 ? "bg-primary font-semibold" : pct >= 20 ? "bg-primary/80" : "bg-primary/35"
-                                      )}
-                                      style={{ width: `${pct}%` }}
-                                    />
-                                  </div>
-                                </div>
+                            content =
+                              group.revenue == null || isNaN(group.revenue) ? (
+                                <span className="text-muted-foreground">—</span>
+                              ) : (
+                                <span className="font-mono tabular-nums text-[13px] leading-[18px] font-semibold text-foreground">
+                                  {formatCurrency(group.revenue)}
+                                </span>
                               )
-                            }
                             break
                           case "requests":
                             content = formatNumber(group.requests)
@@ -948,13 +897,18 @@ export function DetailsView({
                           case "tps":
                             content = formatTps(group.tps)
                             break
-                          case "cache":
-                            content = (
-                              <div className="w-full flex justify-end [&_.sm\:w-12]:w-10">
-                                <CacheRateCell value={group.cache_rate} />
-                              </div>
-                            )
+                          case "cache": {
+                            const thresholds = getServerSettings().monitoring.cacheRate
+                            content =
+                              group.cache_rate != null && !isNaN(group.cache_rate) ? (
+                                <span className={cn("text-[13px] leading-[18px] font-mono tabular-nums", cacheToneClass(group.cache_rate, thresholds))}>
+                                  {formatPercent(group.cache_rate)}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )
                             break
+                          }
                           case "p50":
                             content = (
                               <span className={latencyP50ToneClass(group.p50 ?? group.latency_p50)}>
@@ -962,13 +916,19 @@ export function DetailsView({
                               </span>
                             )
                             break
-                          case "p95":
-                            content = (
-                              <div className="w-full flex justify-end [&_.sm\:w-12]:w-10">
-                                <LatencyP95Cell value={group.p95 ?? group.latency_p95} />
-                              </div>
-                            )
+                          case "p95": {
+                            const val = group.p95 ?? group.latency_p95
+                            const thresholds = getServerSettings().monitoring.latencyP95
+                            content =
+                              val != null && !isNaN(val) && val >= 0 ? (
+                                <span className={cn("text-[13px] leading-[18px] font-mono tabular-nums", latencyP95ToneClass(val, thresholds))}>
+                                  {formatLatency(val)}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )
                             break
+                          }
                           case "per_1e8":
                             content = group.top_model?.per_1e8 != null ? (
                               <span className="font-mono tabular-nums text-[13px] leading-[18px]" title={group.top_model.model}>

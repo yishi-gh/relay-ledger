@@ -38,6 +38,15 @@
 
 核心不对称：**充值发生在账户层，售出发生在渠道层**。两者只有在这一层能对齐，往下拆（渠道级充值）只能是估算，见 `DECISIONS.md` D9。
 
+### 渠道归属：显式优先、自动只读派生
+
+- `accounts[].channels` 是显式归属，**绝对优先**；同一渠道被多个账户显式列出时原样保留（多 owner），本轮不改变既有财务归属算法。
+- 只对「路由快照里存在、且没有任何显式 owner」的渠道做自动匹配：账户 `base_url` 的 origin 相同，或该账户显式拥有的某个快照渠道 origin 相同（API 别名）。origin 归一为 `http(s) + 小写 host`（默认端口归一），路径/查询/hash 忽略，带 userinfo 的 URL 不参与。
+- 候选按 `account.id` 去重，**恰好一个**才自动关联；零个为未匹配；多个为歧义，`owner_source='ambiguous'` 且不关联。自动匹配**不会新增多 owner**。
+- 归属每次请求从「当前账户配置 + 当前路由快照」纯派生，不落库、不学习上一轮结果；换 base_url 或快照更新会立即改变派生结果，也会影响用当前配置回查历史区间的归属。没有「从某时刻起生效」的时间版本机制。
+- 停用账户、停用渠道仍参与归属（与原 D7 一致）。坏/空快照只回退到显式归属，不静默清空；库关闭仍报错。
+- 派生结果供 `overview / profit / channels / models / capital / upstreams / routes / logo` 共用；`routes.channels` 带 `owner_source` 与 `owner_candidates`，账户带 `auto_channels`，歧义项交 UI 待确认。
+
 ## 3. 两条数据链路
 
 ```mermaid

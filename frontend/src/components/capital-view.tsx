@@ -48,7 +48,7 @@ const CAPITAL_ACCESSORS: AccessorMap<CapitalAccount> = {
   cost_range: (r) => r.cost_range ?? null,
   credits_range: (r) => r.credits_range ?? null,
   daily_avg_7d: (r) => r.daily_avg_7d ?? null,
-  runway_days: (r) => r.runway_days ?? null,
+  runway_days: (r) => r.runway_days != null && Number.isFinite(r.runway_days) ? r.runway_days : null,
   status: (r) => r.status || "",
 }
 
@@ -100,7 +100,7 @@ function renderStatusBadge(status: string) {
 }
 
 function renderRunway(days: number | null | undefined) {
-  if (days == null || isNaN(days)) {
+  if (days == null || !Number.isFinite(days)) {
     return <span className="text-muted-foreground">—</span>
   }
 
@@ -174,7 +174,7 @@ export function CapitalView({
     setSortState((prev) => nextSort(prev, key))
   }, [])
 
-  const rows = data?.accounts || []
+  const rows = React.useMemo(() => data?.accounts ?? [], [data])
   const shortest = React.useMemo(() => {
     return rows.reduce<{
       name: string
@@ -188,16 +188,31 @@ export function CapitalView({
   }, [rows])
 
   const sortedRows = React.useMemo(() => {
-    return sortRows(rows, sortState, CAPITAL_ACCESSORS)
+    if (sortState !== null) {
+      return sortRows(rows, sortState, CAPITAL_ACCESSORS)
+    }
+    // 相同天数与不可估算值保留接口顺序。
+    return [...rows].sort((a, b) => {
+      const aVal = a.runway_days
+      const bVal = b.runway_days
+      const aValid = aVal != null && Number.isFinite(aVal)
+      const bValid = bVal != null && Number.isFinite(bVal)
+      if (aValid && bValid) {
+        return aVal - bVal
+      }
+      if (aValid) return -1
+      if (bValid) return 1
+      return 0
+    })
   }, [rows, sortState])
 
   const total = data?.total
   const isScrollable = sortedRows.length > 8
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
+    <div className="flex-1 min-h-0 min-w-0 flex flex-col gap-4 overflow-y-auto pr-1">
       {/* 1. 顶部 4 张 KPI 卡片 */}
-      <section className="grid grid-cols-2 md:grid-cols-4 gap-3.5 shrink-0">
+      <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5 shrink-0 [&>[data-slot=card]]:min-w-0">
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">余额合计</span>
@@ -206,9 +221,6 @@ export function CapitalView({
           <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
             {formatCurrency(total?.balance)}
           </div>
-          <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-            有效上游账户最新可用余额汇总
-          </span>
         </Card>
 
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">
@@ -219,9 +231,6 @@ export function CapitalView({
           <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
             {formatCurrency(total?.cost_range)}
           </div>
-          <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-            {timeRange === "24h" ? "近 24 小时上游总消耗" : "近 7 天上游总消耗"}
-          </span>
         </Card>
 
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">
@@ -232,49 +241,48 @@ export function CapitalView({
           <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
             {formatCurrency(total?.daily_avg_7d)}
           </div>
-          <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
-            固定最近 7 个自然日均消耗
-          </span>
         </Card>
 
         <Card className="shadow-xs p-3.5 flex flex-col justify-between">
           <div className="flex items-center justify-between text-muted-foreground">
-            <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">预计最早耗尽时间</span>
+            <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">预计最早耗尽</span>
             <Hourglass className="size-4 text-amber-500" />
           </div>
-          <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums">
-            {shortest?.days != null ? (
-              (() => {
-                const runwayThresholds = getServerSettings().monitoring.runway
-                return (
-                  <span
-                    className={
-                      shortest.days < runwayThresholds.dangerDays
-                        ? "text-rose-600 dark:text-rose-400"
-                        : shortest.days < runwayThresholds.warnDays
-                        ? "text-amber-600 dark:text-amber-400"
-                        : "text-foreground"
-                    }
+          {shortest?.days != null ? (
+            (() => {
+              const runwayThresholds = getServerSettings().monitoring.runway
+              const colorClass =
+                shortest.days < runwayThresholds.dangerDays
+                  ? "text-rose-600 dark:text-rose-400"
+                  : shortest.days < runwayThresholds.warnDays
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-foreground"
+              return (
+                <div className="mt-1 flex flex-col gap-0.5 min-w-0">
+                  <div
+                    className="text-[22px] leading-[28px] font-semibold text-foreground truncate"
+                    title={shortest.name}
                   >
-                    {shortest.days.toFixed(1)}{" "}
-                    <span className="text-[14px] font-normal font-sans text-muted-foreground">天后耗尽</span>
-                  </span>
-                )
-              })()
-            ) : (
-              <span className="text-muted-foreground">—</span>
-            )}
-          </div>
-          <div className="text-[12px] leading-[16px] text-muted-foreground mt-1 flex flex-col gap-0.5">
-            <span>
-              {shortest
-                ? `最早耗尽上游账户: ${shortest.name}`
-                : "暂无上游账户消耗数据"}
-            </span>
-            <span>
-              全站加权估算: {total?.runway_days != null ? `${total.runway_days.toFixed(1)} 天` : "—"}
-            </span>
-          </div>
+                    {shortest.name}
+                  </div>
+                  <div className="text-[22px] leading-[28px] font-semibold font-mono tabular-nums">
+                    <span className={colorClass}>
+                      <span className="text-[13px] font-normal font-sans text-muted-foreground">最早 </span>
+                      {shortest.days.toFixed(1)}{" "}
+                      <span className="text-[13px] font-normal font-sans text-muted-foreground">天后耗尽</span>
+                    </span>
+                  </div>
+                </div>
+              )
+            })()
+          ) : (
+            <div className="mt-1.5 text-[24px] leading-[28px] font-semibold text-muted-foreground">
+              —
+            </div>
+          )}
+          <span className="text-[12px] leading-[16px] text-muted-foreground mt-1 truncate">
+            综合估算：{total?.runway_days != null && Number.isFinite(total.runway_days) ? `${total.runway_days.toFixed(1)} 天` : "—"}
+          </span>
         </Card>
       </section>
 
@@ -337,7 +345,7 @@ export function CapitalView({
                       { key: "runway_days", label: "预计耗尽", isNum: true },
                       { key: "status", label: "状态", isNum: false },
                     ].map((col) => {
-                      const sortAttrs = getSortHeaderAttrs(sortState, col.key)
+                      const sortAttrs = getSortHeaderAttrs(sortState ?? { key: "runway_days", dir: "asc" }, col.key)
                       return (
                         <TableHead
                           key={col.key}

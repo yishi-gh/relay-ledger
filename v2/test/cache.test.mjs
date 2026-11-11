@@ -151,9 +151,9 @@ test('条目上限：超过 maxEntries 按最旧淘汰', () => {
   respondApi({ api, cache, pathname: '/api/channels', url: urlOf('/api/channels?a=3') });
 
   assert.equal(cache.size, 2);
-  assert.equal(cache.get('/api/channels?a=1'), null, '最旧的一条应被淘汰');
-  assert.notEqual(cache.get('/api/channels?a=2'), null);
-  assert.notEqual(cache.get('/api/channels?a=3'), null);
+  assert.equal(cache.get('/api/channels?a=1|v=none'), null, '最旧的一条应被淘汰');
+  assert.notEqual(cache.get('/api/channels?a=2|v=none'), null);
+  assert.notEqual(cache.get('/api/channels?a=3|v=none'), null);
   assert.equal(calls.channels, 3);
 });
 

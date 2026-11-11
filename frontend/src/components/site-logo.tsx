@@ -2,7 +2,7 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 
 export interface SiteLogoProps {
-  kind: "channel" | "account"
+  kind: "channel" | "account" | "site"
   id: string | number
   label?: string
   size?: number
@@ -22,7 +22,7 @@ function getInitials(label?: string, fallbackId?: string | number): string {
 
 export function SiteLogo({ kind, id, label, size = 16, className }: SiteLogoProps) {
   const [failedSrc, setFailedSrc] = React.useState<string | null>(null)
-  const src = `/api/site-logo?kind=${kind}&id=${encodeURIComponent(String(id))}`
+  const src = `/api/site-logo?kind=${kind}&id=${encodeURIComponent(String(id))}&v=2`
   const initials = getInitials(label, id)
   const hasFailed = failedSrc === src
 

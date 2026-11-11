@@ -103,7 +103,7 @@ export function OverviewView({
         <Card className="col-span-1 sm:col-span-2 xl:col-span-2 h-auto xl:h-full shadow-xs flex flex-col justify-between">
           <CardHeader className="p-4 pb-1 flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-[14px] leading-[20px] font-normal text-muted-foreground">
-              本站售出 (Revenue)
+              本站售出
             </CardTitle>
             <DollarSign className="size-4 text-muted-foreground" />
           </CardHeader>
@@ -112,9 +112,6 @@ export function OverviewView({
               <div className="text-[28px] leading-[36px] font-semibold font-mono tracking-tight text-foreground tabular-nums whitespace-nowrap">
                 {formatCurrency(kpiData.revenue)}
               </div>
-              <p className="text-[12px] leading-[16px] text-muted-foreground mt-1.5">
-                {timeRange === "24h" ? "24 小时全站售出累计" : "近 7 天全站售出累计"}
-              </p>
             </div>
 
             {/* 下方一行 3 个次级指标 */}
@@ -194,7 +191,7 @@ export function OverviewView({
         <Card data-slot="kpi-aux-card" className="col-span-1 sm:col-span-1 xl:col-span-1 h-auto xl:h-full shadow-xs flex flex-col justify-between">
           <CardHeader className="p-4 pb-1 flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-[14px] leading-[20px] font-normal text-muted-foreground">
-              请求数 (Requests)
+              请求数
             </CardTitle>
             <Activity className="size-4 text-muted-foreground" />
           </CardHeader>
@@ -204,9 +201,6 @@ export function OverviewView({
                 {formatNumber(kpiData.requests)}
               </div>
             </div>
-            <p className="text-[12px] leading-[16px] text-muted-foreground mt-1.5">
-              {timeRange === "24h" ? "24 小时调用频次求和" : "近 7 天调用总请求数"}
-            </p>
           </CardContent>
         </Card>
 
@@ -224,9 +218,6 @@ export function OverviewView({
                 {formatTokens(kpiData.tokens)}
               </div>
             </div>
-            <p className="text-[12px] leading-[16px] text-muted-foreground mt-1.5">
-              {timeRange === "24h" ? "近 24 小时窗口" : "全站近 7 天消耗总计"}
-            </p>
           </CardContent>
         </Card>
 
