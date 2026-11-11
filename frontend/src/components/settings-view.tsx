@@ -52,6 +52,15 @@ function parseInputNumber(raw: string): number {
   return trimmed === "" ? NaN : Number(trimmed)
 }
 
+const THRESHOLD_DOT_CLASSES = {
+  good: "bg-emerald-600 dark:bg-emerald-400",
+  warn: "bg-amber-600 dark:bg-amber-400",
+  danger: "bg-rose-600 dark:bg-rose-400",
+  neutral: "bg-muted-foreground",
+}
+
+type ThresholdTone = keyof typeof THRESHOLD_DOT_CLASSES
+
 /** 双阈值行内表单组件 */
 function ThresholdPairField({
   label,
@@ -63,6 +72,8 @@ function ThresholdPairField({
   onRightChange,
   leftLabel,
   rightLabel,
+  leftTone,
+  rightTone,
   comparator = "<",
   step,
   min,
@@ -77,6 +88,8 @@ function ThresholdPairField({
   onRightChange: (val: string) => void
   leftLabel: string
   rightLabel: string
+  leftTone: ThresholdTone
+  rightTone: ThresholdTone
   comparator?: "<" | ">"
   step?: number | string
   min?: number
@@ -97,7 +110,10 @@ function ThresholdPairField({
       </div>
       <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-2">
         <div className="min-w-0 flex flex-col gap-1">
-          <span className="text-[12px] text-muted-foreground">{leftLabel}</span>
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
+            <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", THRESHOLD_DOT_CLASSES[leftTone])} />
+            {leftLabel}
+          </span>
           <Input
             type="number"
             min={min}
@@ -113,7 +129,10 @@ function ThresholdPairField({
         </div>
         <span aria-hidden="true" className="pb-2 text-muted-foreground text-[12px] font-mono select-none">{comparator}</span>
         <div className="min-w-0 flex flex-col gap-1">
-          <span className="text-[12px] text-muted-foreground">{rightLabel}</span>
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
+            <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", THRESHOLD_DOT_CLASSES[rightTone])} />
+            {rightLabel}
+          </span>
           <Input
             type="number"
             min={min}
@@ -138,6 +157,7 @@ function ThresholdPairField({
 /** 单数字设置项组件 */
 function NumberSettingField({
   label,
+  tone,
   hint,
   error,
   value,
@@ -147,6 +167,7 @@ function NumberSettingField({
   step = 1,
 }: {
   label: string
+  tone?: ThresholdTone
   hint?: string
   error?: string
   value: number | string
@@ -159,7 +180,10 @@ function NumberSettingField({
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <div className="flex items-center gap-1.5 sm:min-h-9 text-[13px] font-medium text-foreground">
-        <label htmlFor={inputId}>{label}</label>
+        <label htmlFor={inputId} className="inline-flex items-center gap-1.5">
+          {tone && <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", THRESHOLD_DOT_CLASSES[tone])} />}
+          {label}
+        </label>
         {hint && (
           <Tooltip>
             <TooltipTrigger render={<button type="button" aria-label={`${label}说明`} className="shrink-0 rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" />}>
@@ -664,6 +688,8 @@ export function SettingsView({ meta }: SettingsViewProps) {
               comparator=">"
               leftLabel="良好 %"
               rightLabel="警告 %"
+              leftTone="good"
+              rightTone="warn"
               leftValue={Number.isFinite(serverDraft.monitoring.cacheRate.good) ? toFloatString(serverDraft.monitoring.cacheRate.good * 100) : ""}
               rightValue={Number.isFinite(serverDraft.monitoring.cacheRate.warn) ? toFloatString(serverDraft.monitoring.cacheRate.warn * 100) : ""}
               min={0}
@@ -692,6 +718,8 @@ export function SettingsView({ meta }: SettingsViewProps) {
               comparator="<"
               leftLabel="良好 s"
               rightLabel="警告 s"
+              leftTone="good"
+              rightTone="warn"
               leftValue={Number.isFinite(serverDraft.monitoring.latencyP50.goodMs) ? toFloatString(serverDraft.monitoring.latencyP50.goodMs / 1000) : ""}
               rightValue={Number.isFinite(serverDraft.monitoring.latencyP50.warnMs) ? toFloatString(serverDraft.monitoring.latencyP50.warnMs / 1000) : ""}
               min={0.001}
@@ -720,6 +748,8 @@ export function SettingsView({ meta }: SettingsViewProps) {
               comparator="<"
               leftLabel="良好 s"
               rightLabel="警告 s"
+              leftTone="good"
+              rightTone="warn"
               leftValue={Number.isFinite(serverDraft.monitoring.latencyP95.goodMs) ? toFloatString(serverDraft.monitoring.latencyP95.goodMs / 1000) : ""}
               rightValue={Number.isFinite(serverDraft.monitoring.latencyP95.warnMs) ? toFloatString(serverDraft.monitoring.latencyP95.warnMs / 1000) : ""}
               min={0.001}
@@ -748,6 +778,8 @@ export function SettingsView({ meta }: SettingsViewProps) {
               comparator="<"
               leftLabel="严重天数"
               rightLabel="警告天数"
+              leftTone="danger"
+              rightTone="warn"
               leftValue={Number.isFinite(serverDraft.monitoring.runway.dangerDays) ? toFloatString(serverDraft.monitoring.runway.dangerDays) : ""}
               rightValue={Number.isFinite(serverDraft.monitoring.runway.warnDays) ? toFloatString(serverDraft.monitoring.runway.warnDays) : ""}
               min={0.01}
@@ -776,6 +808,8 @@ export function SettingsView({ meta }: SettingsViewProps) {
               comparator="<"
               leftLabel="提示分钟"
               rightLabel="严重分钟"
+              leftTone="warn"
+              rightTone="danger"
               leftValue={Number.isFinite(serverDraft.monitoring.freshness.warnMinutes) ? toFloatString(serverDraft.monitoring.freshness.warnMinutes) : ""}
               rightValue={Number.isFinite(serverDraft.monitoring.freshness.dangerMinutes) ? toFloatString(serverDraft.monitoring.freshness.dangerMinutes) : ""}
               min={0.01}
@@ -860,6 +894,7 @@ export function SettingsView({ meta }: SettingsViewProps) {
             {/* 健康最小样本数 */}
             <NumberSettingField
               label="健康判定最小样本数 (次)"
+              tone="neutral"
               hint="默认 3 次，单桶调用低于此值判定为样本不足"
               value={Number.isFinite(serverDraft.health.minSamples) ? serverDraft.health.minSamples : ""}
               min={1}
@@ -877,6 +912,7 @@ export function SettingsView({ meta }: SettingsViewProps) {
             {/* 判定为故障的错误率阈值 */}
             <NumberSettingField
               label="故障判定错误率临界点 (%)"
+              tone="danger"
               hint="默认 2%，严格大于 0% 且不超过 100%"
               value={Number.isFinite(serverDraft.health.failErrorRate) ? toFloatString(serverDraft.health.failErrorRate * 100) : ""}
               min={0.01}
