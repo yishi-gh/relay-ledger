@@ -62,6 +62,168 @@ export interface ProfitQuality {
   [key: string]: unknown
 }
 
+export interface ProfitAxisExtent {
+  min: number
+  max: number
+}
+
+export interface ProfitAxisDomains {
+  leftDomain: [number, number]
+  rightDomain: [number, number]
+  leftTicks: number[]
+  rightTicks: number[]
+}
+
+interface ProfitAxisScale {
+  domain: [number, number]
+  ticks: number[]
+}
+
+/** 向上取到 1 / 2 / 2.5 / 5 / 10 × 10^k 的 nice 步长。 */
+function niceStep(raw: number): number {
+  if (!Number.isFinite(raw) || raw <= 0) return 1
+  const exponent = Math.floor(Math.log10(raw))
+  const base = 10 ** exponent
+  const fraction = raw / base
+  const mantissa =
+    fraction <= 1 + 1e-9 ? 1
+    : fraction <= 2 + 1e-9 ? 2
+    : fraction <= 2.5 + 1e-9 ? 2.5
+    : fraction <= 5 + 1e-9 ? 5
+    : 10
+  return mantissa * base
+}
+
+/** 刻度不足时逐级缩小步长。 */
+function previousNiceStep(step: number): number {
+  const exponent = Math.floor(Math.log10(step))
+  const base = 10 ** exponent
+  const ratio = step / base
+  if (ratio >= 10 - 1e-9) return 5 * base
+  if (ratio >= 5 - 1e-9) return 2.5 * base
+  if (ratio >= 2.5 - 1e-9) return 2 * base
+  if (ratio >= 2 - 1e-9) return 1 * base
+  return 0.5 * base
+}
+
+/** 生成 [bottom, top] 内所有 step 整数倍，0 必在其中。 */
+function buildTicks(bottom: number, top: number, step: number): number[] {
+  const first = Math.ceil(bottom / step - 1e-9)
+  const last = Math.floor(top / step + 1e-9)
+  const ticks: number[] = []
+  for (let index = first; index <= last; index += 1) {
+    const value = Number((index * step).toPrecision(12))
+    if (value >= bottom - 1e-9 && value <= top + 1e-9) {
+      ticks.push(Object.is(value, -0) ? 0 : value)
+    }
+  }
+  if (!ticks.includes(0)) ticks.push(0)
+  return ticks.sort((a, b) => a - b)
+}
+
+function buildAxisScale(pos: number, neg: number, f: number): ProfitAxisScale {
+  const fallback: ProfitAxisScale = { domain: [0, 1], ticks: [0, 0.5, 1] }
+  if (pos <= 0 && neg <= 0) return fallback
+
+  const topNeeded = pos * 1.06
+  const bottomNeeded = neg * 1.06
+  // 先由共享零点比例确定未取整的顶端，再向上取整到 step 的整数倍。
+  const provisionalTop = f > 0
+    ? Math.max(topNeeded, (bottomNeeded * (1 - f)) / f)
+    : topNeeded
+  const topBase = provisionalTop > 0 && Number.isFinite(provisionalTop) ? provisionalTop : 1
+  const provisionalBottom = f > 0 ? -(topBase * f) / (1 - f) : 0
+
+  let step = niceStep((topBase - provisionalBottom) / 5)
+  let top = Math.ceil(topBase / step - 1e-9) * step
+  let bottom = f > 0 ? -(top * f) / (1 - f) : 0
+  let ticks = buildTicks(bottom, top, step)
+
+  for (let guard = 0; ticks.length < 3 && guard < 20; guard += 1) {
+    step = previousNiceStep(step)
+    top = Math.ceil(topBase / step - 1e-9) * step
+    bottom = f > 0 ? -(top * f) / (1 - f) : 0
+    ticks = buildTicks(bottom, top, step)
+  }
+
+  return { domain: [bottom, top], ticks }
+}
+
+/**
+ * 让左右轴的 0 落在绘图区同一相对高度，并返回显式刻度。
+ * 两轴共用最大的负值占比 f；底端由取整后的顶端反推，
+ * 因此 zeroFraction 严格相等，且 0 一定是刻度的整数倍。
+ */
+export function computeSharedZeroDomains(
+  left: ProfitAxisExtent,
+  right: ProfitAxisExtent
+): ProfitAxisDomains {
+  const negL = Math.max(0, -left.min)
+  const posL = Math.max(0, left.max)
+  const negR = Math.max(0, -right.min)
+  const posR = Math.max(0, right.max)
+  const spanL = negL + posL
+  const spanR = negR + posR
+
+  if (spanL === 0 && spanR === 0) {
+    return {
+      leftDomain: [0, 1],
+      rightDomain: [0, 1],
+      leftTicks: [0, 0.5, 1],
+      rightTicks: [0, 0.5, 1],
+    }
+  }
+
+  const ratioL = spanL > 0 ? negL / spanL : 0
+  const ratioR = spanR > 0 ? negR / spanR : 0
+  // 单侧没有正向数据时把零点略向下收，避免顶端取整后底端被成倍放大。
+  const cap = posL <= 0 || posR <= 0 ? 0.9 : 0.999
+  const f = Math.min(cap, Math.max(ratioL, ratioR))
+
+  const leftScale = buildAxisScale(posL, negL, f)
+  const rightScale = buildAxisScale(posR, negR, f)
+
+  return {
+    leftDomain: leftScale.domain,
+    rightDomain: rightScale.domain,
+    leftTicks: leftScale.ticks,
+    rightTicks: rightScale.ticks,
+  }
+}
+
+function seriesExtent(values: Array<number | null | undefined>): ProfitAxisExtent {
+  let min = Infinity
+  let max = -Infinity
+  for (const value of values) {
+    if (value == null || !Number.isFinite(value)) continue
+    if (value < min) min = value
+    if (value > max) max = value
+  }
+  return min === Infinity ? { min: 0, max: 0 } : { min, max }
+}
+
+/** 金额轴标签：按量级缩写，避免固定小数位在窄轴内被截断。 */
+function formatAxisMoney(value: number): string {
+  if (!Number.isFinite(value) || Math.abs(value) < 0.005) return "$0"
+  const sign = value < 0 ? "-" : ""
+  const abs = Math.abs(value)
+  const trim = (text: string) => text.replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1")
+  if (abs >= 999_500) return `${sign}$${trim((abs / 1e6).toFixed(1))}M`
+  if (abs >= 1e4) return `${sign}$${Math.round(abs / 1e3)}k`
+  if (abs >= 1e3) return `${sign}$${trim((abs / 1e3).toFixed(1))}k`
+  if (abs >= 100) return `${sign}$${Math.round(abs)}`
+  if (abs >= 1) return `${sign}$${trim(abs.toFixed(1))}`
+  return `${sign}$${trim(abs.toFixed(2))}`
+}
+
+/** 百分比轴标签固定 0 位小数，接近 0 时不显示负零。 */
+function formatAxisPercent(value: number): string {
+  if (!Number.isFinite(value)) return "0%"
+  const percent = value * 100
+  if (Math.abs(percent) < 0.5) return "0%"
+  return `${percent.toFixed(0)}%`
+}
+
 const PROFIT_TABLE_ACCESSORS: AccessorMap<SiteProfitItem> = {
   name: (s) => s.name || s.account_id,
   revenue: (s) => s.revenue ?? null,
@@ -103,6 +265,15 @@ export function ProfitView({
   const sortedTableData = React.useMemo(() => {
     return sortRows(tableData, sortState, PROFIT_TABLE_ACCESSORS)
   }, [tableData, sortState])
+
+  const { leftDomain, rightDomain, leftTicks, rightTicks } = React.useMemo(
+    () =>
+      computeSharedZeroDomains(
+        seriesExtent(profitChartData.flatMap((row) => [row.cost, row.profit])),
+        seriesExtent(profitChartData.map((row) => row.margin))
+      ),
+    [profitChartData]
+  )
 
   const missingAccounts = quality?.accounts_missing_balance ?? []
   const missingNames = tableData
@@ -214,8 +385,10 @@ export function ProfitView({
                     axisLine={false}
                     width={44}
                     tickCount={6}
+                    domain={leftDomain}
+                    ticks={leftTicks}
                     tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
-                    tickFormatter={(val) => (val < 0 ? `-$${Math.abs(val)}` : `$${val}`)}
+                    tickFormatter={formatAxisMoney}
                   />
                   <YAxis
                     yAxisId="right"
@@ -224,8 +397,10 @@ export function ProfitView({
                     axisLine={false}
                     width={38}
                     tickCount={6}
+                    domain={rightDomain}
+                    ticks={rightTicks}
                     tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
-                    tickFormatter={(val) => `${(val * 100).toFixed(0)}%`}
+                    tickFormatter={formatAxisPercent}
                   />
                   <RechartsTooltip
                     content={({ active, payload }) => {
