@@ -65,16 +65,18 @@ interface MergedUpstreamAccount extends UpstreamAccount {
   ledger?: ProfitSite
 }
 
-const UPSTREAMS_STORAGE_KEY = "relay-ledger:upstreams-columns:v2"
+const UPSTREAMS_STORAGE_KEY = "relay-ledger:upstreams-columns:v3"
+const UPSTREAMS_PREVIOUS_STORAGE_KEY = "relay-ledger:upstreams-columns:v2"
 const UPSTREAMS_LEGACY_STORAGE_KEY = "relay-ledger-cols-upstreams"
 
 export const UPSTREAMS_ALL_COLUMNS: ColumnItem[] = [
   { key: "account", label: "账户", locked: true, group: "biz" },
   { key: "enabled", label: "启用状态", group: "biz" },
-  { key: "latest_balance", label: "最新余额", group: "biz" },
+  { key: "latest_balance", label: "总计余额", group: "biz" },
   { key: "runway_days", label: "预计耗尽", group: "biz" },
   { key: "daily_avg_7d", label: "7日日均", group: "biz" },
   { key: "revenue", label: "售出", group: "biz" },
+  { key: "funding_cost", label: "区间成本", group: "audit" },
   { key: "balance", label: "期末余额", group: "audit" },
   { key: "credits", label: "充值", group: "biz" },
   { key: "cost", label: "成本", group: "biz" },
@@ -83,7 +85,6 @@ export const UPSTREAMS_ALL_COLUMNS: ColumnItem[] = [
   { key: "status", label: "账本状态", group: "biz" },
   { key: "profit_status", label: "利润状态", group: "biz" },
   { key: "funding_status", label: "资金状态", group: "audit" },
-  { key: "funding_cost", label: "资金区间成本", group: "audit" },
   { key: "reported_spend", label: "区间上报", group: "audit" },
   { key: "reported_today", label: "今日上报", group: "audit" },
   { key: "consumption", label: "推导消费", group: "audit" },
@@ -92,8 +93,8 @@ export const UPSTREAMS_ALL_COLUMNS: ColumnItem[] = [
 ]
 
 const UPSTREAMS_DEFAULT_KEYS: Record<UpstreamViewMode, string[]> = {
-  biz: ["account", "latest_balance", "runway_days", "daily_avg_7d", "revenue", "credits", "cost", "profit", "margin_pct", "status"],
-  audit: ["account", "enabled", "balance", "reported_spend", "consumption", "channels", "last_sync"],
+  biz: ["account", "latest_balance", "runway_days", "daily_avg_7d", "revenue", "funding_cost", "credits", "cost", "profit", "margin_pct", "status"],
+  audit: ["account", "enabled", "funding_cost", "balance", "reported_spend", "consumption", "channels", "last_sync"],
   all: [
     "account",
     "enabled",
@@ -101,6 +102,7 @@ const UPSTREAMS_DEFAULT_KEYS: Record<UpstreamViewMode, string[]> = {
     "runway_days",
     "daily_avg_7d",
     "revenue",
+    "funding_cost",
     "balance",
     "credits",
     "cost",
@@ -268,10 +270,14 @@ function loadVisibleMap(
   try {
     const saved = localStorage.getItem(key)
     if (saved !== null) return readMap(saved)
-    const legacy = localStorage.getItem(UPSTREAMS_LEGACY_STORAGE_KEY)
-    if (legacy === null) return defaults
-    // 只迁移列选择，不重映射旧列名，balance 仍表示期末余额。
-    const migrated = readMap(legacy)
+    const legacy = localStorage.getItem(UPSTREAMS_PREVIOUS_STORAGE_KEY) ?? localStorage.getItem(UPSTREAMS_LEGACY_STORAGE_KEY)
+    const previous = legacy === null ? defaults : readMap(legacy)
+    // 仅首次迁入 v3 时补回区间成本；已有 v3 尊重用户隐藏，balance 仍表示期末余额。
+    const migrated = {
+      biz: [...new Set([...previous.biz, "funding_cost"])],
+      audit: [...new Set([...previous.audit, "funding_cost"])],
+      all: [...new Set([...previous.all, "funding_cost"])],
+    }
     try {
       localStorage.setItem(key, JSON.stringify(migrated))
     } catch {
@@ -381,7 +387,7 @@ export function UpstreamsView({ timeRange, accounts, capital, profitSites, quali
         <Card className="shadow-xs gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">
-              最新余额
+              总计余额
             </span>
             <Wallet className="size-4" />
           </div>
@@ -414,15 +420,15 @@ export function UpstreamsView({ timeRange, accounts, capital, profitSites, quali
         <Card className="shadow-xs gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">
-              区间充值
+              区间成本
             </span>
             <CreditCard className="size-4 text-indigo-500" />
           </div>
-          <div className="mt-3 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
-            {formatCurrency(kpiData.totalCredits)}
+          <div className="mt-3 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground" title="资金口径；可能仅含部分时段">
+            {formatCurrency(capital?.total.cost_range)}
           </div>
-          <span className="text-[12px] leading-[16px] text-muted-foreground mt-1" title="资金口径；可能仅含部分时段">
-            区间成本 {formatCurrency(capital?.total.cost_range)}
+          <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
+            区间充值 {formatCurrency(kpiData.totalCredits)}
           </span>
         </Card>
 
@@ -689,7 +695,7 @@ export function UpstreamsView({ timeRange, accounts, capital, profitSites, quali
                           break
                         }
                         case "latest_balance":
-                          content = <span className="font-semibold" title={row.funding?.status === "missing_balance" ? "缺失最新余额" : undefined}>{formatCurrency(row.funding?.balance)}</span>
+                          content = <span className="font-semibold" title={row.funding?.status === "missing_balance" ? "缺失总计余额" : undefined}>{formatCurrency(row.funding?.balance)}</span>
                           break
                         case "runway_days": {
                           const days = row.funding?.runway_days
