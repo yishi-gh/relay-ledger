@@ -67,6 +67,20 @@ export type TrafficChartPoint = {
   cacheRate: number | null
 }
 
+function MetricTrend({ values, label, color }: { values: (number | null)[]; label: string; color: string }) {
+  const valid = values.filter((value): value is number => value != null && Number.isFinite(value))
+  if (valid.length < 2) return null
+  const min = Math.min(...valid)
+  const span = Math.max(...valid) - min
+  const path = values.map((value, index) => {
+    if (value == null || !Number.isFinite(value)) return ""
+    const previous = values[index - 1]
+    const connected = previous != null && Number.isFinite(previous)
+    return `${connected ? "L" : "M"}${index / Math.max(1, values.length - 1) * 200},${span > 0 ? 30 - (value - min) / span * 26 : 17}`
+  }).join(" ")
+  return <svg viewBox="0 0 200 34" preserveAspectRatio="none" className="mt-auto h-9 w-full" role="img" aria-label={label}><title>{label}</title><path d={path} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" /></svg>
+}
+
 interface OverviewViewProps {
   timeRange: RangeType
   kpiData: KpiData
@@ -101,8 +115,8 @@ export function OverviewView({
     kpiData.accountableRevenue < kpiData.revenue
 
   const isRawUnit = getPreferences().display.unitSystem === "raw"
-  // raw 模式大数（如 1,400,000,000）留足 >=104px 宽度，避免左侧截断；非 raw 保持 54px
-  const tokenAxisWidth = isRawUnit ? 108 : 54
+  // 为数字和单位预留完整刻度宽度，避免中文单位折行。
+  const tokenAxisWidth = isRawUnit ? 108 : 76
   const ledgerAccounts = profitData?.sites.filter((site) => site.kind !== "external")
   const coveredAccounts = ledgerAccounts?.filter((site) => site.status === "complete").length
   const missingAccounts = profitData ? profitData.quality?.accounts_missing_balance?.length ?? 0 : undefined
@@ -117,16 +131,16 @@ export function OverviewView({
       {/* 1. KPI 分层：主卡 + 3 张辅卡 (紧凑行, shrink-0) */}
       <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4 items-stretch shrink-0">
         {/* 主卡：本站售出 */}
-        <Card className="col-span-1 sm:col-span-2 xl:col-span-2 h-auto xl:h-full shadow-xs flex flex-col justify-between">
-          <CardHeader className="p-4 pb-1 flex flex-row items-center justify-between space-y-0">
+        <Card className="col-span-1 sm:col-span-2 xl:col-span-2 h-auto xl:h-full gap-0 py-0 shadow-xs flex flex-col">
+          <CardHeader className="px-3.5 pt-3.5 pb-0 flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-[14px] leading-[20px] font-normal text-muted-foreground">
               本站售出
             </CardTitle>
             <DollarSign className="size-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent className="px-4 pb-4 pt-0 flex-1 flex flex-col justify-between">
+          <CardContent className="px-3.5 pb-3.5 pt-2 flex-1 flex flex-col">
             <div>
-              <div className="text-[28px] leading-[36px] font-semibold font-mono tracking-tight text-foreground tabular-nums whitespace-nowrap">
+              <div className="text-[24px] leading-[36px] font-semibold font-mono tracking-tight text-foreground tabular-nums whitespace-nowrap">
                 {formatCurrency(kpiData.revenue)}
               </div>
             </div>
@@ -205,42 +219,44 @@ export function OverviewView({
         </Card>
 
         {/* 辅卡 1: 请求数 */}
-        <Card data-slot="kpi-aux-card" className="col-span-1 sm:col-span-1 xl:col-span-1 h-auto xl:h-full shadow-xs flex flex-col justify-between">
-          <CardHeader className="p-4 pb-1 flex flex-row items-center justify-between space-y-0">
+        <Card data-slot="kpi-aux-card" className="col-span-1 sm:col-span-1 xl:col-span-1 h-auto xl:h-full gap-0 py-0 shadow-xs flex flex-col">
+          <CardHeader className="px-3.5 pt-3.5 pb-0 flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-[14px] leading-[20px] font-normal text-muted-foreground">
               请求数
             </CardTitle>
             <Activity className="size-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent className="px-4 pb-4 pt-0 flex-1 flex flex-col justify-between">
-            <div className="pt-1">
-              <div className="text-[24px] leading-[28px] font-semibold font-mono tracking-tight text-foreground tabular-nums whitespace-nowrap">
+          <CardContent className="px-3.5 pb-3.5 pt-2 flex-1 flex flex-col gap-2">
+            <div>
+              <div className="text-[24px] leading-[36px] font-semibold font-mono tracking-tight text-foreground tabular-nums whitespace-nowrap">
                 {formatNumber(kpiData.requests)}
               </div>
             </div>
+            <MetricTrend values={trafficChartData.map((point) => point.requests)} label="区间请求走势" color="var(--chart-1)" />
           </CardContent>
         </Card>
 
         {/* 辅卡 2: Token */}
-        <Card data-slot="kpi-aux-card" className="col-span-1 sm:col-span-1 xl:col-span-1 h-auto xl:h-full shadow-xs flex flex-col justify-between">
-          <CardHeader className="p-4 pb-1 flex flex-row items-center justify-between space-y-0">
+        <Card data-slot="kpi-aux-card" className="col-span-1 sm:col-span-1 xl:col-span-1 h-auto xl:h-full gap-0 py-0 shadow-xs flex flex-col">
+          <CardHeader className="px-3.5 pt-3.5 pb-0 flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-[14px] leading-[20px] font-normal text-muted-foreground">
               Token 消耗
             </CardTitle>
             <Cpu className="size-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent className="px-4 pb-4 pt-0 flex-1 flex flex-col justify-between">
-            <div className="pt-1">
-              <div className="text-[24px] leading-[28px] font-semibold font-mono tracking-tight text-foreground tabular-nums whitespace-nowrap">
+          <CardContent className="px-3.5 pb-3.5 pt-2 flex-1 flex flex-col gap-2">
+            <div>
+              <div className="text-[24px] leading-[36px] font-semibold font-mono tracking-tight text-foreground tabular-nums whitespace-nowrap">
                 {formatTokens(kpiData.tokens)}
               </div>
             </div>
+            <MetricTrend values={trafficChartData.map((point) => point.tokens)} label="区间 Token 走势" color="var(--chart-2)" />
           </CardContent>
         </Card>
 
         {/* 辅卡 3: 缓存率 */}
-        <Card data-slot="kpi-aux-card" className="col-span-1 sm:col-span-2 xl:col-span-1 h-auto xl:h-full shadow-xs flex flex-col justify-between">
-          <CardHeader className="p-4 pb-1 flex flex-row items-center justify-between space-y-0">
+        <Card data-slot="kpi-aux-card" className="col-span-1 sm:col-span-2 xl:col-span-1 h-auto xl:h-full gap-0 py-0 shadow-xs flex flex-col">
+          <CardHeader className="px-3.5 pt-3.5 pb-0 flex flex-row items-center justify-between space-y-0">
             <div className="flex items-center gap-1">
               <CardTitle className="text-[14px] leading-[20px] font-normal text-muted-foreground">
                 缓存率
@@ -254,15 +270,14 @@ export function OverviewView({
             </div>
             <Percent className="size-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent className="px-4 pb-4 pt-0 flex-1 flex flex-col justify-between">
-            <div className="pt-1">
-              <div className="text-[24px] leading-[28px] font-semibold font-mono tracking-tight text-foreground tabular-nums whitespace-nowrap">
+          <CardContent className="px-3.5 pb-3.5 pt-2 flex-1 flex flex-col gap-2">
+            <div>
+              <div className="text-[24px] leading-[36px] font-semibold font-mono tracking-tight text-foreground tabular-nums whitespace-nowrap">
                 {formatPercent(kpiData.cacheRate)}
               </div>
             </div>
-            <p className="text-[12px] leading-[16px] text-muted-foreground mt-1.5">
-              {kpiData.isCache7d ? "近 7 天窗口" : "当前窗口"}
-            </p>
+            <MetricTrend values={trafficChartData.map((point) => point.cacheRate)} label="区间缓存率走势" color="var(--chart-3)" />
+            {kpiData.isCache7d && <span className="text-[12px] text-muted-foreground">近7天缓存率</span>}
           </CardContent>
         </Card>
       </section>

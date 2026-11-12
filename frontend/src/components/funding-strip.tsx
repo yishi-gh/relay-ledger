@@ -84,8 +84,8 @@ export function FundingStrip({ capital, accounts = [], now, className }: Funding
 
   return (
     <section className={cn("grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-4 shrink-0", className)}>
-      <Card className="shadow-xs">
-        <CardContent className="p-4 grid grid-cols-2 xl:grid-cols-4 gap-3 items-start">
+      <Card className="gap-0 py-0 shadow-xs">
+        <CardContent className="p-3.5 grid grid-cols-2 xl:grid-cols-4 gap-3 items-start">
           <Metric
             label="上游总余额"
             value={formatCurrency(total?.balance ?? null)}

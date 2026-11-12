@@ -518,17 +518,26 @@ export function ProfitView({
 
           <CardContent className="p-0 flex-1 flex flex-col min-h-0">
             <div className="flex-1 min-h-[280px] xl:min-h-0 overflow-auto rounded-lg border border-border">
-              <Table data-slot="profit-table" className="w-full min-w-[500px] xl:min-w-full">
+              <Table data-slot="profit-table" className="w-full min-w-[856px] table-fixed sm:min-w-[920px]">
+                <colgroup>
+                  <col />
+                  <col style={{ width: "120px" }} />
+                  <col style={{ width: "120px" }} />
+                  <col style={{ width: "120px" }} />
+                  <col style={{ width: "120px" }} />
+                  <col style={{ width: "104px" }} />
+                  <col style={{ width: "136px" }} />
+                </colgroup>
                 <TableHeader className="bg-muted/40">
                   <TableRow>
                     {[
-                      { key: "name", label: "账户", align: "left", className: "sticky left-0 bg-muted/95 backdrop-blur-xs z-10 w-[110px] min-w-[95px] max-w-[120px] border-r border-border/60" },
+                      { key: "name", label: "账户", align: "left", className: "sticky left-0 bg-muted z-10 border-r border-border/60" },
                       { key: "revenue", label: "售出", align: "right" },
                       { key: "credits", label: "充值", align: "right" },
                       { key: "cost", label: "成本", align: "right" },
                       { key: "profit", label: "利润", align: "right" },
                       { key: "margin", label: "毛利率", align: "right" },
-                      { key: "status", label: "状态", align: "center", className: "w-[68px] min-w-[64px]" },
+                      { key: "status", label: "状态", align: "left" },
                     ].map((col) => {
                       const sortAttrs = getSortHeaderAttrs(sortState, col.key)
                       const isNum = col.align === "right"
@@ -547,14 +556,14 @@ export function ProfitView({
                         >
                           <div
                             className={cn(
-                              "inline-flex items-center gap-1",
-                              isNum ? "flex-row-reverse" : "flex-row"
+                              "relative inline-flex items-center"
                             )}
                           >
                             <span>{col.label}</span>
                             <span
                               className={cn(
-                                "font-mono text-[12px] leading-[16px] tabular-nums transition-opacity",
+                                "absolute text-[12px] leading-[16px] tabular-nums transition-opacity",
+                                isNum ? "right-[calc(100%+4px)]" : "left-[calc(100%+4px)]",
                                 sortAttrs.isActive
                                   ? "text-primary font-semibold opacity-100"
                                   : "text-muted-foreground/40 opacity-0 group-hover/th:opacity-100"
@@ -572,24 +581,24 @@ export function ProfitView({
                   {sortedTableData.map((site) => (
                     <TableRow key={site.account_id} className="h-[40px]">
                       <TableCell
-                        className="sticky left-0 bg-card z-10 border-r border-border/50 py-[9px] px-2.5 w-[110px] min-w-[95px] max-w-[120px]"
+                        className="sticky left-0 bg-card z-10 border-r border-border/50 py-[9px] px-2.5"
                         title={`${site.name} (${site.account_id})`}
                       >
-                        <span className="font-normal text-foreground text-[14px] leading-[20px] line-clamp-2 block" title={site.name}>
+                        <span className="font-normal text-foreground text-[14px] leading-[20px] truncate block" title={site.name}>
                           {site.name}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right font-mono tabular-nums text-[14px] leading-[20px] font-semibold text-foreground py-[9px] px-2">
+                      <TableCell className="text-right font-mono tabular-nums text-[14px] leading-[20px] font-semibold text-foreground py-[9px] px-2.5">
                         {formatCurrency(site.revenue)}
                       </TableCell>
-                      <TableCell className="text-right font-mono tabular-nums text-muted-foreground text-[14px] leading-[20px] py-[9px] px-2">
+                      <TableCell className="text-right font-mono tabular-nums text-muted-foreground text-[14px] leading-[20px] py-[9px] px-2.5">
                         {formatCurrency(site.credits)}
                       </TableCell>
-                      <TableCell className="text-right font-mono tabular-nums text-[14px] leading-[20px] font-semibold text-foreground py-[9px] px-2">
+                      <TableCell className="text-right font-mono tabular-nums text-[14px] leading-[20px] font-semibold text-foreground py-[9px] px-2.5">
                         {formatCurrency(site.cost)}
                       </TableCell>
                       <TableCell
-                        className={`text-right font-mono tabular-nums text-[14px] leading-[20px] font-semibold py-[9px] px-2 ${
+                        className={`text-right font-mono tabular-nums text-[14px] leading-[20px] font-semibold py-[9px] px-2.5 ${
                           site.profit != null && site.profit < 0
                             ? "text-destructive"
                             : "text-foreground"
@@ -598,7 +607,7 @@ export function ProfitView({
                         {formatCurrency(site.profit)}
                       </TableCell>
                       <TableCell
-                        className={`text-right font-mono tabular-nums text-[14px] leading-[20px] font-semibold py-[9px] px-2 ${
+                        className={`text-right font-mono tabular-nums text-[14px] leading-[20px] font-semibold py-[9px] px-2.5 ${
                           site.margin != null && site.margin < 0
                             ? "text-destructive"
                             : "text-foreground"
@@ -606,7 +615,7 @@ export function ProfitView({
                       >
                         {formatPercent(site.margin)}
                       </TableCell>
-                      <TableCell className="text-center py-[9px] px-2">
+                      <TableCell className="text-left py-[9px] px-2.5">
                         {renderStatusBadge(
                           site.status,
                           site.covered_buckets,

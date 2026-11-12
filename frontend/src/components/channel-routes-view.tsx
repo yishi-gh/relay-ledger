@@ -1139,15 +1139,22 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
                   </div>
                 ) : (
                   <div className="rounded-lg border border-border overflow-hidden">
-                    <div className="max-h-[140px] overflow-y-auto">
-                      <table className="w-full text-[12px] text-left">
+                    <div className="max-h-[140px] overflow-auto">
+                      <table className="w-full min-w-[660px] table-fixed text-[12px] text-left">
+                        <colgroup>
+                          <col style={{ width: "120px" }} />
+                          <col />
+                          <col style={{ width: "180px" }} />
+                          <col style={{ width: "80px" }} />
+                          <col style={{ width: "80px" }} />
+                        </colgroup>
                         <thead className="bg-muted/50 border-b border-border sticky top-0 text-muted-foreground">
                           <tr>
                             <th className="px-2.5 py-1.5 font-medium">分组</th>
                             <th className="px-2.5 py-1.5 font-medium">请求模型</th>
                             <th className="px-2.5 py-1.5 font-medium">规则状态</th>
-                            <th className="px-2.5 py-1.5 font-medium text-right font-mono">优先级 (Priority)</th>
-                            <th className="px-2.5 py-1.5 font-medium text-right font-mono">权重 (Weight)</th>
+                            <th className="px-2.5 py-1.5 font-medium text-right tabular-nums">优先级</th>
+                            <th className="px-2.5 py-1.5 font-medium text-right tabular-nums">权重</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border/60">
@@ -1189,8 +1196,8 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
 
                             return (
                               <tr key={`${ab.group}-${ab.model}-${idx}`} className="hover:bg-muted/30">
-                                <td className="px-2.5 py-1 text-foreground">{ab.group}</td>
-                                <td className="px-2.5 py-1 font-mono text-foreground">{ab.model}</td>
+                                <td className="px-2.5 py-1 text-foreground"><span className="block truncate" title={ab.group}>{ab.group}</span></td>
+                                <td className="px-2.5 py-1 text-foreground"><span className="block truncate" title={ab.model}>{ab.model}</span></td>
                                 <td className="px-2.5 py-1">{statusBadge}</td>
                                 <td className="px-2.5 py-1 text-right font-mono tabular-nums text-foreground">
                                   {ab.priority != null ? ab.priority : "—"}

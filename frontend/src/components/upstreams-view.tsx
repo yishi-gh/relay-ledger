@@ -117,36 +117,27 @@ const UPSTREAMS_DEFAULT_KEYS: Record<UpstreamViewMode, string[]> = {
   ],
 }
 
-const UPSTREAMS_COL_WEIGHTS: Record<string, number> = {
-  account: 20,
-  enabled: 9,
-  balance: 13,
-  latest_balance: 12,
-  runway_days: 11,
-  daily_avg_7d: 11,
-  revenue: 11,
-  credits: 11,
-  cost: 12,
-  profit: 12,
-  margin_pct: 13,
-  status: 10,
-  reported_spend: 14,
-  consumption: 14,
-  channels: 11,
-  last_sync: 14,
-}
-
-function computeColWidths(
-  visibleKeys: string[],
-  weightsMap: Record<string, number>
-): Record<string, string> {
-  const total = visibleKeys.reduce((acc, k) => acc + (weightsMap[k] ?? 12), 0)
-  const result: Record<string, string> = {}
-  visibleKeys.forEach((k) => {
-    const w = weightsMap[k] ?? 12
-    result[k] = `${((w / (total || 1)) * 100).toFixed(2)}%`
-  })
-  return result
+const UPSTREAMS_COL_PIXELS: Record<string, number> = {
+  account: 210,
+  enabled: 132,
+  balance: 110,
+  latest_balance: 110,
+  runway_days: 104,
+  daily_avg_7d: 104,
+  revenue: 110,
+  credits: 110,
+  cost: 110,
+  profit: 110,
+  margin_pct: 92,
+  status: 114,
+  profit_status: 114,
+  funding_status: 114,
+  funding_cost: 130,
+  reported_spend: 110,
+  reported_today: 110,
+  consumption: 110,
+  channels: 104,
+  last_sync: 156,
 }
 
 type ChannelStatusInfo =
@@ -381,23 +372,20 @@ export function UpstreamsView({ timeRange, accounts, capital, profitSites, quali
 
   const visibleCols = UPSTREAMS_ALL_COLUMNS.filter((c) => activeKeys.includes(c.key))
 
-  const colWidths = React.useMemo(() => {
-    const keys = visibleCols.map((c) => c.key)
-    return computeColWidths(keys, UPSTREAMS_COL_WEIGHTS)
-  }, [visibleCols])
+  const tableMinWidth = visibleCols.reduce((sum, column) => sum + UPSTREAMS_COL_PIXELS[column.key], 0)
 
   return (
     <div className="flex-1 min-h-0 min-w-0 flex flex-col gap-4 overflow-y-auto pr-1">
       {/* 顶部 4 张 KPI 卡（等高） */}
       <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5 shrink-0 [&>[data-slot=card]]:min-w-0">
-        <Card className="shadow-xs p-3.5 flex flex-col justify-between">
+        <Card className="shadow-xs gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">
               最新余额
             </span>
             <Wallet className="size-4" />
           </div>
-          <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
+          <div className="mt-3 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
             {formatCurrency(kpiData.totalBalance)}
           </div>
           <span className="text-[12px] leading-[16px] text-muted-foreground mt-1" title={capital?.total.accounts_counted != null ? `${capital.total.accounts_counted} 个账户参与估算` : undefined}>
@@ -405,16 +393,16 @@ export function UpstreamsView({ timeRange, accounts, capital, profitSites, quali
           </span>
         </Card>
 
-        <Card className="shadow-xs p-3.5 flex flex-col justify-between">
+        <Card className="shadow-xs gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">
               最早耗尽
             </span>
             <Hourglass className="size-4 text-amber-500" />
           </div>
-          <div className="mt-1.5 flex min-w-0 flex-col gap-1 text-[22px] leading-[28px] font-semibold tabular-nums">
-            <span className="truncate" title={kpiData.shortest?.name}>{kpiData.shortest?.name ?? "—"}</span>
-            <span className={cn(shortestDays != null && shortestDays < runwayThresholds.dangerDays ? "text-rose-600 dark:text-rose-400" : shortestDays != null && shortestDays < runwayThresholds.warnDays ? "text-amber-600 dark:text-amber-400" : "text-foreground")}>
+          <div className="mt-3 flex min-w-0 items-baseline gap-2 text-[22px] leading-[28px] font-semibold tabular-nums">
+            <span className="min-w-0 flex-1 truncate" title={kpiData.shortest?.name}>{kpiData.shortest?.name ?? "—"}</span>
+            <span className={cn("shrink-0 text-[24px]", shortestDays != null && shortestDays < runwayThresholds.dangerDays ? "text-rose-600 dark:text-rose-400" : shortestDays != null && shortestDays < runwayThresholds.warnDays ? "text-amber-600 dark:text-amber-400" : "text-foreground")}>
               {shortestDays != null ? shortestDays.toFixed(1) : "—"}<span className="ml-1 text-[13px] font-normal text-muted-foreground">天后耗尽</span>
             </span>
           </div>
@@ -423,14 +411,14 @@ export function UpstreamsView({ timeRange, accounts, capital, profitSites, quali
           </span>
         </Card>
 
-        <Card className="shadow-xs p-3.5 flex flex-col justify-between">
+        <Card className="shadow-xs gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">
               区间充值
             </span>
             <CreditCard className="size-4 text-indigo-500" />
           </div>
-          <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
+          <div className="mt-3 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
             {formatCurrency(kpiData.totalCredits)}
           </div>
           <span className="text-[12px] leading-[16px] text-muted-foreground mt-1" title="资金口径；可能仅含部分时段">
@@ -438,14 +426,14 @@ export function UpstreamsView({ timeRange, accounts, capital, profitSites, quali
           </span>
         </Card>
 
-        <Card className="shadow-xs p-3.5 flex flex-col justify-between">
+        <Card className="shadow-xs gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">
               核算毛利
             </span>
             <Percent className="size-4 text-amber-500" />
           </div>
-          <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
+          <div className="mt-3 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
             {formatPercent(kpiData.weightedMargin)}
           </div>
           <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
@@ -524,13 +512,10 @@ export function UpstreamsView({ timeRange, accounts, capital, profitSites, quali
           <div
             className="rounded-lg border border-border bg-card overflow-hidden flex-1 min-h-[300px] lg:min-h-0"
           >
-            <Table className={cn(
-              "text-sm table-auto",
-              visibleCols.length <= 8 ? "min-w-[760px]" : "min-w-[1100px]"
-            )}>
-              <colgroup className="hidden lg:table-column-group">
+            <Table className="table-fixed text-sm [--name-column-width:136px] sm:[--name-column-width:210px]" style={{ minWidth: `calc(${tableMinWidth - UPSTREAMS_COL_PIXELS.account}px + var(--name-column-width))` }}>
+              <colgroup>
                 {visibleCols.map((col) => (
-                  <col key={col.key} style={{ width: colWidths[col.key] || "10%" }} />
+                  <col key={col.key} style={col.key === "account" ? undefined : { width: `${UPSTREAMS_COL_PIXELS[col.key]}px` }} />
                 ))}
               </colgroup>
               <TableHeader className="bg-muted/50 sticky top-0 z-20 backdrop-blur-xs">
@@ -569,14 +554,14 @@ export function UpstreamsView({ timeRange, accounts, capital, profitSites, quali
                       >
                         <div
                           className={cn(
-                            "inline-flex items-center gap-1.5",
-                            isNum ? "flex-row-reverse" : "flex-row"
+                            "relative inline-flex items-center"
                           )}
                         >
                           <span>{col.label}</span>
                           <span
                             className={cn(
-                              "font-mono text-[12px] leading-[16px] tabular-nums transition-opacity",
+                              "absolute text-[12px] leading-[16px] tabular-nums transition-opacity",
+                              isNum ? "right-[calc(100%+4px)]" : "left-[calc(100%+4px)]",
                               sortAttrs.isActive
                                 ? "text-primary font-semibold opacity-100"
                                 : "text-muted-foreground/40 opacity-0 group-hover/th:opacity-100"
@@ -629,7 +614,7 @@ export function UpstreamsView({ timeRange, accounts, capital, profitSites, quali
                               <SiteLogo kind="account" id={row.id} label={row.name || row.id} size={18} />
                               <div className="flex flex-col justify-center min-w-0 leading-tight">
                                 <span
-                                  className="font-medium text-foreground text-[13px] leading-[18px] line-clamp-2"
+                                  className="font-medium text-foreground text-[13px] leading-[18px] truncate"
                                   title={accountTitle}
                                 >
                                   {row.name || row.id}

@@ -68,14 +68,14 @@ function getInitialVisibleKeys(): string[] {
   return ALL_COLUMNS.map((c) => c.key)
 }
 
-const COL_WIDTH_PCT: Record<string, number> = {
-  model: 24,
-  revenue: 12,
-  share: 10,
-  requests: 11,
-  tokens: 14,
-  per_1e8: 13,
-  upstream: 16,
+const COL_PIXELS: Record<string, number> = {
+  model: 260,
+  revenue: 120,
+  share: 88,
+  requests: 112,
+  tokens: 124,
+  per_1e8: 152,
+  upstream: 148,
 }
 
 const MODEL_ACCESSORS: AccessorMap<ModelItem> = {
@@ -188,51 +188,49 @@ export function ModelsView({
   }, [data, rows])
 
   const visibleCols = ALL_COLUMNS.filter((c) => visibleKeys.includes(c.key))
+  const tableMinWidth = visibleCols.reduce((sum, column) => sum + COL_PIXELS[column.key], 0)
   const isScrollable = sortedRows.length > 10
 
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
       {/* 1. 顶部 4 张 KPI 卡片 */}
       <section className="grid grid-cols-2 md:grid-cols-4 gap-3.5 shrink-0">
-        <Card className="shadow-xs p-3.5 flex flex-col justify-between">
+        <Card className="shadow-xs min-w-0 gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">模型数</span>
             <Cpu className="size-4 text-emerald-600 dark:text-emerald-400" />
           </div>
-          <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
+          <div className="mt-3 flex items-baseline gap-1 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
             {data ? totals.modelCount : "—"} <span className="text-[14px] font-normal font-sans text-muted-foreground">个</span>
           </div>
         </Card>
 
-        <Card className="shadow-xs p-3.5 flex flex-col justify-between">
+        <Card className="shadow-xs min-w-0 gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">售出合计</span>
             <DollarSign className="size-4" />
           </div>
-          <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
+          <div className="mt-3 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
             {formatCurrency(data ? totals.revenue : null)}
           </div>
         </Card>
 
-        <Card className="shadow-xs p-3.5 flex flex-col justify-between">
+        <Card className="shadow-xs min-w-0 gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">Token 合计</span>
             <Activity className="size-4 text-indigo-500" />
           </div>
-          <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
+          <div className="mt-3 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground" title={data ? totals.tokens.toLocaleString("zh-CN") : undefined}>
             {formatTokenCn(data ? totals.tokens : null)}
           </div>
-          <span className="text-[12px] leading-[16px] text-muted-foreground mt-1 tabular-nums font-mono">
-            {formatNumber(data ? totals.tokens : null)}
-          </span>
         </Card>
 
-        <Card className="shadow-xs p-3.5 flex flex-col justify-between">
+        <Card className="shadow-xs min-w-0 gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px] font-normal text-muted-foreground">每亿 Token 均价</span>
             <Coins className="size-4 text-amber-500" />
           </div>
-          <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
+          <div className="mt-3 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
             {formatCurrency(totals.avgPer1e8)}
           </div>
         </Card>
@@ -282,10 +280,10 @@ export function ModelsView({
                 isScrollable ? "lg:flex-1 lg:min-h-0 lg:overflow-auto" : ""
               )}
             >
-              <Table className="min-w-[860px] lg:min-w-full table-auto lg:table-fixed text-sm">
-                <colgroup className="hidden lg:table-column-group">
+              <Table className="table-fixed text-sm [--name-column-width:144px] sm:[--name-column-width:260px]" style={{ minWidth: `calc(${tableMinWidth - COL_PIXELS.model}px + var(--name-column-width))` }}>
+                <colgroup>
                   {visibleCols.map((col) => (
-                    <col key={col.key} style={{ width: `${COL_WIDTH_PCT[col.key] ?? 12}%` }} />
+                    <col key={col.key} style={col.key === "model" ? undefined : { width: `${COL_PIXELS[col.key]}px` }} />
                   ))}
                 </colgroup>
                 <TableHeader className="bg-muted/50 sticky top-0 z-20 backdrop-blur-xs">
@@ -309,7 +307,7 @@ export function ModelsView({
                           className={cn(
                             "h-9 px-3 text-[12px] leading-[16px] font-medium text-muted-foreground whitespace-nowrap select-none cursor-pointer transition-colors group/th hover:bg-muted/80",
                             isNum ? "text-right" : "text-left",
-                            isLocked && "sticky left-0 bg-muted/95 z-30 border-r border-border min-w-[180px] sm:min-w-[220px]",
+                            isLocked && "sticky left-0 bg-muted z-30 border-r border-border",
                             sortAttrs.isActive && "text-foreground font-semibold"
                           )}
                           title={
@@ -320,14 +318,14 @@ export function ModelsView({
                         >
                           <div
                             className={cn(
-                              "inline-flex items-center gap-1.5",
-                              isNum ? "flex-row-reverse" : "flex-row"
+                              "relative inline-flex items-center"
                             )}
                           >
                             <span>{col.label}</span>
                             <span
                               className={cn(
-                                "font-mono text-[12px] leading-[16px] tabular-nums transition-opacity",
+                                "absolute text-[12px] leading-[16px] tabular-nums transition-opacity",
+                                isNum ? "right-[calc(100%+4px)]" : "left-[calc(100%+4px)]",
                                 sortAttrs.isActive
                                   ? "text-primary font-semibold opacity-100"
                                   : "text-muted-foreground/40 opacity-0 group-hover/th:opacity-100"
@@ -369,10 +367,10 @@ export function ModelsView({
                               return (
                                 <TableCell
                                   key={col.key}
-                                  className="sticky left-0 bg-card z-10 border-r border-border/50 px-3 py-1 whitespace-nowrap min-w-[180px] sm:min-w-[220px]"
+                                  className="sticky left-0 bg-card z-10 border-r border-border/50 px-3 py-1 whitespace-nowrap"
                                 >
                                   <span
-                                    className="font-medium text-foreground text-[14px] leading-[20px] truncate block max-w-[240px]"
+                                    className="font-medium text-foreground text-[14px] leading-[20px] truncate block"
                                     title={row.model}
                                   >
                                     {row.model}
@@ -438,17 +436,9 @@ export function ModelsView({
                                   className="px-3 py-1 whitespace-nowrap"
                                 >
                                   {row.upstream_accounts && row.upstream_accounts.length > 0 ? (
-                                    <div className="flex flex-wrap gap-1 max-w-[200px]">
-                                      {row.upstream_accounts.map((acc) => (
-                                        <Badge
-                                          key={acc}
-                                          variant="secondary"
-                                          className="text-[12px] leading-[16px] h-5 px-1.5 font-normal text-foreground"
-                                        >
-                                          {acc}
-                                        </Badge>
-                                      ))}
-                                    </div>
+                                    <span className="block truncate text-[13px] text-foreground" title={row.upstream_accounts.join("、")}>
+                                      {row.upstream_accounts.join("、")}
+                                    </span>
                                   ) : (
                                     <span className="text-muted-foreground text-[14px] leading-[20px]">
                                       —

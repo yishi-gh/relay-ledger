@@ -88,37 +88,37 @@ export const GROUPS_ALL_COLUMNS: ColumnItem[] = [
 const CHANNELS_DEFAULT_KEYS: string[] = CHANNELS_ALL_COLUMNS.map((c) => c.key)
 const GROUPS_DEFAULT_KEYS: string[] = GROUPS_ALL_COLUMNS.map((c) => c.key)
 
-// 精简像素定宽：总宽控制在 ~1042px，1440 桌面卡内无需横向滚动条，首列严格锁定不重叠
+// 数值列按内容定宽，名称列吸收剩余空间；窄屏只在表内横滚。
 const CHANNELS_COL_PIXELS: Record<string, number> = {
-  channel: 155,
-  revenue: 85,
-  requests: 68,
-  tokens: 82,
-  margin: 64,
-  status: 72,
-  upstream: 110,
-  tps: 52,
-  cache: 65,
-  p50: 58,
-  p95: 58,
-  per_1e8: 85,
-  last: 88,
+  channel: 208,
+  revenue: 96,
+  requests: 88,
+  tokens: 96,
+  margin: 80,
+  status: 90,
+  upstream: 132,
+  tps: 68,
+  cache: 76,
+  p50: 80,
+  p95: 80,
+  per_1e8: 100,
+  last: 96,
 }
 
 const GROUPS_COL_PIXELS: Record<string, number> = {
-  group: 155,
-  revenue: 85,
-  requests: 68,
-  tokens: 82,
-  margin: 64,
-  status: 72,
-  channels: 75,
-  tps: 52,
-  cache: 65,
-  p50: 58,
-  p95: 58,
-  per_1e8: 85,
-  last: 88,
+  group: 208,
+  revenue: 96,
+  requests: 88,
+  tokens: 96,
+  margin: 80,
+  status: 90,
+  channels: 88,
+  tps: 68,
+  cache: 76,
+  p50: 80,
+  p95: 80,
+  per_1e8: 100,
+  last: 96,
 }
 
 const CHANNEL_ACCESSORS: AccessorMap<ChannelRowData> = {
@@ -466,24 +466,21 @@ export function DetailsView({
 
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto pr-1">
-      {/* 1. 顶部紧凑汇总指标行：控高 74px，间距 8px */}
+      {/* 1. 顶部紧凑汇总指标行 */}
       <section className="grid grid-cols-2 md:grid-cols-4 gap-2 shrink-0">
-        <Card className="shadow-xs p-2.5 sm:p-3 flex flex-col justify-between h-[74px]">
+        <Card className="shadow-xs min-w-0 gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground leading-none">
             <span className="text-[12px] font-medium text-muted-foreground">售出总计</span>
             <DollarSign className="size-3.5 text-muted-foreground" />
           </div>
-          <div className="flex items-baseline justify-between gap-1 leading-none">
+          <div className="mt-3 flex items-baseline gap-2 leading-none">
             <span className="text-[20px] font-semibold font-mono tabular-nums text-foreground">
               {formatCurrency(totals.revenue)}
-            </span>
-            <span className="text-[12px] text-muted-foreground truncate">
-              区间累计
             </span>
           </div>
         </Card>
 
-        <Card className="shadow-xs p-2.5 sm:p-3 flex flex-col justify-between h-[74px]">
+        <Card className="shadow-xs min-w-0 gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground leading-none">
             <span className="text-[12px] font-medium text-muted-foreground">
               {totals.countLabel}
@@ -494,37 +491,31 @@ export function DetailsView({
               <Layers className="size-3.5 text-emerald-600 dark:text-emerald-400" />
             )}
           </div>
-          <div className="flex items-baseline justify-between gap-1 leading-none">
+          <div className="mt-3 flex items-baseline gap-2 leading-none">
             <span className="text-[20px] font-semibold font-mono tabular-nums text-foreground">
               {totals.count} <span className="text-[12px] font-normal font-sans text-muted-foreground">个</span>
-            </span>
-            <span className="text-[12px] text-muted-foreground truncate">
-              {level === "channel" ? "在售线路" : "在用组"}
             </span>
           </div>
         </Card>
 
-        <Card className="shadow-xs p-2.5 sm:p-3 flex flex-col justify-between h-[74px]">
+        <Card className="shadow-xs min-w-0 gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground leading-none">
             <span className="text-[12px] font-medium text-muted-foreground">消耗 Token</span>
             <Cpu className="size-3.5 text-indigo-500" />
           </div>
-          <div className="flex items-baseline justify-between gap-1 leading-none">
-            <span className="text-[20px] font-semibold font-mono tabular-nums text-foreground">
+          <div className="mt-3 flex items-baseline gap-2 leading-none">
+            <span className="text-[20px] font-semibold font-mono tabular-nums text-foreground" title={totals.tokens.toLocaleString("zh-CN")}>
               {formatTokenCn(totals.tokens)}
-            </span>
-            <span className="text-[12px] text-muted-foreground font-mono tabular-nums truncate">
-              {formatNumber(totals.tokens)}
             </span>
           </div>
         </Card>
 
-        <Card className="shadow-xs p-2.5 sm:p-3 flex flex-col justify-between h-[74px]">
+        <Card className="shadow-xs min-w-0 gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground leading-none">
             <span className="text-[12px] font-medium text-muted-foreground">请求总量</span>
             <Activity className="size-3.5 text-amber-500" />
           </div>
-          <div className="flex items-baseline justify-between gap-1 leading-none">
+          <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 leading-none">
             <span className="text-[20px] font-semibold font-mono tabular-nums text-foreground">
               {formatNumber(totals.requests)} <span className="text-[12px] font-normal font-sans text-muted-foreground">次</span>
             </span>
@@ -590,10 +581,10 @@ export function DetailsView({
 
         <CardContent className="p-0 flex flex-col">
           <div className="rounded-lg border border-border bg-card overflow-hidden [&_[data-slot=table-container]]:h-[clamp(180px,calc((100dvh-320px)/2),420px)] [&_[data-slot=table-container]]:overflow-y-auto max-md:[&_[data-slot=table-container]]:h-auto max-md:[&_[data-slot=table-container]]:max-h-none">
-            <Table className="table-fixed text-sm" style={{ width: "100%", minWidth: `${totalMinPx}px` }}>
+            <Table className="table-fixed text-sm [--name-column-width:144px] sm:[--name-column-width:208px]" style={{ width: "100%", minWidth: `calc(${totalMinPx - 208}px + var(--name-column-width))` }}>
               <colgroup>
                 {visibleCols.map((col) => (
-                  <col key={col.key} style={{ width: `${colPixels[col.key]}px` }} />
+                  <col key={col.key} style={col.key === "channel" || col.key === "group" ? undefined : { width: `${colPixels[col.key]}px` }} />
                 ))}
               </colgroup>
               <TableHeader className="bg-muted/50 sticky top-0 z-20 backdrop-blur-xs">
@@ -627,15 +618,6 @@ export function DetailsView({
                           isLocked && "sticky left-0 bg-muted z-30 border-r border-border shadow-[1px_0_0_0_var(--border)]",
                           sortAttrs.isActive && "text-foreground font-semibold"
                         )}
-                        style={{
-                          width: `${colPixels[col.key]}px`,
-                          ...(isLocked
-                            ? {
-                                minWidth: `${colPixels[col.key]}px`,
-                                maxWidth: `${colPixels[col.key]}px`,
-                              }
-                            : {}),
-                        }}
                         title={
                           col.key === "per_1e8"
                             ? "该主体售出额最高模型的每 1 亿 Token 售出额"
@@ -648,14 +630,14 @@ export function DetailsView({
                       >
                         <div
                           className={cn(
-                            "inline-flex items-center gap-1",
-                            isNum ? "flex-row-reverse" : "flex-row"
+                            "relative inline-flex items-center"
                           )}
                         >
                           <span>{col.label}</span>
                           <span
                             className={cn(
-                              "font-mono text-[12px] leading-[16px] tabular-nums transition-opacity",
+                              "absolute text-[12px] leading-[16px] tabular-nums transition-opacity",
+                              isNum ? "right-[calc(100%+4px)]" : "left-[calc(100%+4px)]",
                               sortAttrs.isActive
                                 ? "text-primary font-semibold opacity-100"
                                 : "text-muted-foreground/40 opacity-0 group-hover/th:opacity-100"
@@ -806,15 +788,6 @@ export function DetailsView({
                                 isNum ? "text-right" : "text-left",
                                 isLocked && "sticky left-0 bg-card z-10 border-r border-border shadow-[1px_0_0_0_var(--border)]"
                               )}
-                              style={{
-                                width: `${colPixels[col.key]}px`,
-                                ...(isLocked
-                                  ? {
-                                      minWidth: `${colPixels[col.key]}px`,
-                                      maxWidth: `${colPixels[col.key]}px`,
-                                    }
-                                  : {}),
-                              }}
                             >
                               {content}
                             </TableCell>
@@ -949,15 +922,6 @@ export function DetailsView({
                               isNum ? "text-right" : "text-left",
                               isLocked && "sticky left-0 bg-card z-10 border-r border-border shadow-[1px_0_0_0_var(--border)]"
                             )}
-                            style={{
-                              width: `${colPixels[col.key]}px`,
-                              ...(isLocked
-                                ? {
-                                    minWidth: `${colPixels[col.key]}px`,
-                                    maxWidth: `${colPixels[col.key]}px`,
-                                  }
-                                : {}),
-                            }}
                           >
                             {content}
                           </TableCell>

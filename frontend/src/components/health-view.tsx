@@ -508,12 +508,12 @@ export function HealthView({
     <div className="flex-1 min-h-0 min-w-0 flex flex-col gap-4 overflow-y-auto pr-1">
       {/* 1. 顶部 3 张 KPI：整体 uptime、总请求、总错误 */}
       <section className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 shrink-0">
-        <Card className="shadow-xs p-3.5 flex flex-col justify-between">
+        <Card className="shadow-xs gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px]">整体 uptime</span>
             <HeartPulse className={cn("size-4", getHealthStatusColor(overall?.requests, overall?.errors, overall?.uptime))} />
           </div>
-          <div className={cn("mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums", getHealthStatusColor(overall?.requests, overall?.errors, overall?.uptime))}>
+          <div className={cn("mt-3 text-[24px] leading-[28px] font-semibold font-mono tabular-nums", getHealthStatusColor(overall?.requests, overall?.errors, overall?.uptime))}>
             {formatUptime(overall?.uptime ?? null)}
           </div>
           <span className="text-[12px] leading-[16px] text-muted-foreground mt-1">
@@ -521,12 +521,12 @@ export function HealthView({
           </span>
         </Card>
 
-        <Card className="shadow-xs p-3.5 flex flex-col justify-between">
+        <Card className="shadow-xs gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px]">总请求</span>
             <Activity className="size-4 text-indigo-500" />
           </div>
-          <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
+          <div className="mt-3 flex items-baseline gap-1 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
             {formatNumber(overall?.requests ?? null)}
             <span className="text-[14px] font-normal font-sans text-muted-foreground"> 次</span>
           </div>
@@ -535,12 +535,12 @@ export function HealthView({
           </span>
         </Card>
 
-        <Card className="shadow-xs p-3.5 flex flex-col justify-between">
+        <Card className="shadow-xs gap-0 p-3.5 flex flex-col">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[14px] leading-[20px]">总错误</span>
             <AlertTriangle className="size-4 text-amber-500" />
           </div>
-          <div className="mt-1.5 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
+          <div className="mt-3 flex items-baseline gap-1 text-[24px] leading-[28px] font-semibold font-mono tabular-nums text-foreground">
             {formatNumber(overall?.errors ?? null)}
             <span className="text-[14px] font-normal font-sans text-muted-foreground"> 次</span>
           </div>

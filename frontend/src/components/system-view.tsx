@@ -217,7 +217,7 @@ export function SystemView({
   const chartData = React.useMemo(() => {
     if (!errorsData?.buckets) return []
     return errorsData.buckets.map((b) => {
-      const displayLabel = b.label.includes(" ") ? `${b.label.slice(5, 10)} ${b.label.split(" ")[1]}` : b.label.slice(5)
+      const displayLabel = b.label.replace(/^\d{4}-/, "")
       return {
         ...b,
         displayLabel,
@@ -534,11 +534,11 @@ export function SystemView({
                           <div className="space-y-1">
                             <div className="flex items-center justify-between text-amber-600 dark:text-amber-400">
                               <span>客户端 4xx:</span>
-                              <span className="font-mono font-semibold tabular-nums">{formatNumber(point.c4xx)}</span>
+                              <span className="font-mono font-semibold tabular-nums">{formatNumber(point.s4xx)}</span>
                             </div>
                             <div className="flex items-center justify-between text-rose-600 dark:text-rose-400">
                               <span>服务端 5xx:</span>
-                              <span className="font-mono font-semibold tabular-nums">{formatNumber(point.c5xx)}</span>
+                              <span className="font-mono font-semibold tabular-nums">{formatNumber(point.s5xx)}</span>
                             </div>
                             <div className="flex items-center justify-between text-foreground font-medium pt-1 border-t border-border">
                               <span>错误总计:</span>
@@ -549,8 +549,8 @@ export function SystemView({
                       )
                     }}
                   />
-                  <Bar dataKey="c4xx" name="4xx 客户端错误" stackId="err" fill="var(--chart-3)" stroke="none" radius={[0, 0, 0, 0]} isAnimationActive={false} />
-                  <Bar dataKey="c5xx" name="5xx 服务端错误" stackId="err" fill="var(--chart-5)" stroke="none" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                  <Bar dataKey="s4xx" name="4xx 客户端错误" stackId="err" fill="var(--chart-3)" stroke="none" radius={[0, 0, 0, 0]} isAnimationActive={false} />
+                  <Bar dataKey="s5xx" name="5xx 服务端错误" stackId="err" fill="var(--chart-5)" stroke="none" radius={[2, 2, 0, 0]} isAnimationActive={false} />
                 </BarChart>
               </ResponsiveContainer>
             )}

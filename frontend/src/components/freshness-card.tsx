@@ -62,7 +62,7 @@ export function FreshnessCard({ accounts = [], now, className }: FreshnessCardPr
   }, null)
 
   return (
-    <Card className={cn("shadow-xs overflow-hidden flex flex-col p-4", className)}>
+    <Card className={cn("shadow-xs overflow-hidden flex flex-col gap-0 p-3.5", className)}>
       <CardHeader className="p-0 pb-2.5 shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
