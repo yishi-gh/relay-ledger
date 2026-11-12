@@ -46,13 +46,13 @@ function RevenueRing({ items }: { items: RankingItem[] }) {
     return segment
   }) : []
   return (
-    <div className="relative size-24 shrink-0 self-center xl:size-28" role="img" aria-label={valid ? `前五售出占比 ${formatPercent(topShare)}，其余 ${formatPercent(1 - topShare)}` : "暂无有效售出份额"}>
+    <div className="relative size-28 shrink-0 self-center sm:max-h-full sm:size-[clamp(120px,calc((100dvh-336px)/3),128px)] xl:size-[clamp(120px,calc((100dvh-336px)/3),144px)]" role="img" aria-label={valid ? `前五售出占比 ${formatPercent(topShare)}，其余 ${formatPercent(1 - topShare)}` : "暂无有效售出份额"}>
       <svg viewBox="0 0 100 100" className="size-full -rotate-90" aria-hidden="true">
-        <circle cx="50" cy="50" r="40" fill="none" stroke="var(--muted)" strokeWidth="12" />
-        {segments.map(({ item, share, offset: start, color }) => <circle key={item.key} cx="50" cy="50" r="40" pathLength="100" fill="none" stroke={color} strokeWidth="12" strokeDasharray={`${share * 100} ${100 - share * 100}`} strokeDashoffset={-start * 100}><title>{item.name}：{formatCurrency(item.value)}，{formatPercent(share)}</title></circle>)}
+        <circle cx="50" cy="50" r="40" fill="none" stroke="var(--muted)" strokeWidth="18" />
+        {segments.map(({ item, share, offset: start, color }) => <circle key={item.key} cx="50" cy="50" r="40" pathLength="100" fill="none" stroke={color} strokeWidth="18" strokeDasharray={`${share * 100} ${100 - share * 100}`} strokeDashoffset={-start * 100}><title>{item.name}：{formatCurrency(item.value)}，{formatPercent(share)}</title></circle>)}
       </svg>
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-0.5">
-        <span className="text-[16px] font-semibold tabular-nums">{valid ? formatPercent(topShare) : "—"}</span>
+        <span className="text-[16px] font-semibold tabular-nums sm:text-[18px]">{valid ? formatPercent(topShare) : "—"}</span>
         <span className="text-[10px] text-muted-foreground">前5占比</span>
       </div>
     </div>
