@@ -26,7 +26,7 @@ relay-collector ──> 上游余额接口 / 站点日志源 ──> /var/lib/re
 ## 2. 前置条件
 
 - Linux 服务器，systemd 管理服务。
-- Node.js **≥ 22.13**（`node:sqlite` 从该版本起免 `--experimental-sqlite`），`node --version` 确认。
+- Node.js **≥ 22.13**（`node:sqlite` 从该版本起免 `--experimental-sqlite`）与 npm（构建前端），`node --version` 确认。
 - nginx，且编译了 `http_auth_request` 模块：`nginx -V 2>&1 | grep auth_request` 有输出即可。
 - 一个域名与可用的 TLS 证书（下文按 certbot 的默认证书路径写）。
 - 系统时间已同步（`timedatectl` 显示 `System clock synchronized: yes`）。余额快照按边界 ±5 分钟判定，机器时钟漂移会直接把成本判成缺失。
@@ -45,7 +45,7 @@ sudo install -d -o root          -g relay-ledger -m 0750 /etc/relay-ledger
 
 | 路径 | 内容 | 权限 |
 | --- | --- | --- |
-| `/opt/relay-ledger` | 代码，升级时整目录替换 | `0755` |
+| `/opt/relay-ledger` | 代码，升级时整目录替换；须含 `shared` 与 `frontend/dist` | `0755` |
 | `/etc/relay-ledger` | `instance.json`、`accounts.json`、登录凭据 | 目录 `0750`，配置文件 `0640` 或 `0600` |
 | `/var/lib/relay-ledger` | 中转站日志库、看板库、令牌文件 | 运行用户可写 |
 
@@ -60,7 +60,17 @@ sudo setfacl -m u:relay-ledger:r /home/newapi/one-api.db-shm 2>/dev/null || true
 
 ## 4. 安装代码与实例配置
 
-把仓库放到 `/opt/relay-ledger`（`git clone` 或 `rsync` 均可），确认 `web/vendor/echarts.min.js` 存在（图表依赖，随仓库分发）。
+把仓库放到 `/opt/relay-ledger`（`git clone` 或 `rsync` 均可），确认 `shared/settings-defaults.json` 存在（运行时必需），并构建前端。构建可在服务机、CI 或本地用同一源码版本完成；部署目录必须含 `frontend/dist/index.html`：
+
+```bash
+cd /opt/relay-ledger
+sudo -u relay-ledger npm --prefix frontend ci
+sudo -u relay-ledger npm --prefix frontend run build
+test -f frontend/dist/index.html
+test -f shared/settings-defaults.json
+```
+
+`frontend/dist/` 不提交版本库，但必须与后端代码同版本部署；缺少入口时根路径返回 503，API 不受影响。
 
 ```bash
 sudo cp /opt/relay-ledger/instance.example.json /etc/relay-ledger/instance.json
@@ -145,7 +155,7 @@ sudo chmod 600 /var/lib/relay-ledger/accounts.json
 
 ## 7. systemd 服务
 
-模板在 `v2/deploy/`，装好后只需改 `User` / `Group`、node 路径（`command -v node` 的结果），以及数据目录（若不用 `/var/lib/relay-ledger`）：
+模板在 `v2/deploy/`，装好后只需改 `User` / `Group`、node 路径（`command -v node` 的结果），以及数据目录（若不用 `/var/lib/relay-ledger`）。启动前确认第 4 节的前端构建已完成，否则面板根路径会返回 503：
 
 ```bash
 sudo cp /opt/relay-ledger/v2/deploy/relay-collector.service \
@@ -187,7 +197,7 @@ gzip_min_length 1024;
 gzip_types text/css text/javascript application/javascript application/json image/svg+xml;
 ```
 
-首访要下约 1.9 MB 静态资源（含 1.1 MB 图表库）。少了 `gzip_proxied any`，nginx 不会压缩来自上游（`relay-panel`）的响应，等于白传；`gzip_types` 少了 `text/javascript` / `application/javascript`，`app.js` 也不压缩。这是实测过的必需要点。
+当前页面由 `/` 与 `/assets/...` 提供，旧 `/vendor/...` 静态路径已移除。压缩对构建后的 JS、CSS 与 JSON 仍有效；少了 `gzip_proxied any`，nginx 不会压缩来自上游（`relay-panel`）的响应；`gzip_types` 需包含 `text/javascript` / `application/javascript`。实际传输体积以当次构建产物为准。
 
 ### 登录凭据
 
@@ -221,6 +231,8 @@ proxy_set_header Cookie $http_cookie;
 
 cron 备选见 `v2/deploy/crontab.example`：余额在 `:10/:25/:40/:55`，日志在 `:14/:29/:44/:59`，两行都带 `RELAY_LEDGER_INSTANCE`。两者只能选一个，同时启用会重复采集（数据幂等，但白费请求，也让上游更快触发限流）。
 
+nginx 错误码聚合默认读取 `/var/log/nginx/access.log`，运行用户需对该文件有读权限、对父目录有遍历权限，日志轮转后的新文件也要保持；不接入时在 `relay-collector.service` 的 `ExecStart` 追加 `--no-http-errors`。
+
 ## 10. 首次验证
 
 ```bash
@@ -228,6 +240,7 @@ cron 备选见 `v2/deploy/crontab.example`：余额在 `:10/:25/:40/:55`，日�
 sudo -u relay-ledger env RELAY_LEDGER_INSTANCE=/etc/relay-ledger/instance.json \
   node /opt/relay-ledger/v2/jobs/run-scheduler.mjs --once
 
+curl -sI http://127.0.0.1:8788/ | head -n 5   # 200，HTML 为 no-cache
 curl -s http://127.0.0.1:8788/api/healthz
 curl -s http://127.0.0.1:8788/api/quality     # jobs、collect_errors、源库行数
 curl -s http://127.0.0.1:8788/api/upstreams   # 余额、last_sync、last_job
@@ -255,12 +268,17 @@ sqlite3 /var/lib/relay-ledger/dashboard.db ".backup '/var/backups/relay-ledger-$
 ```bash
 sudo systemctl stop relay-collector
 # 替换 /opt/relay-ledger 下的代码，不要覆盖 /etc/relay-ledger 与 /var/lib/relay-ledger
+cd /opt/relay-ledger
+sudo -u relay-ledger npm --prefix frontend ci
+sudo -u relay-ledger npm --prefix frontend run build
+test -f frontend/dist/index.html
+test -f shared/settings-defaults.json
 sudo systemctl start relay-collector
 sudo systemctl restart relay-panel relay-auth
 curl -s http://127.0.0.1:8788/api/quality
 ```
 
-表结构由程序启动时 `CREATE TABLE IF NOT EXISTS` 补齐，不删旧表。升级前备份 `dashboard.db`。
+构建必须发生在重启 `relay-panel` 之前；用 CI 或本地构建时，把同一源码版本的 `frontend/dist/` 一并同步到 `/opt/relay-ledger`。表结构由程序启动时 `CREATE TABLE IF NOT EXISTS` 补齐，不删旧表。升级前备份 `dashboard.db`。
 
 ## 13. 安全清单
 
@@ -278,7 +296,8 @@ curl -s http://127.0.0.1:8788/api/quality
 | 登录后立刻回到登录页 | `/verify` 没有转发 Cookie | nginx 加 `proxy_set_header Cookie $http_cookie;` |
 | 所有成本显示 `—` | 余额快照不足一个桶，或采集没跑 | 看 `/api/quality` 的 `jobs` 与 `collect_errors`；确认时钟已同步 |
 | 渠道名为空 | 源库 `channel_name` 为 NULL | 采集器会用 `channels.name` 回填；仍为空说明渠道已删除 |
-| 首访 2 秒以上 | nginx 未压缩 | 检查 `gzip_proxied any` 与 `gzip_types` |
+| 根路径 503，提示缺少 `frontend/dist/index.html` | 未构建或发布时漏带产物 | 在源码目录执行 `npm --prefix frontend ci && npm --prefix frontend run build`，再重启面板 |
+| 首访较慢 | nginx 未压缩、后端冷查询或网络延迟 | 检查 `gzip_proxied any`、`gzip_types` 与 `/api` 响应时间；体积以当次构建为准 |
 | 首访几十秒、多个接口同时超时 | 同步 SQLite + 冷缓存，首个查询把事件循环占满，后面的请求排队 | 等启动预热跑完（日志里有 `[warmup] ok`）；磁盘慢时单次聚合可到 3 秒级，属预期，不是宕机 |
 | 启动日志说「源库不存在，已创建空库」 | `paths.relay_db` 或 `site.id` 指错了位置 | 改 `instance.json` 后重启；空库是给首次部署用的，不会自动找回旧数据 |
 | `/api/quality` 出现 `auth_failed` | 上游令牌过期 | 更新 `accounts.json` 对应账户，重启 collector |

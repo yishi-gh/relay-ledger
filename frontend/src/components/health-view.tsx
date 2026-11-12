@@ -11,7 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Activity, AlertTriangle, HeartPulse, Inbox } from "lucide-react"
-import { formatNumber } from "@/lib/formatters"
+import { formatBeijingShort, formatNumber } from "@/lib/formatters"
 import {
   Tooltip,
   TooltipContent,
@@ -48,13 +48,6 @@ export const STATE_LABEL: Record<StatusState, string> = {
 }
 
 export const LEGEND: StatusState[] = ["ok", "warn", "fail", "unknown", "none"]
-
-/** 北京时间的 MM-DD HH:mm；coverage 只用于「错误数据自 X 起」的小字 */
-export function formatBeijingShort(ms: number): string {
-  const d = new Date(ms + 8 * 3600_000)
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
-}
 
 /** uptime 用两位小数：1 位小数会把 99.98% 显示成 100.0%，看起来像零故障 */
 export function formatUptime(value: number | null): string {
@@ -103,18 +96,8 @@ export function HealthView({
 
   const bucketSize: StatusBucketSize = timeRange === "7d" || (timeRange === "custom" && dateRange != null && dateRange.to - dateRange.from > 36 * 3600000) ? "1h" : "15m"
 
-  // 健康页窗口对齐桶粒度：24h = 96 个 15 分钟桶，7d = 168 个 1 小时桶。
-  const range = React.useMemo<DateRange | null>(() => {
-    if (!dateRange) return null
-    if (timeRange === "today" || timeRange === "custom") return { from: dateRange.from, to: dateRange.to }
-    const to = dateRange.to
-    if (timeRange === "24h") {
-      const slotStart = Math.floor(to / (15 * 60_000)) * (15 * 60_000)
-      return { from: slotStart - (96 - 1) * 15 * 60_000, to }
-    }
-    const hourStart = Math.floor(to / 3600_000) * 3600_000
-    return { from: hourStart - (168 - 1) * 3600_000, to }
-  }, [dateRange, timeRange])
+  // 健康页直接使用上层 computeRange 的窗口，不再按桶边界重锚起点。
+  const range = dateRange ?? null
 
   // 按视图懒加载：健康页不参与首屏 loadDashboard，切到本页或切换维度/跨度时才请求
   React.useEffect(() => {

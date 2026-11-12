@@ -5,32 +5,10 @@ import { DollarSign, Layers, TrendingUp, ChevronRight, Inbox } from "lucide-reac
 import { formatCurrency, formatPercent } from "@/lib/formatters"
 import { getDeterministicChartColor } from "@/components/table-utils"
 import { cn } from "@/lib/utils"
+import type { GroupRowData } from "@/lib/api-types"
 import type { RangeType } from "@/lib/api"
 
-export interface GroupRowData {
-  group_name: string
-  channels?: number
-  channel_names?: string[]
-  revenue: number
-  tokens?: number
-  requests?: number
-  cache_rate?: number
-  p50?: number
-  latency_p50?: number
-  p95?: number
-  latency_p95?: number
-  tps?: number
-  last_t?: number | null
-  top_model?: {
-    model: string
-    revenue: number
-    tokens: number
-    per_1e8: number
-  } | null
-  margin?: number | null
-  margin_pct?: number | null
-  status?: string
-}
+export type { GroupRowData } from "@/lib/api-types"
 
 interface GroupsRankViewProps {
   timeRange: RangeType

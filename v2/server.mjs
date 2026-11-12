@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * v2 本地预览服务：只读站点库，静态服务 v2/web，API 见 v2/CONTRACT.md。
+ * v2 本地预览服务：只读站点库，静态服务 frontend/dist，API 见 v2/CONTRACT.md。
  *
  * 用法：
  *   node v2/server.mjs
@@ -30,20 +30,17 @@ import { ensureAggIndexes, LOGS_SCHEMA } from './store/site-logs.mjs';
 
 const V2_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(V2_DIR, '..');
-const WEB_DIR = path.join(V2_DIR, 'web');
-const VENDOR_DIR = path.join(ROOT, 'web', 'vendor');
+const WEB_DIR = path.join(ROOT, 'frontend', 'dist');
 const DASHBOARD_FILE = INSTANCE.paths.dashboardFile;
 
-/** 页面自身的 html/js/css 不做强缓存：本地改完刷新就能生效 */
+/** 未带内容 hash 的前端文件不做强缓存：本地改完刷新就能生效 */
 const NO_CACHE_EXT = new Set(['.html', '.js', '.mjs', '.css']);
 
-/** 第三方库不带版本号，只能靠一年期强缓存；改库时必须换文件名，否则浏览器不会重新拉取 */
-const IMMUTABLE_PREFIX = '/vendor/';
-const IMMUTABLE_FILES = new Set(['/vendor-tabler.css']);
+/** Vite 默认产物名为 name-<8 位内容 hash>.ext；未带 hash 的文件不做不可变缓存 */
 const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
 
 function isImmutableAsset(pathname) {
-  return pathname.startsWith(IMMUTABLE_PREFIX) || IMMUTABLE_FILES.has(pathname);
+  return /^\/assets\/(?:[^/]+\/)*[^/]+-[A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$/.test(pathname);
 }
 
 const MIME = {
@@ -59,9 +56,13 @@ const MIME = {
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
   '.webp': 'image/webp',
+  '.avif': 'image/avif',
   '.ico': 'image/x-icon',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
+  '.wasm': 'application/wasm',
   '.txt': 'text/plain; charset=utf-8',
 };
 
@@ -205,7 +206,7 @@ function safeJoin(root, urlPath) {
   } catch {
     return null;
   }
-  if (decoded.includes('\0')) return null;
+  if (decoded.includes('\0') || decoded.includes('\\') || decoded.split('/').includes('..')) return null;
   const rootResolved = path.resolve(root);
   const target = path.resolve(rootResolved, `.${path.posix.normalize(`/${decoded}`)}`);
   if (target !== rootResolved && !target.startsWith(rootResolved + path.sep)) return null;
@@ -219,7 +220,7 @@ function serveFile(res, file, { head = false, status = 200, immutable = false } 
   res.writeHead(status, {
     'Content-Type': MIME[ext] ?? 'application/octet-stream',
     'Content-Length': stat.size,
-    'Cache-Control': immutable
+    'Cache-Control': ext === '.html' ? 'no-cache' : immutable
       ? IMMUTABLE_CACHE
       : NO_CACHE_EXT.has(ext) ? 'no-cache' : 'public, max-age=300',
   });
@@ -231,26 +232,21 @@ function serveFile(res, file, { head = false, status = 200, immutable = false } 
   return true;
 }
 
-function serveStatic(req, res, pathname, { head }) {
-  const routes = [
-    { prefix: '/vendor/', root: VENDOR_DIR },
-    { prefix: '/', root: WEB_DIR },
-  ];
-  const route = routes.find((r) => pathname.startsWith(r.prefix));
-  if (!route) return sendText(res, 404, 'Not Found', { head });
-
-  let rel = pathname.slice(route.prefix.length);
+function serveStatic(res, pathname, { head, webDir }) {
+  let rel = pathname.slice(1);
   if (rel === '' || rel.endsWith('/')) rel += 'index.html';
-  const file = safeJoin(route.root, rel);
+  const file = safeJoin(webDir, rel);
   if (!file) return sendError(res, 400, 'bad_path', '非法路径', { head });
 
   try {
     if (serveFile(res, file, { head, immutable: isImmutableAsset(pathname) })) return undefined;
   } catch (err) {
-    if (err.code !== 'ENOENT' && err.code !== 'EISDIR') throw err;
+    if (err.code !== 'ENOENT' && err.code !== 'EISDIR' && err.code !== 'ENOTDIR') throw err;
   }
-  if (pathname === '/') {
-    return sendText(res, 404, 'v2/web/index.html 不存在，前端静态文件尚未就位', { head });
+  if (pathname === '/' || pathname === '/index.html') {
+    return sendText(res, 503,
+      'frontend/dist/index.html 不存在，请先运行 npm --prefix frontend ci，然后运行 npm --prefix frontend run build',
+      { head });
   }
   return sendText(res, 404, 'Not Found', { head });
 }
@@ -547,6 +543,7 @@ export function createRequestHandler({
   dashboard = null,
   now = Date.now,
   logoService = null,
+  webDir = WEB_DIR,
 }) {
   return async (req, res) => {
     const head = req.method === 'HEAD';
@@ -580,7 +577,7 @@ export function createRequestHandler({
             sendError(res, 400, 'bad_request', 'range 与 from/to 不能同时使用', { head });
             return;
           }
-          if (fromRaw == null || fromRaw === '' || toRaw == null || toRaw === '') {
+          if (fromRaw == null || toRaw == null || fromRaw.trim() === '' || toRaw.trim() === '') {
             sendError(res, 400, 'bad_request', 'from/to 必须成对提供', { head });
             return;
           }
@@ -680,7 +677,7 @@ export function createRequestHandler({
         return;
       }
 
-      serveStatic(req, res, pathname, { head });
+      serveStatic(res, pathname, { head, webDir });
     } catch (err) {
       if (err instanceof RangeError || err instanceof TypeError) {
         sendError(res, 400, 'bad_request', err.message, { head });

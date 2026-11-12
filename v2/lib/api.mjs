@@ -15,7 +15,7 @@ import {
 import crypto from 'node:crypto';
 import { readChannelStates, readLiveChannelIds } from '../store/channel-state.mjs';
 import { readRoutingSnapshot } from '../store/channel-routing.mjs';
-import { buildChannelAssociations, normalizeChannelOrigin } from './channel-associations.mjs';
+import { buildChannelAssociations } from './channel-associations.mjs';
 import {
   computeMargin,
   evaluateLedger,
@@ -397,12 +397,6 @@ function snapshotObjectNear(snapshots, boundaryMs, tolerance) {
   if (best === null || bestDiff > tolerance) return null;
   if (typeof best.balance !== 'number' || !Number.isFinite(best.balance)) return null;
   return best;
-}
-
-/** 快照数组（t_ms 升序）中距 boundaryMs 最近、偏差不超过 tolerance 的余额；否则 null */
-function snapshotNear(snapshots, boundaryMs, tolerance) {
-  const snap = snapshotObjectNear(snapshots, boundaryMs, tolerance);
-  return snap ? snap.balance : null;
 }
 
 /** boundaryMs 之前最近一条快照（整条）；超出容差或无快照返回 null */

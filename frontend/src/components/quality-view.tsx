@@ -7,36 +7,13 @@ import {
   AlertCircle,
   Info,
 } from "lucide-react"
-import { formatNumber } from "@/lib/formatters"
+import { formatBeijingClock, formatNumber } from "@/lib/formatters"
 import { FreshnessCard } from "@/components/freshness-card"
 import type { DateRange, RangeType } from "@/lib/api"
+import type { QualityData, UpstreamAccount } from "@/lib/api-types"
 import { cn } from "@/lib/utils"
-import type { UpstreamAccount } from "@/components/upstreams-view"
 
-export interface JobRun {
-  job: string
-  started_at: number
-  finished_at: number
-  status: "ok" | "complete" | "partial" | "error" | string
-  detail?: string
-}
-
-export interface CollectError {
-  account_id: string
-  name?: string
-  reason: string
-  at: number
-}
-
-export interface QualityData {
-  source_last_t?: number | null
-  source_rows?: number | null
-  error_rows?: number | null
-  job_runs?: JobRun[]
-  collect_errors?: CollectError[]
-  schema_ok?: boolean
-  checked_at?: number | null
-}
+export type { CollectError, JobRun, QualityData } from "@/lib/api-types"
 
 export interface QualityViewProps {
   quality: QualityData
@@ -86,7 +63,7 @@ export function QualityView({
               </Badge>
               <span className="text-[12px] leading-[16px] text-muted-foreground font-mono tabular-nums">
                 {quality.checked_at
-                  ? `自检时间: ${new Date(quality.checked_at).toLocaleTimeString("zh-CN", { hour12: false })}`
+                  ? `自检时间: ${formatBeijingClock(quality.checked_at, true)}`
                   : "自检中…"}
               </span>
             </div>
@@ -145,7 +122,7 @@ export function QualityView({
                     <div className="flex items-center justify-between font-medium text-rose-600 dark:text-rose-400">
                       <span>{err.name || err.account_id}</span>
                       <span className="font-mono text-[11px] text-muted-foreground">
-                        {new Date(err.at).toLocaleTimeString("zh-CN", { hour12: false })}
+                        {formatBeijingClock(err.at, true)}
                       </span>
                     </div>
                     <span className="text-muted-foreground break-all">{err.reason}</span>

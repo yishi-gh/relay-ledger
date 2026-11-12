@@ -7,7 +7,6 @@
  */
 
 export const OFFSET_KEY = 'http_errors_offset';
-export const PATH_GROUPS = ['/v1', '/api', 'other'];
 
 function hasTable(db, name) {
   return Boolean(

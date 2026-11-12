@@ -27,38 +27,13 @@ import {
 import { ColPicker, type ColumnItem } from "@/components/col-picker"
 import { cn } from "@/lib/utils"
 import type { CapitalAccount, CapitalPayload, DateRange, ProfitQuality, ProfitSite, RangeType } from "@/lib/api"
+import type { UpstreamAccount } from "@/lib/api-types"
 import { getServerSettings } from "@/lib/settings"
 
-export type UpstreamViewMode = "biz" | "audit" | "all"
+// 保留原有导出路径，兼容既有引用。
+export type { UpstreamAccount } from "@/lib/api-types"
 
-export interface UpstreamAccount {
-  id: string
-  name: string
-  kind: "sub2api" | "newapi" | "external" | string
-  base_url?: string
-  status: "complete" | "partial" | "unavailable" | "unconfigured" | string
-  reason?: string | null
-  opening_balance?: number | null
-  closing_balance?: number | null
-  credits?: number | null
-  credit_events?: number | null
-  consumption?: number | null
-  reported_consumption?: number | null
-  reported_spend_range?: number | null
-  last_sync?: number | null
-  unit?: string
-  local_revenue?: number | null
-  margin?: number | null
-  margin_pct?: number | null
-  channels?: number[]
-  channels_live?: number
-  channels_total?: number
-  auto_channels?: number[]
-  enabled?: boolean
-  external?: boolean
-  cost?: number | null
-  profit?: number | null
-}
+export type UpstreamViewMode = "biz" | "audit" | "all"
 
 interface MergedUpstreamAccount extends UpstreamAccount {
   funding?: CapitalAccount

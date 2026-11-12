@@ -40,8 +40,6 @@ export type ViewKey =
   | "system"
   | "settings"
 
-export type CompatibleViewKey = ViewKey | "capital" | "health" | "details" | "ops"
-
 interface NavItem {
   key: ViewKey
   title: string
@@ -94,7 +92,7 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({
-  siteName = "Madfu",
+  siteName = "Relay Ledger",
   currentView,
   onSelectView,
 }: AppSidebarProps) {

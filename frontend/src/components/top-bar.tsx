@@ -8,26 +8,10 @@ import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar"
 import { CalendarDays, ChevronDown, Moon, RefreshCw, Sun } from "lucide-react"
 import type { DateRange, RangeType } from "@/lib/api"
 import { parseBeijingDateTime, formatBeijingDateTimeInput, validateCustomRange } from "@/lib/time-range"
+import { formatBeijingTime } from "@/lib/formatters"
 
-export function formatBeijingTime(ms: number | null | undefined): string {
-  if (!ms) return "—"
-  const d = new Date(ms)
-  const formatter = new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  })
-  const parts = formatter.formatToParts(d)
-  const map: Record<string, string> = {}
-  for (const p of parts) {
-    map[p.type] = p.value
-  }
-  return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}`
-}
+// 保留原有导出路径，兼容既有引用。
+export { formatBeijingTime }
 
 interface TopBarProps {
   title: string

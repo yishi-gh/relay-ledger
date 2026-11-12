@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Radio } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { formatBeijingClock } from "@/lib/formatters"
 import { getServerSettings } from "@/lib/settings"
 
 export interface UpstreamLike {
@@ -95,11 +96,7 @@ export function FreshnessCard({ accounts = [], now, className }: FreshnessCardPr
             <span className="text-[12px] leading-[16px] text-muted-foreground mt-0.5">
               最近同步：
               {latest
-                ? new Date(latest).toLocaleTimeString("zh-CN", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: false,
-                  })
+                ? formatBeijingClock(latest)
                 : "—"}
             </span>
           </div>

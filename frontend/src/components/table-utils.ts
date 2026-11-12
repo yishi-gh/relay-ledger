@@ -49,13 +49,8 @@ export function latencyP95ToneClass(
   return "text-rose-600 dark:text-rose-400 font-medium"
 }
 
-export interface UserRowData {
-  user_name: string
-  revenue: number
-  requests: number
-  tokens: number
-  share?: number
-}
+/** 保留旧导入路径的类型兼容；新代码统一从 lib/api-types 引用。 */
+export type { UserRowData } from "@/lib/api-types"
 
 /** 字符串确定性 Hash，用于稳定分配颜色 */
 export function stringHash(str: string): number {

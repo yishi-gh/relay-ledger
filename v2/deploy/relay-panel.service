@@ -11,11 +11,13 @@
 #
 # 需要按实际环境替换的占位：
 #   - User / Group    运行用户（占位值 relay-ledger，需先创建用户与数据目录）
-#   - /opt/relay-ledger   项目根目录（该目录下应有 v2/ 与 web/vendor/）
+#   - /opt/relay-ledger   项目根目录（该目录下应有 v2/、shared/ 与 frontend/dist/）
 #   - /usr/bin/node       `command -v node` 的结果，Node 必须 >= 22.13
 #
 # 前置：
 #   - sudo install -d -o relay-ledger -g relay-ledger -m 0750 /var/lib/relay-ledger
+#   - 首次启动前先执行 npm --prefix frontend ci 与 npm --prefix frontend run build，
+#     并确认 frontend/dist/index.html 存在
 #   - /etc/relay-ledger/instance.json 已就位（数据目录、站点 id、日志库路径都在里面）
 #   - 站点日志库 <dataDir>/db/sites/<site.id>.db 由采集器创建；空库也能启动，页面显示空态
 

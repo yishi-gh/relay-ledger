@@ -1,5 +1,5 @@
 import type { DateRange, ProfitData, TrendData } from "./api"
-import type { TrafficChartPoint } from "@/components/overview-view"
+import type { TrafficChartPoint } from "./api-types"
 import { beijingDayStart, beijingTrendBucket, bucketLabel, DAY_MS, HOUR_MS } from "./time-range"
 
 export type ProfitBucketRow = {

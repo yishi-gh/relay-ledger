@@ -1,25 +1,30 @@
-# v2 本地预览后端
+# v2 后端
 
-只读站点库 `db/sites/<site>.db`，在 `127.0.0.1:8788` 提供 JSON API 与 `v2/web` 静态页面。
+以只读连接读取站点日志副本 `db/sites/<site>.db`，在 `127.0.0.1:8788` 提供 JSON API，并在根路径发布 `frontend/dist` 新版页面。旧 `v2/web` 源码暂留，不作为默认入口。
 口径与字段以 [CONTRACT.md](./CONTRACT.md) 为准，本文只说明实现与运行。
 
-零 npm 依赖，Node 24 原生 ESM + `node:http` + `node:sqlite`。不连接上游、不读取凭据、不写站点库。
+后端零 npm 依赖，使用 Node ≥ 22.13 原生 ESM + `node:http` + `node:sqlite`；前端由 npm 安装依赖并构建。面板 API 不写中转站业务库；账户凭据不进入 API 响应、日志或 `job_runs`。唯一对外抓取是 `/api/site-logo` 按白名单来源获取图标，规则见 [SITE-LOGOS.md](../docs/SITE-LOGOS.md)。
 
 ## 运行
 
 ```bash
+npm --prefix frontend ci               # 首次构建前端
+npm --prefix frontend run build
 node v2/server.mjs                     # 127.0.0.1:8788
 node v2/server.mjs --port=8791         # 指定端口（8790 留给登录服务，见「面板登录」）
 PORT=8791 node v2/server.mjs           # 或用环境变量
 node v2/server.mjs --site=relay --source=db/sites/relay.db
 ```
 
-启动时自动创建 `v2/db/dashboard.db`（`CREATE TABLE IF NOT EXISTS`，不覆盖已有数据），并把
+构建产物 `frontend/dist/` 不提交版本库；缺少 `frontend/dist/index.html` 时根路径返回 503 并提示构建命令。启动时自动创建 `v2/db/dashboard.db`（`CREATE TABLE IF NOT EXISTS`，不覆盖已有数据），并把
 `v2/secrets/accounts.json`（不存在时回退 `v2/config/upstreams.json`）的账户同步进 `upstream_account`。
+站点日志副本不存在且没有可回退的业务库时，会按日志表结构创建空库并告警，只写本地副本，不写中转站业务库；存在业务库时直接只读打开。
 
 `--host` 默认 `127.0.0.1`，不要改成 `0.0.0.0` 暴露到局域网。
 
 ## 目录
+
+仓库根同时包含 `frontend/`（React / Vite，产物 `frontend/dist/`）与运行必需的 `shared/settings-defaults.json`；下面是后端目录：
 
 ```text
 v2/
@@ -127,8 +132,11 @@ v2/
 | `GET /api/quality` | 源库最后时间、行数、error_logs 行数、job_runs、collect_errors、schema_ok |
 | `GET /api/errors?from=&to=` | nginx 4xx/5xx 按北京整点分桶（含空桶）、状态码 Top 8、路径组 Top 6；区间上限 31 天 |
 | `GET /api/status?from=&to=&level=channel\|group&bucket=15m\|1h` | 渠道/分组健康：成功请求、错误、可用率与分桶状态；只统计启用渠道 |
+| `GET /api/routes` | 渠道、账户归属、abilities 与最近 1 小时健康快照；不访问上游 |
 | `GET /api/rows?from=&to=&page=&page_size=` | 逐条明细，`t_ms DESC`；`page_size` 上限 200（超限收敛到 200） |
 | `GET /api/healthz` | `{ "ok": true }` |
+
+另有运行时设置 `GET/HEAD/PATCH /api/settings`、采集服务健康 `GET/HEAD /api/services` 与站点图标 `GET/HEAD /api/site-logo`；完整路径、参数、缓存与错误语义见 [CONTRACT.md](./CONTRACT.md)。
 
 `/api/trend` 每点新增 `tokens:number`（`input_total + output`）与 `cache_rate:number|null`
 （`cache_read / (cache_read + input_uncached)`，分母 0 为 null，按桶加权，不按请求数平均）。
@@ -226,11 +234,11 @@ hour 粒度只覆盖明细，不并入归档。
 
 | 请求 | 文件 |
 | --- | --- |
-| `/` | `v2/web/index.html` |
-| `/styles.css`、`/app.js` | `v2/web/…` |
-| `/vendor/echarts.min.js` | `web/vendor/echarts.min.js`（复用旧看板，不复制） |
+| `/`、`/index.html` | `frontend/dist/index.html` |
+| `/assets/*-<hash>.js`、`.css`、字体、图片 | `frontend/dist/assets/…`，一年 immutable |
+| 其它页面静态文件 | `frontend/dist/…` |
 
-路径先 `decodeURIComponent` 再解析，越出根目录直接 400；`v2/web` 缺文件时返回 404 文本。
+HTML 一律 `Cache-Control: no-cache`，带内容 hash 的 `/assets` 才使用 `public, max-age=31536000, immutable`。路径先 `decodeURIComponent` 再解析，越界、反斜杠或 NUL 返回 400；未知文件返回 404，不做 SPA 回退。旧 `/vendor/echarts.min.js` 与 `/vendor-tabler.css` 已移除，请求返回 404。缺少 `frontend/dist/index.html` 时 `/` 与 `/index.html` 返回 503 和构建命令，API 仍可用。
 
 ## 单文件账户配置 `v2/secrets/accounts.json`
 
@@ -457,7 +465,7 @@ node v2/jobs/collect-http-errors.mjs --from-start # 忽略位点从头读（仅�
 ```
 
 - 常驻调度任务名 `http-errors`：启动 5 分钟后首轮，之后每 15 分钟；`--no-http-errors` 关闭，
-  与其它任务同样防重入、异常不退出进程。`--once` 不跑它，手动执行用上面的命令。
+  与其它任务同样防重入、异常不退出进程。默认读取 `/var/log/nginx/access.log`，运行用户需有该文件读权限与父目录遍历权限，轮转后的新文件也要保持；不接入时给 `run-scheduler.mjs` 加 `--no-http-errors`。`--once` 不跑它，手动执行用上面的命令。
 - 增量位点存 `schema_meta.http_errors_offset`（已处理字节偏移）。只消费以换行结尾的完整行，
   文件末尾的半行留到下一轮；文件变小（轮转/截断）时位点归零重读。
 - 只统计状态码 400..599，按 nginx combined 格式解析；时间取 `$time_local` 自带的偏移换算成
@@ -475,16 +483,18 @@ node v2/jobs/collect-http-errors.mjs --from-start # 忽略位点从头读（仅�
 ### 前置
 
 - **Node ≥ 22.13**（`node:sqlite` 从 22.13.0 / 23.4.0 起可用且不再需要 `--experimental-sqlite`；
-  更早版本必须加该 flag 才能 `import 'node:sqlite'`），`node --version` 确认；
+  更早版本必须加该 flag 才能 `import 'node:sqlite'`），构建前端另需 npm，`node --version` 确认；
   建议直接用生产环境的 node 跑 `node --check v2/server.mjs` 验证一次。
 - 项目根目录（下文以 `/opt/relay-ledger` 为例）结构：
 
   ```text
   relay-ledger/
+  ├── frontend/dist/index.html  前端构建产物（随发布携带，不提交 git）
+  ├── shared/settings-defaults.json 运行时必需默认设置
   ├── v2/                       后端与采集代码
   ├── db/sites/<site>.db        站点库（采集只读，服务只读）
   ├── meta/site_token.txt       中转站管理员 PAT（名称含 site.id 的行）
-  └── web/vendor/echarts.min.js 面板图表依赖（必须存在，否则图表空白）
+  └── instance.json             实例配置（或由 RELAY_LEDGER_INSTANCE 指定）
   ```
 
   `v2/db/dashboard.db` 与 `logs/` 由程序/运维创建，不需要从仓库带过去。
@@ -496,6 +506,15 @@ node v2/jobs/collect-http-errors.mjs --from-start # 忽略位点从头读（仅�
   ```
 
 ### 运行方式（二选一）
+
+首次启动面板前先构建；构建可在服务机、CI 或本地用同一源码版本完成，`dist` 与 `shared` 必须随代码一起部署：
+
+```bash
+npm --prefix frontend ci
+npm --prefix frontend run build
+test -f frontend/dist/index.html
+test -f shared/settings-defaults.json
+```
 
 **A. 常驻 runner（推荐）**：一个进程管两个采集任务，余额对齐整点 +10 秒，站点日志每 1 小时。
 

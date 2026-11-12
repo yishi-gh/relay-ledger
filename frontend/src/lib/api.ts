@@ -1,8 +1,4 @@
-import type { ChannelRowData } from "@/components/channels-rank-view"
-import type { GroupRowData } from "@/components/groups-rank-view"
-import type { UpstreamAccount } from "@/components/upstreams-view"
-import type { QualityData } from "@/components/quality-view"
-import type { UserRowData } from "@/components/table-utils"
+import type { ChannelRowData, GroupRowData, QualityData, UpstreamAccount, UserRowData } from "./api-types"
 import type { CollectorStatus } from "./settings"
 import { beijingDayStart, DAY_MS, getRangeGranularity, HOUR_MS, validateCustomRange } from "./time-range"
 
@@ -222,13 +218,8 @@ export class ApiError extends Error {
 }
 
 export function getApiBaseUrl(): string {
-  if (typeof window !== "undefined") {
-    const port = window.location.port
-    if (port === "5173" || port === "5178") {
-      return "http://127.0.0.1:8788"
-    }
-    return window.location.origin
-  }
+  // 浏览器始终同源：开发与预览由 Vite 把 /api 代理到后端，生产由站点自身反代。
+  if (typeof window !== "undefined") return window.location.origin
   return "http://127.0.0.1:8788"
 }
 
@@ -666,74 +657,6 @@ export function getMockModels(): ModelsPayload {
       available: false,
       partial_fields: [],
     },
-  }
-}
-
-export function getMockCapital(range: DateRange): CapitalPayload {
-  const accounts: CapitalAccount[] = [
-    {
-      account_id: "acc-anthropic",
-      name: "Anthropic Direct",
-      balance: 1250.0,
-      cost_range: 168.3,
-      credits_range: 500.0,
-      daily_avg_7d: 24.04,
-      runway_days: 52.0,
-      status: "ok",
-    },
-    {
-      account_id: "acc-openai",
-      name: "OpenAI Platform",
-      balance: 84.5,
-      cost_range: 98.5,
-      credits_range: 0,
-      daily_avg_7d: 14.07,
-      runway_days: 6.0,
-      status: "ok",
-    },
-    {
-      account_id: "acc-aws",
-      name: "AWS Bedrock",
-      balance: 18.2,
-      cost_range: 42.1,
-      credits_range: 0,
-      daily_avg_7d: 6.01,
-      runway_days: 3.0,
-      status: "ok",
-    },
-    {
-      account_id: "acc-deepseek",
-      name: "DeepSeek API",
-      balance: 4.8,
-      cost_range: 45.1,
-      credits_range: 100.0,
-      daily_avg_7d: 6.44,
-      runway_days: 0.7,
-      status: "ok",
-    },
-    {
-      account_id: "acc-openrouter",
-      name: "OpenRouter Backup",
-      balance: null,
-      cost_range: null,
-      credits_range: null,
-      daily_avg_7d: null,
-      runway_days: null,
-      status: "missing_balance",
-    },
-  ]
-  return {
-    accounts,
-    total: {
-      balance: 1357.5,
-      cost_range: 354.0,
-      credits_range: 600.0,
-      daily_avg_7d: 50.56,
-      runway_days: 26.8,
-      accounts_counted: 4,
-    },
-    range,
-    generated_at: Date.now(),
   }
 }
 

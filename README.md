@@ -28,7 +28,7 @@
 - 充值取累计计数器：NewAPI 用 `quota + used_quota`、Sub2API 用 `total_recharged` 的区间差值，与消耗无关，不会把「充值 5 消耗 2.5」算成成本 0。
 - 缺失即缺失：没有快照、没有日志、算出负成本时返回空值并标注原因，界面显示 `—`，不补零、不插值、不借相邻小时。
 - 覆盖度可见：上游账户与渠道行标出「完整 / 部分 / 缺快照 / 无成本源」，区间合计只要缺一个桶就不求和，同时给出 `11/24` 这类覆盖度。
-- 前端零构建：无 npm 依赖、无打包步骤，Node 内置 `node:sqlite`，克隆下来直接跑；静态资源总量约 1.9 MB。
+- 前端使用 React、shadcn/ui、Tailwind CSS 与 Recharts，由 Vite 构建；后端使用 Node 内置 `node:sqlite`。
 - 部署简单：一个看板进程、一个采集进程、一个登录进程，配 `instance.json` 与 `accounts.json` 两份配置即可。
 
 ## 快速开始
@@ -36,7 +36,7 @@
 ### 环境要求
 
 - Node.js **≥ 22.13**（`node:sqlite` 从该版本起可用且不再需要 `--experimental-sqlite`）。
-- 无第三方 npm 依赖，`npm install` 不需要执行；前端零构建，没有构建产物。
+- 构建前端需要 npm；按 `frontend/package-lock.json` 安装依赖，构建产物为 `frontend/dist/`。
 - 接入真实数据时另需其一：与 NewAPI 同机的 `one-api.db` 读权限，或一个中转站管理员令牌（PAT）。
 
 ### 安装
@@ -44,6 +44,8 @@
 ```bash
 cd relay-ledger
 node --version    # 应不低于 v22.13.0
+npm --prefix frontend ci
+npm --prefix frontend run build
 ```
 
 ### 运行
@@ -53,15 +55,21 @@ cp instance.example.json instance.json
 node v2/server.mjs --port=8788
 ```
 
-打开 <http://127.0.0.1:8788>。空库也能查看：页面正常渲染，金额与比率列显示 `—`，`/api/healthz` 返回 `{"ok":true}`。如果启动提示源库不存在，说明中转站日志库还没生成，按「基础用法」跑一次采集即可。看板只监听 `127.0.0.1`，对外访问请按 [部署指南](docs/DEPLOY.md) 在 nginx 后面加登录。
+打开 <http://127.0.0.1:8788/>，根路径提供新版前端，站点名称从 `/api/meta` 的实例配置读取。日志副本库缺失且没有可回退的业务库时，服务会创建空副本库并提示；未采集的成本与比率显示 `—`，`/api/healthz` 返回 `{"ok":true}`；按「基础用法」接入数据。缺少 `frontend/dist/index.html` 时页面会明确提示先构建。看板只监听 `127.0.0.1`，对外访问请按 [部署指南](docs/DEPLOY.md) 在 nginx 后面加登录。
+
+`frontend/dist/` 已被 gitignore，不提交版本库；发布时应从同一代码版本构建并携带产物，同时保留运行必需的 `shared/settings-defaults.json`。旧静态源码暂时保留，默认入口使用新版。开发代理与本地预览见 [前端说明](frontend/README.md)。
 
 ### 跑测试
 
 ```bash
 node --test v2/test/*.test.mjs
+npm --prefix frontend run typecheck
+npm --prefix frontend run lint
+npm --prefix frontend test
+npm --prefix frontend run build
 ```
 
-必须带 glob：`node --test v2/test` 会把目录当文件读而报错。全部是临时库与注入 fetch，不连真实站点、不写生产数据。
+后端测试必须带 glob：`node --test v2/test` 会把目录当文件读而报错；测试使用临时库与注入 fetch，不连真实站点、不写生产数据。
 
 ## 使用
 
@@ -91,7 +99,7 @@ node v2/server.mjs --port=8788
 
 ### 进阶用法
 
-- **采集参数**：`run-scheduler.mjs --once`（各跑一次后退出，退出码 0/1）、`--no-logs`（只采余额）、`--spend-interval-ms=<n>`、`--logs-interval-ms=<n>`、`--no-prune`（不跑每日清理）。
+- **采集参数**：`run-scheduler.mjs --once`（各跑一次后退出，退出码 0/1）、`--no-logs`（关闭站点日志采集）、`--spend-interval-ms=<n>`、`--logs-interval-ms=<n>`、`--no-prune`（不跑每日清理）、`--no-http-errors`（关闭 nginx 错误码聚合）。错误码聚合默认读取 `/var/log/nginx/access.log`，运行用户须有文件读权限与父目录遍历权限，日志轮转后也需保持；不接入时用 `--no-http-errors`。
 - **日志采集参数**：`collect-site-logs.mjs --source=db|http`、`--db-file=<path>`、`--days=<n>`（空库回看天数）、`--chunk-days=<n>`（HTTP 分片长度）、`--timeout-ms=<n>`、`--since=<ISO8601>`（指定回补起点）、`--dry-run`（只读不写）。
 - **面板参数**：`server.mjs --port=<n>`、`--host=<addr>`；端口也可用环境变量 `PORT`，主机用 `HOST`。
 - **登录服务**：`panel-auth.mjs --port=8790`，密码与会话密钥用 `PANEL_PASSWORD_FILE`、`PANEL_SESSION_SECRET_FILE` 指向文件。
@@ -165,6 +173,7 @@ node v2/server.mjs --port=8788
 | `RELAY_LEDGER_INSTANCE` | 指定 `instance.json` 路径（systemd 与 cron 用它） |
 | `PORT` / `HOST` | 面板监听端口与地址，`--port` / `--host` 优先 |
 | `PANEL_PASSWORD_FILE` / `PANEL_SESSION_SECRET_FILE` | 登录服务的密码文件与会话签名密钥文件 |
+| `API_CACHE_TTL_MS` | 面板业务 API 进程内缓存时长（毫秒，默认 60000，`0` 关闭） |
 | `WARMUP=0` | 关闭面板启动时的首屏预热查询 |
 
 ### 凭据与隐私
@@ -177,18 +186,20 @@ node v2/server.mjs --port=8788
 
 ```text
 relay-ledger/
+├── frontend/              React / TypeScript 前端，Vite 构建到 dist/（gitignore）
+├── shared/                前后端共享默认设置，运行时必须保留
 ├── v2/
 │   ├── server.mjs         面板 HTTP 服务（JSON API + 静态页）
 │   ├── lib/               查询聚合、账本计算、实例配置、北京时间分桶
 │   ├── store/             站点日志库与看板库的读写
 │   ├── jobs/              采集任务、常驻调度、保留期清理与归档
 │   ├── sources/upstream/  上游适配（NewAPI / Sub2API / 渠道 key）
-│   ├── web/               前端页面（零构建，Tabler + ECharts）
+│   ├── web/               暂保留的旧静态源码，非默认发布入口
 │   ├── tools/             面板登录服务、浏览器采集导入
 │   ├── deploy/            systemd / nginx / cron 模板
 │   └── test/              node:test 用例
 ├── docs/                  设计、口径、决策、部署、上游配置
-├── web/vendor/            ECharts（仓库内文件）
+├── web/vendor/            旧页面图表依赖（暂保留）
 ├── data/                  运行时数据（gitignore）
 └── instance.example.json  实例配置模板
 ```
@@ -214,7 +225,7 @@ flowchart LR
   SUM --> UI[看板页面]
 ```
 
-采集与展示是两条独立链路：售出可以事后回补（日志还在），成本不能回补（余额只有当下）。Node 内置 `node:http` + `node:sqlite`，前端只用仓库内的 CSS 与图表库，无构建链。
+采集与展示是两条独立链路：售出可以事后回补（日志还在），成本不能回补（余额只有当下）。后端使用 Node 内置 `node:http` + `node:sqlite`，同源提供 JSON API 与 `frontend/dist/`；前端使用 React / TypeScript / Vite，开发与预览通过 `/api` 代理连接后端。
 
 ## API
 
@@ -233,6 +244,8 @@ flowchart LR
 
 时间参数为毫秒时间戳，缺省走默认区间（最近 7 个北京自然日）；错误统一为 `{"error":{"code":"...","message":"..."}}`。
 
+完整的 19 个接口路径、参数与缓存规则见 [接口契约](v2/CONTRACT.md)，包括用户、模型、资金、错误、健康状态、路由、运行时设置、服务状态与站点图标。
+
 **术语**：`site` 是历史命名——`instance.json` 的 `site`、`db/sites/<site.id>.db`、`/api/meta` 里的 `site` 都指你部署的这个中转站；`/api/profit` 返回的 `sites[]` 是上游账户，不是中转站。
 
 ```bash
@@ -246,7 +259,7 @@ curl -s "http://127.0.0.1:8788/api/profit?granularity=day"
 
 **渠道名字为空。** 源库 `logs.channel_name` 允许为 NULL，采集器会用 `channels.name` 回填。回填后仍为空，说明该渠道已从 `channels` 表删除，只剩历史日志。
 
-**首次打开页面要 2 秒以上。** 首访要下载约 1.9 MB 静态资源（其中图表库 1.1 MB）。确认 nginx 已开 gzip，且包含 `gzip_proxied any`，否则压缩不生效，等于白传。
+**页面提示前端尚未构建。** 在仓库根执行 `npm --prefix frontend ci` 与 `npm --prefix frontend run build`，并确认服务部署目录含同版本的 `frontend/dist/`。首访缓慢时检查 nginx 压缩、静态资源请求与后端查询耗时；资源体积以当次构建输出为准。
 
 **登录后立刻被打回登录页。** `auth_request` 子请求不会继承原请求的 Cookie，nginx 的 `/verify` 必须显式写 `proxy_set_header Cookie $http_cookie;`，模板已包含。
 
@@ -266,5 +279,5 @@ curl -s "http://127.0.0.1:8788/api/profit?granularity=day"
 ## 致谢
 
 - 借鉴 [New API](https://github.com/QuantumNous/new-api) 与 [one-api](https://github.com/songquanpeng/one-api) 的日志与渠道数据结构，售出口径与它们保持一致。
-- 图表使用 [Apache ECharts](https://echarts.apache.org/)（Apache-2.0），界面组件取自 [Tabler](https://tabler.io/)（MIT），两者均以本地文件形式随仓库分发。
+- 新版前端使用 [React](https://react.dev/)、[shadcn/ui](https://ui.shadcn.com/)、[Base UI](https://base-ui.com/)、[Tailwind CSS](https://tailwindcss.com/)、[Recharts](https://recharts.org/) 与 [Vite](https://vite.dev/)（均为 MIT）；图标使用 [Lucide](https://lucide.dev/)（ISC），字体通过 Fontsource 随构建分发，保留其各自许可证。暂保留的旧页面使用 Apache ECharts（Apache-2.0）与 Tabler（MIT）。
 - 感谢所有提交问题、提供真实运行数据用于核对口径的贡献者。

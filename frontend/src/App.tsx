@@ -416,7 +416,7 @@ export function App() {
         }
       >
         <AppSidebar
-          siteName={meta?.site_name || meta?.site || "Madfu"}
+          siteName={meta?.site_name || meta?.site || "Relay Ledger"}
           currentView={currentView}
           onSelectView={navigate}
         />

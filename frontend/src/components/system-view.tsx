@@ -49,8 +49,7 @@ import {
 } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useSettings } from "@/lib/settings"
-import type { QualityData } from "@/components/quality-view"
-import type { UpstreamAccount } from "@/components/upstreams-view"
+import type { QualityData, UpstreamAccount } from "@/lib/api-types"
 
 export interface SystemViewProps {
   quality?: QualityData

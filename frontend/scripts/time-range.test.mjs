@@ -45,7 +45,7 @@ function profitFixture(range, granularity) {
 }
 
 /** 编译并执行真实 TS 模块；仅隔离 UI 组件与 React hooks，不复制业务实现。 */
-function runtime({ stored = {}, defaultRange, href = "http://localhost/?view=overview", metaMaxT = MAX_T } = {}) {
+function runtime({ stored = {}, defaultRange, href = "http://localhost/?view=overview", metaMaxT = MAX_T, entry = "src/App.tsx", exportName = "App", props = {} } = {}) {
   let now = NOW
   const storage = new Map(Object.entries(stored))
   const storageReads = new Map()
@@ -128,6 +128,17 @@ function runtime({ stored = {}, defaultRange, href = "http://localhost/?view=ove
       const range = { from: Number(url.searchParams.get("from")), to: Number(url.searchParams.get("to")) }
       if (url.pathname === "/api/overview") await held.get(range.from)?.promise
       if (failures.has(url.pathname)) return Response.json({ error: { message: `fixture ${url.pathname}` } }, { status: 503 })
+      if (url.pathname === "/api/status") {
+        return Response.json({
+          from: Number(url.searchParams.get("from")),
+          to: Number(url.searchParams.get("to")),
+          level: url.searchParams.get("level"),
+          bucket: url.searchParams.get("bucket"),
+          components: [],
+          overall: { requests: 0, errors: 0, uptime: null },
+          coverage: { errors_since: null, errors_available: false },
+        })
+      }
       const granularity = url.searchParams.get("granularity") ?? "hour"
       const bodies = {
         "/api/overview": { range, revenue: 1000, requests: 500, tokens: { total: 900 }, cache_rate: 0.4 },
@@ -161,6 +172,7 @@ function runtime({ stored = {}, defaultRange, href = "http://localhost/?view=ove
       if (name === "react") return react
       if (name === "react/jsx-runtime") return { jsx, jsxs: jsx, Fragment: "Fragment" }
       if (name === "lucide-react" || name.startsWith("@/components/")) return ui
+      if (name === "cn") return { cn: (...values) => values.filter(Boolean).join(" ") }
       const target = name.startsWith("@/") ? resolve(root, "src", name.slice(2)) : resolve(dirname(file), name)
       return load(target.endsWith(".json") ? target : `${target}.ts`)
     }
@@ -168,14 +180,15 @@ function runtime({ stored = {}, defaultRange, href = "http://localhost/?view=ove
     return module.exports
   }
   function render() {
-    const { App } = load("src/App.tsx")
+    const Component = load(entry)[exportName]
+    assert.equal(typeof Component, "function", `找不到入口组件 ${exportName}`)
     let runs = 0
     do {
       assert.ok(++runs < 20, "App 不应发生无限重渲染")
       dirty = false
       hookIndex = 0
       effects = []
-      tree = App()
+      tree = Component(props)
       for (const effect of effects) effect()
     } while (dirty)
     return tree
@@ -416,4 +429,33 @@ test("损坏的自定义记忆只发送 24h 请求，错误在 App 可见", asyn
   assert.equal(r.find("TopBar").timeRange, "24h")
   assert.match(r.find("AlertDescription").children, /已恢复近 24 小时/)
   assert.equal(r.find("OverviewView").profitData.to, MAX_T)
+})
+
+test("HealthView 直接使用 computeRange 的窗口，24h/7d 不再重锚起点", async () => {
+  const api = runtime().load("src/lib/api.ts")
+  const cases = [
+    { name: "24h 整点", type: "24h", maxT: Date.parse("2026-11-10T15:00:00Z"), bucket: "15m" },
+    { name: "24h 非整点", type: "24h", maxT: Date.parse("2026-11-10T15:30:00Z"), bucket: "15m" },
+    { name: "7d 北京 00:00", type: "7d", maxT: Date.parse("2026-11-10T16:00:00Z"), bucket: "1h" },
+    { name: "7d 北京 14:37", type: "7d", maxT: Date.parse("2026-11-10T06:37:00Z"), bucket: "1h" },
+    { name: "today", type: "today", bucket: "15m" },
+    { name: "自定义 36h 内", type: "custom", custom: { from: NOW - 36 * HOUR, to: NOW }, bucket: "15m" },
+    { name: "自定义 36h 外", type: "custom", custom: { from: NOW - 3 * DAY, to: NOW }, bucket: "1h" },
+  ]
+
+  for (const item of cases) {
+    const dateRange = api.computeRange({ max_t: item.maxT ?? MAX_T, rows: 1 }, item.type, item.custom, NOW)
+    const r = runtime({
+      entry: "src/components/health-view.tsx",
+      exportName: "HealthView",
+      props: { timeRange: item.type, dateRange },
+    })
+    r.render()
+    await r.settle()
+    const request = r.requests.filter(({ url }) => url.pathname === "/api/status").at(-1)
+    assert.ok(request, `${item.name} 应请求 /api/status`)
+    assert.equal(Number(request.url.searchParams.get("from")), dateRange.from, `${item.name} from`)
+    assert.equal(Number(request.url.searchParams.get("to")), dateRange.to, `${item.name} to`)
+    assert.equal(request.url.searchParams.get("bucket"), item.bucket, `${item.name} bucket`)
+  }
 })

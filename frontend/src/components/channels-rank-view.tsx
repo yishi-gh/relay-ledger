@@ -5,36 +5,10 @@ import { DollarSign, Radio, TrendingUp, ChevronRight, Inbox } from "lucide-react
 import { formatCurrency, formatPercent } from "@/lib/formatters"
 import { getDeterministicChartColor } from "@/components/table-utils"
 import { cn } from "@/lib/utils"
+import type { ChannelRowData } from "@/lib/api-types"
 import type { RangeType } from "@/lib/api"
 
-export interface ChannelRowData {
-  channel_id: number
-  channel_name: string
-  revenue: number
-  quota?: number
-  tokens?: number
-  tokens_total?: number
-  requests?: number
-  cache_rate?: number
-  latency_p50?: number
-  p50?: number
-  latency_p95?: number
-  p95?: number
-  tps?: number
-  last_t?: number | null
-  top_model?: {
-    model: string
-    revenue: number
-    tokens: number
-    per_1e8: number
-  } | null
-  upstream_account?: string | null
-  margin_status?: string
-  archive_only?: boolean
-  margin?: number | null
-  margin_pct?: number | null
-  status?: string
-}
+export type { ChannelRowData } from "@/lib/api-types"
 
 interface ChannelsRankViewProps {
   timeRange: RangeType

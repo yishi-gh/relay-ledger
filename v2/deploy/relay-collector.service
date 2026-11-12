@@ -11,7 +11,7 @@
 #
 # 需要按实际环境替换的占位：
 #   - User / Group    运行用户（占位值 relay-ledger，需先创建用户与数据目录）
-#   - /opt/relay-ledger   项目根目录（该目录下应有 v2/ 与 web/vendor/）
+#   - /opt/relay-ledger   项目根目录（该目录下应有 v2/ 与 shared/）
 #   - /usr/bin/node       `command -v node` 的结果，Node 必须 >= 22.13
 #
 # 前置：

@@ -19,6 +19,8 @@ import {
   Inbox,
 } from "lucide-react"
 import {
+  formatBeijingClock,
+  formatBeijingDate,
   formatCurrency,
   formatNumber,
   formatPercent,
@@ -42,9 +44,8 @@ import {
 import { ColPicker, type ColumnItem } from "@/components/col-picker"
 import { HealthView } from "@/components/health-view"
 import { SiteLogo } from "@/components/site-logo"
+import type { ChannelRowData, GroupRowData } from "@/lib/api-types"
 import type { DateRange, RangeType } from "@/lib/api"
-import type { ChannelRowData } from "@/components/channels-rank-view"
-import type { GroupRowData } from "@/components/groups-rank-view"
 import { cn } from "@/lib/utils"
 
 export type DetailLevel = "channel" | "group"
@@ -156,10 +157,8 @@ const GROUP_ACCESSORS: AccessorMap<GroupRowData> = {
 /** 格式化紧凑时间：日期在上、时间在下，节省水平宽度 */
 function formatTwoLineTime(ms: number | null | undefined): React.ReactNode {
   if (!ms) return <span className="text-muted-foreground">—</span>
-  const d = new Date(ms + 8 * 3600_000)
-  const pad = (n: number) => String(n).padStart(2, "0")
-  const dateStr = `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
-  const timeStr = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
+  const dateStr = formatBeijingDate(ms)
+  const timeStr = formatBeijingClock(ms)
   return (
     <div className="flex flex-col items-start leading-[14px] text-right">
       <span className="text-[12px] text-muted-foreground font-mono">{dateStr}</span>
@@ -936,7 +935,7 @@ export function DetailsView({
         </CardContent>
       </Card>
 
-      {/* 3. 明细卡片下方：对应维度的健康卡（内嵌模式：紧凑 overall 3 指标 + 96/168 状态矩阵，自然展开） */}
+      {/* 3. 明细卡片下方：对应维度的健康卡，状态矩阵与统计使用所选时间范围。 */}
       <HealthView
         timeRange={timeRange}
         dateRange={dateRange ?? null}

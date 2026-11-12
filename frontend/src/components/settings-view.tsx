@@ -21,7 +21,7 @@ import {
   SlidersHorizontal,
   Info,
 } from "lucide-react"
-import { formatRawNumber } from "@/lib/formatters"
+import { formatBeijingClock, formatRawNumber } from "@/lib/formatters"
 import { useTheme } from "@/components/theme-provider"
 import {
   useSettings,
@@ -975,7 +975,7 @@ export function SettingsView({ meta }: SettingsViewProps) {
               </span>
               <span>·</span>
               {collector?.updatedAt ? (
-                <span>最后心跳: {new Date(collector.updatedAt).toLocaleTimeString("zh-CN", { hour12: false })}</span>
+                <span>最后心跳: {formatBeijingClock(collector.updatedAt, true)}</span>
               ) : (
                 <span>暂无心跳</span>
               )}
@@ -1081,8 +1081,8 @@ export function SettingsView({ meta }: SettingsViewProps) {
               <div className="flex items-center gap-1.5 text-muted-foreground text-[12px]">
                 <Globe className="size-3.5" />站点名称
               </div>
-              <span className="text-[14px] font-medium text-foreground mt-1 truncate capitalize" title={meta?.site_name || meta?.site || "Madfu"}>
-                {meta?.site_name || meta?.site || "Madfu"}
+              <span className="text-[14px] font-medium text-foreground mt-1 truncate capitalize" title={meta?.site_name || meta?.site || "Relay Ledger"}>
+                {meta?.site_name || meta?.site || "Relay Ledger"}
               </span>
             </div>
             <div className="rounded-lg bg-muted/30 p-3 flex flex-col">

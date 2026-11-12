@@ -61,12 +61,19 @@ function parseMs(value, name) {
   return n;
 }
 
-/** 从 query string 解析 from/to，缺省用默认范围；from > to 视为参数错误 */
+/** 从 query string 解析 from/to：两者都缺省用默认范围；显式出现任一参数则必须成对且非空 */
 export function parseRange(searchParams, maxT) {
-  const fallback = defaultRange(maxT);
-  const from = parseMs(searchParams.get('from'), 'from');
-  const to = parseMs(searchParams.get('to'), 'to');
-  const range = { from: from ?? fallback.from, to: to ?? fallback.to };
+  const fromRaw = searchParams.get('from');
+  const toRaw = searchParams.get('to');
+  if (fromRaw === null && toRaw === null) return defaultRange(maxT);
+  if (fromRaw === null || toRaw === null
+    || fromRaw.trim() === '' || toRaw.trim() === '') {
+    throw new RangeError('from 和 to 必须成对提供，且不能为空');
+  }
+  const range = {
+    from: parseMs(fromRaw, 'from'),
+    to: parseMs(toRaw, 'to'),
+  };
   if (range.from > range.to) throw new RangeError('from 不能大于 to');
   return range;
 }

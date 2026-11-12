@@ -122,19 +122,3 @@ export function loadConfig(file, { writable = false } = {}) {
     accounts,
   };
 }
-
-/**
- * 渠道 -> 上游账户 id 列表（共用渠道会有多个）。
- * 停用账户仍参与归属：它的渠道可能还在卖，售出要记到它名下而不是「未配置上游」。
- */
-export function channelOwners(config) {
-  const map = new Map();
-  for (const account of config.accounts) {
-    for (const channelId of account.channels) {
-      const list = map.get(channelId) ?? [];
-      if (!list.includes(account.id)) list.push(account.id);
-      map.set(channelId, list);
-    }
-  }
-  return map;
-}

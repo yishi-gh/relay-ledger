@@ -254,9 +254,14 @@ test('services：显式 from/to 使用精确区间，span≤36h 15m、>36h 1h', 
   assert.equal(legacy.services[0].buckets.length, 96);
   const week = await (await fetch(`${base}/api/services?range=7d`)).json();
   assert.equal(week.services[0].buckets.length, 168);
+  assert.equal((await fetch(`${base}/api/services?from=0&to=86400000`)).status, 200);
 
   for (const query of [
     `from=${from}`,
+    'from=%20&to=86400000',
+    'from=%09&to=86400000',
+    'from=0&to=%20',
+    'from=%20&to=%09',
     `from=${from}&to=${to}&range=24h`,
     `from=${to}&to=${from}`,
     `from=${fx.now - 32 * DAY_MS}&to=${fx.now}`,
@@ -268,4 +273,135 @@ test('services：显式 from/to 使用精确区间，span≤36h 15m、>36h 1h', 
   const head = await fetch(`${base}/api/services?from=${from}&to=${to}`, { method: 'HEAD' });
   assert.equal(head.status, 200);
   assert.equal(await head.text(), '');
+});
+
+// ---------------------------------------------------------------------------
+// from/to 成对校验（业务 API + HTTP）
+// ---------------------------------------------------------------------------
+
+const RANGE_FROM = Date.UTC(2026, 10, 10, 10, 0, 0);
+const RANGE_TO = RANGE_FROM + 2 * HOUR;
+const FUTURE_FROM = Date.UTC(2099, 0, 1, 0, 0, 0);
+const FUTURE_TO = FUTURE_FROM + 2 * HOUR;
+const DEFAULT_TO = RANGE_FROM + HOUR;
+const DEFAULT_FROM = beijingDayStart(DEFAULT_TO) - 6 * DAY_MS;
+const PAIR_ERROR = /from 和 to 必须成对提供/;
+
+test('业务 API：from/to 必须成对，from=0、相等与未来范围保持合法', () => {
+  const fx = setup({ rows: [{ tMs: RANGE_FROM + HOUR, cost: 1 }] });
+  try {
+    const rangeOf = (query) => fx.api.overview(new URLSearchParams(query)).range;
+
+    const fallback = rangeOf('');
+    assert.deepEqual(
+      fallback,
+      { from: DEFAULT_FROM, to: DEFAULT_TO },
+      '无参数使用源库 max_t 对应的北京 7 日默认范围',
+    );
+    assert.deepEqual(rangeOf(`from=${RANGE_FROM}&to=${RANGE_TO}`), { from: RANGE_FROM, to: RANGE_TO });
+    assert.deepEqual(rangeOf('from=0&to=86400000'), { from: 0, to: 86400000 });
+    assert.deepEqual(rangeOf('from=0&to=0'), { from: 0, to: 0 });
+    assert.deepEqual(rangeOf(`from=${RANGE_TO}&to=${RANGE_TO}`), { from: RANGE_TO, to: RANGE_TO });
+    assert.deepEqual(
+      rangeOf(`from=${FUTURE_FROM}&to=${FUTURE_TO}`),
+      { from: FUTURE_FROM, to: FUTURE_TO },
+      '2099 未来时间不额外拒绝',
+    );
+
+    for (const query of [
+      `from=${RANGE_FROM}`,
+      `to=${RANGE_TO}`,
+      `from=&to=${RANGE_TO}`,
+      `from=${RANGE_FROM}&to=`,
+      'from=&to=',
+      `from=%20&to=${RANGE_TO}`,
+      `from=${RANGE_FROM}&to=%09`,
+      'from=%20&to=%09',
+    ]) {
+      assert.throws(
+        () => fx.api.overview(new URLSearchParams(query)),
+        (err) => err instanceof RangeError && PAIR_ERROR.test(err.message),
+        query,
+      );
+    }
+    assert.throws(
+      () => fx.api.overview(new URLSearchParams(`from=${RANGE_TO}&to=${RANGE_FROM}`)),
+      /from 不能大于 to/,
+      'from > to 的原规则不变',
+    );
+  } finally {
+    fx.close();
+  }
+});
+
+test('HTTP /api/overview：默认与成对范围 200，单边/空白 400，HEAD 错误无正文', async (t) => {
+  const fx = setup({ rows: [{ tMs: RANGE_FROM + HOUR, cost: 1 }] });
+  const server = http.createServer(createRequestHandler({
+    api: fx.api,
+    cache: createApiCache({ ttlMs: 0 }),
+    settingsStore: null,
+  }));
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    await new Promise((resolve) => {
+      server.close(resolve);
+      server.closeAllConnections();
+    });
+    fx.close();
+  });
+
+  for (const query of [
+    '',
+    `?from=${RANGE_FROM}&to=${RANGE_TO}`,
+    '?from=0&to=86400000',
+    '?from=0&to=0',
+    `?from=${FUTURE_FROM}&to=${FUTURE_TO}`,
+  ]) {
+    const res = await fetch(`${base}/api/overview${query}`);
+    assert.equal(res.status, 200, query || '(default)');
+    const body = await res.json();
+    if (query) {
+      assert.equal(body.range.from, Number(new URLSearchParams(query).get('from')), query);
+      assert.equal(body.range.to, Number(new URLSearchParams(query).get('to')), query);
+    } else {
+      assert.deepEqual(body.range, { from: DEFAULT_FROM, to: DEFAULT_TO }, '默认范围取源库 max_t');
+    }
+  }
+
+  for (const query of [
+    `?from=${RANGE_FROM}`,
+    `?to=${RANGE_TO}`,
+    `?from=&to=${RANGE_TO}`,
+    `?from=${RANGE_FROM}&to=`,
+    '?from=&to=',
+    `?from=%20&to=${RANGE_TO}`,
+    `?from=${RANGE_FROM}&to=%09`,
+    '?from=%20&to=%09',
+  ]) {
+    const res = await fetch(`${base}/api/overview${query}`);
+    assert.equal(res.status, 400, query);
+    assert.equal(res.headers.get('content-type'), 'application/json; charset=utf-8');
+    const body = await res.json();
+    assert.equal(body.error.code, 'bad_request', query);
+    assert.match(body.error.message, PAIR_ERROR, query);
+
+    const head = await fetch(`${base}/api/overview${query}`, { method: 'HEAD' });
+    assert.equal(head.status, 400, query);
+    assert.equal(await head.text(), '', query);
+  }
+
+  for (const [query, message] of [
+    [`?from=1.5&to=${RANGE_TO}`, /from 必须是整数毫秒时间戳/],
+    [`?from=${RANGE_TO}&to=${RANGE_FROM}`, /from 不能大于 to/],
+  ]) {
+    const res = await fetch(`${base}/api/overview${query}`);
+    assert.equal(res.status, 400, query);
+    const body = await res.json();
+    assert.equal(body.error.code, 'bad_request', query);
+    assert.match(body.error.message, message, query);
+  }
 });

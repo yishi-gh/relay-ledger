@@ -33,9 +33,10 @@ import {
 } from "@/lib/formatters"
 import { formatTokenCn } from "@/components/table-utils"
 import { getPreferences } from "@/lib/settings"
+import type { ChannelRowData, QualityData, TrafficChartPoint } from "@/lib/api-types"
 import type { ProfitData, RangeType } from "@/lib/api"
-import type { ChannelRowData } from "@/components/channels-rank-view"
-import type { QualityData } from "@/components/quality-view"
+
+export type { TrafficChartPoint } from "@/lib/api-types"
 
 export interface KpiData {
   revenue: number | null
@@ -58,14 +59,6 @@ export interface ActiveSite {
 }
 
 export type TrendChartItem = Record<string, string | number | null | undefined>
-
-export type TrafficChartPoint = {
-  label: string
-  fullLabel: string
-  requests: number | null
-  tokens: number | null
-  cacheRate: number | null
-}
 
 function MetricTrend({ values, label, color }: { values: (number | null)[]; label: string; color: string }) {
   const valid = values.filter((value): value is number => value != null && Number.isFinite(value))

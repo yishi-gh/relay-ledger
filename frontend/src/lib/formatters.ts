@@ -41,21 +41,48 @@ export function formatTokens(value: number | null | undefined, fallback = "—")
 }
 
 export function formatTimestamp(ms: number | null | undefined): string {
-  if (!ms) return "—"
-  const d = new Date(ms)
-  const pad = (n: number) => String(n).padStart(2, "0")
-  const year = d.getFullYear()
-  const month = pad(d.getMonth() + 1)
-  const day = pad(d.getDate())
-  const hour = pad(d.getHours())
-  const min = pad(d.getMinutes())
-  return `${year}-${month}-${day} ${hour}:${min}`
+  return formatBeijingTime(ms)
 }
 
 // 表格里列宽紧张：年份对「最近请求」没有信息量，省掉可少 5 个字符。
 export function formatTimestampShort(ms: number | null | undefined): string {
   if (!ms) return "—"
-  const d = new Date(ms)
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return formatBeijingShort(ms)
+}
+
+// 中国无夏令时，统一按固定 +08:00 读取，避免依赖浏览器或 Node 的本地时区。
+const BEIJING_OFFSET_MS = 8 * 3600_000
+
+function beijingDate(ms: number): Date {
+  return new Date(ms + BEIJING_OFFSET_MS)
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0")
+}
+
+/** 北京时间 YYYY-MM-DD HH:mm，空值保持 —。 */
+export function formatBeijingTime(ms: number | null | undefined): string {
+  if (!ms) return "—"
+  const d = beijingDate(ms)
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`
+}
+
+/** 北京时间 MM-DD HH:mm，用于紧凑说明。 */
+export function formatBeijingShort(ms: number): string {
+  const d = beijingDate(ms)
+  return `${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`
+}
+
+/** 北京时间 MM-DD，供两行紧凑布局的日期行复用。 */
+export function formatBeijingDate(ms: number): string {
+  const d = beijingDate(ms)
+  return `${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`
+}
+
+/** 北京时间 HH:mm，可选 HH:mm:ss；showSeconds 默认 false，保持既有调用输出。 */
+export function formatBeijingClock(ms: number, showSeconds = false): string {
+  const d = beijingDate(ms)
+  const clock = `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`
+  return showSeconds ? `${clock}:${pad2(d.getUTCSeconds())}` : clock
 }

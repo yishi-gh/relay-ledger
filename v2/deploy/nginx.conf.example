@@ -56,9 +56,10 @@ server {
     ssl_session_timeout 1d;
 
     # ------------------------------------------------------------------ gzip
-    # 首访约 1.9 MB 静态资源（含 1.1 MB 图表库）。少了下面任一项都会白传：
+    # 构建后的页面资源（/assets/*.js、*.css 等）走同一代理，压缩可减少传输：
     #   - gzip_proxied any：面板响应来自 proxy_pass，缺了它 nginx 不压缩上游响应
-    #   - gzip_types 里的 text/javascript / application/javascript：app.js 靠它压缩
+    #   - gzip_types 里的 text/javascript / application/javascript：构建后的 JS 靠它压缩
+    # 实际传输体积以当次构建产物为准。
     gzip on;
     gzip_vary on;
     gzip_proxied any;
