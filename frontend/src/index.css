@@ -187,3 +187,153 @@
     );
   }
 }
+
+/* 高度由应用壳逐层分配；表格只在自身视口内滚动。 */
+@media (min-width: 768px) {
+  html, body, #root {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .dashboard-workspace {
+    container: dashboard-workspace / size;
+  }
+
+  .dashboard-table > [data-slot="table-container"] {
+    height: 100%;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .dashboard-settings {
+    scroll-padding-block: 16px 112px;
+    scrollbar-gutter: stable;
+  }
+
+  .dashboard-settings > section:last-child {
+    margin-bottom: 16px;
+  }
+
+  .dashboard-routes .route-detail > * {
+    flex-shrink: 0;
+  }
+
+  .dashboard-quality .quality-panels > [data-slot="card"] {
+    gap: 0;
+  }
+
+  .dashboard-quality .quality-panels > [data-slot="card"] ul {
+    min-height: 0;
+  }
+}
+
+@media (min-width: 1024px) {
+  .overview-funding {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+
+  .overview-funding > [data-slot="card"]:first-child > [data-slot="card-content"] {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* 窄桌面下总览保留完整卡片，滚动限定在工作区。 */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .dashboard-overview {
+    overflow-y: auto;
+  }
+
+  .dashboard-overview .overview-charts {
+    flex: none;
+    grid-template-rows: repeat(2, 280px);
+  }
+}
+
+@media (min-width: 768px) and (max-height: 719px) {
+  .dashboard-main {
+    padding: 12px;
+  }
+
+  .dashboard-view:not(.dashboard-details):not(.dashboard-routes),
+  .dashboard-overview > section,
+  .profit-panels,
+  .quality-panels {
+    gap: 12px;
+  }
+
+  .dashboard-panel {
+    padding: 12px;
+  }
+
+  .dashboard-routes .route-canvas {
+    padding: 0;
+  }
+}
+
+/* 按扣除顶栏和告警后的实际工作区高度兜底。 */
+@container dashboard-workspace (max-height: 600px) {
+  .dashboard-overview {
+    overflow-y: auto;
+  }
+
+  .dashboard-overview .overview-charts {
+    flex: none;
+    grid-auto-rows: 260px;
+    grid-template-rows: none;
+  }
+}
+
+@container dashboard-workspace (max-height: 520px) {
+  .dashboard-flow-fallback:not(.dashboard-profit) {
+    overflow-y: auto;
+  }
+
+  .dashboard-quality .quality-panels {
+    flex: none;
+    grid-template-rows: repeat(2, 200px);
+  }
+
+  .dashboard-system .service-panel {
+    flex: none;
+    height: 280px;
+  }
+
+  .dashboard-routes .route-canvas {
+    flex: none;
+    height: 260px;
+  }
+
+  .dashboard-routes .route-detail {
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+@container dashboard-workspace (max-height: 360px) {
+  .dashboard-details,
+  .dashboard-upstreams {
+    overflow-y: auto;
+  }
+
+  .dashboard-details > [data-slot="detail-card"],
+  .dashboard-details > .health-panel {
+    flex: none;
+    height: 220px;
+  }
+
+  .dashboard-upstreams > [data-slot="detail-card"] {
+    flex: none;
+    height: 280px;
+  }
+}
+
+@container dashboard-workspace (max-height: 300px) {
+  .dashboard-view {
+    overflow-y: auto;
+  }
+
+  .dashboard-view > [data-slot="card"] {
+    flex-shrink: 0;
+    min-height: 220px;
+  }
+}

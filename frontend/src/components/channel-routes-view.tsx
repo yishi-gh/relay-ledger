@@ -686,7 +686,7 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
   )
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto pr-1">
+    <div className="dashboard-view dashboard-routes dashboard-flow-fallback flex-1 min-h-0 min-w-0 flex flex-col gap-2 md:overflow-hidden">
       {/* 1. 紧凑单行顶栏：状态说明、筛选与操作控件合并，极大释放垂直空间 */}
       <div className="rounded-lg border border-border/80 bg-muted/20 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 shrink-0 text-sm">
         <div className="flex items-center gap-2 flex-wrap min-w-0">
@@ -786,7 +786,7 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
 
       {/* 初始加载状态（不画空白画布） */}
       {loading && !data && (
-        <div className="rounded-lg border border-border bg-card p-12 text-center text-muted-foreground text-[13px] flex flex-col items-center justify-center gap-2">
+        <div className="rounded-lg border border-border bg-card p-12 text-center text-muted-foreground text-[13px] flex flex-col items-center justify-center gap-2 md:flex-1 md:min-h-0 md:overflow-auto">
           <RefreshCw className="size-5 animate-spin text-muted-foreground" />
           <span>加载快照中…</span>
         </div>
@@ -794,7 +794,7 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
 
       {/* 初始请求网络失败 */}
       {fetchError && !data && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6 flex flex-col items-center justify-center gap-2 text-destructive text-[13px]">
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6 flex flex-col items-center justify-center gap-2 text-destructive text-[13px] md:flex-1 md:min-h-0 md:overflow-auto">
           <div className="flex items-center gap-2">
             <AlertTriangle className="size-5 shrink-0" />
             <span>获取拓扑快照失败：{fetchError}</span>
@@ -807,7 +807,7 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
 
       {/* 尚未采集到快照 / 首次同步失败 */}
       {data && !data.available && (
-        <div className="rounded-lg border border-border bg-muted/30 p-8 text-center text-muted-foreground text-[13px] flex flex-col items-center justify-center gap-1.5">
+        <div className="rounded-lg border border-border bg-muted/30 p-8 text-center text-muted-foreground text-[13px] flex flex-col items-center justify-center gap-1.5 md:flex-1 md:min-h-0 md:overflow-auto">
           <Info className="size-5 text-muted-foreground shrink-0" />
           <span className="font-medium text-foreground">尚无可用快照</span>
           <span>{data.error ? `同步异常：${data.error}` : "等待首次同步"}</span>
@@ -819,7 +819,7 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
 
       {/* 合法空渠道状态 */}
       {data?.available && data.channels.length === 0 && (
-        <div className="rounded-lg border border-border bg-muted/20 p-8 text-center text-muted-foreground text-[13px]">
+        <div className="rounded-lg border border-border bg-muted/20 p-8 text-center text-muted-foreground text-[13px] md:flex-1 md:min-h-0 md:overflow-auto">
           暂无已配置渠道
         </div>
       )}
@@ -849,10 +849,10 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
       {data?.available && data.channels.length > 0 && (
         <>
           {/* 2. 4 层拓扑画布 */}
-          <Card className="shadow-xs overflow-hidden flex flex-col min-w-0 flex-1 gap-0">
+          <Card className="dashboard-panel route-canvas shadow-xs overflow-hidden flex flex-col min-w-0 md:min-h-0 md:flex-1 gap-0 py-0">
             <div
               ref={setScrollportEl}
-              className="relative w-full overflow-x-auto overflow-y-auto flex-1 select-none p-2"
+              className="relative w-full overflow-auto flex-1 min-h-0 select-none p-2 max-md:h-[480px] max-md:flex-none"
               onClick={() => {
                 if (pinnedChannelId !== null) {
                   setPinnedChannelId(null)
@@ -1019,7 +1019,7 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
 
           {/* 3. 选中渠道详情卡片 */}
           {selectedChannel && (
-            <Card className="shadow-xs p-3.5 shrink-0 gap-2.5 border-primary/40 bg-card">
+            <Card className="dashboard-panel route-detail shadow-xs p-3.5 shrink-0 gap-2.5 border-primary/40 bg-card md:max-h-[45%] md:min-h-0 md:overflow-y-auto">
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-2">
                   <SiteLogo kind="channel" id={selectedChannel.id} label={selectedChannel.name} size={18} />

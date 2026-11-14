@@ -416,7 +416,7 @@ export function SettingsView({ meta }: SettingsViewProps) {
   }, [collector, isStaleHeartbeat, isPendingRevision])
 
   return (
-    <div className="flex-1 min-h-0 min-w-0 flex flex-col gap-6 overflow-y-auto px-1 pb-4 sm:px-4">
+    <div className="dashboard-settings flex-1 min-h-0 min-w-0 flex flex-col gap-6 md:overflow-y-auto px-1 pb-4 sm:px-4">
       {/* 顶部全局提示 / 错误条 */}
       {error && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3.5 py-2.5 flex items-start gap-2.5 shrink-0 text-destructive text-[13px] leading-[18px]">
@@ -987,7 +987,7 @@ export function SettingsView({ meta }: SettingsViewProps) {
 
       {/* 服务端设置持久化操作栏 (Dirty / Conflict 状态控制) */}
       {(isServerDirty || hasConflict || serverSaveError || serverSuccessNotice || formValidationError) && (
-        <div className="sticky bottom-0 z-10 mx-auto w-full max-w-[880px] rounded-lg border border-border bg-card/95 p-3 shadow-sm backdrop-blur-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+        <div className="settings-save-bar order-last sticky bottom-0 z-10 mx-auto w-full max-w-[880px] rounded-lg border border-border bg-card/95 p-3 shadow-sm backdrop-blur-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
           <div className="flex-1 min-w-0">
             {hasConflict ? (
               <div className="flex items-center gap-2 text-destructive text-[13px] leading-[18px]">

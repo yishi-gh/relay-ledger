@@ -350,11 +350,11 @@ export function ProfitView({
   }
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
+    <div className="dashboard-view dashboard-profit dashboard-flow-fallback flex-1 min-h-0 min-w-0 flex flex-col gap-4 md:overflow-hidden">
       {/* 趋势与账户核算上下排列，桌面表内滚动。 */}
-      <div className="grid grid-cols-1 gap-4 items-stretch xl:grid-rows-[minmax(360px,2fr)_minmax(260px,3fr)] xl:flex-1 xl:min-h-[640px]">
+      <div className="profit-panels grid grid-cols-1 gap-4 items-stretch md:grid-rows-[minmax(0,2fr)_minmax(0,3fr)] md:flex-1 md:min-h-0">
         {/* 上方：盈利趋势 */}
-        <Card className="col-span-1 h-full max-xl:h-auto shadow-xs overflow-hidden flex flex-col justify-between min-w-0 p-4">
+        <Card className="dashboard-panel col-span-1 md:h-full md:min-h-0 shadow-xs overflow-hidden flex flex-col justify-between min-w-0 p-4">
           <CardHeader className="p-0 pb-2.5 shrink-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               盈利趋势
@@ -362,7 +362,7 @@ export function ProfitView({
           </CardHeader>
 
           <CardContent className="p-0 flex-1 flex flex-col min-h-0 w-full py-1.5">
-            <div className="h-[220px] xl:h-auto xl:flex-1 xl:min-h-[250px] w-full min-w-0">
+            <div className="h-[220px] md:h-auto md:flex-1 md:min-h-0 w-full min-w-0">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart
                   data={profitChartData}
@@ -504,8 +504,8 @@ export function ProfitView({
         </Card>
 
         {/* 下方：账户核算 */}
-        <Card className="col-span-1 h-full max-xl:h-auto shadow-xs overflow-hidden flex flex-col min-w-0 p-4">
-          <CardHeader className="p-0 pb-2.5 flex flex-row items-center justify-between space-y-0">
+        <Card className="dashboard-panel col-span-1 md:h-full md:min-h-0 shadow-xs overflow-hidden flex flex-col min-w-0 p-4">
+          <CardHeader className="p-0 pb-2.5 flex flex-row items-center justify-between space-y-0 shrink-0">
             <div>
               <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
                 账户核算
@@ -517,7 +517,7 @@ export function ProfitView({
           </CardHeader>
 
           <CardContent className="p-0 flex-1 flex flex-col min-h-0">
-            <div className="flex-1 min-h-[280px] xl:min-h-0 overflow-auto rounded-lg border border-border">
+            <div className="dashboard-table flex-1 min-h-[280px] md:min-h-0 overflow-hidden rounded-lg border border-border">
               <Table data-slot="profit-table" className="w-full min-w-[856px] table-fixed sm:min-w-[920px]">
                 <colgroup>
                   <col />
@@ -528,7 +528,7 @@ export function ProfitView({
                   <col style={{ width: "104px" }} />
                   <col style={{ width: "136px" }} />
                 </colgroup>
-                <TableHeader className="bg-muted/40">
+                <TableHeader className="bg-muted sticky top-0 z-20">
                   <TableRow>
                     {[
                       { key: "name", label: "账户", align: "left", className: "sticky left-0 bg-muted z-10 border-r border-border/60" },

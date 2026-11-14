@@ -356,7 +356,7 @@ export function UpstreamsView({ timeRange, accounts, capital, profitSites, quali
   const tableMinWidth = visibleCols.reduce((sum, column) => sum + UPSTREAMS_COL_PIXELS[column.key], 0)
 
   return (
-    <div className="flex-1 min-h-0 min-w-0 flex flex-col gap-4 overflow-y-auto pr-1">
+    <div className="dashboard-view dashboard-upstreams flex-1 min-h-0 min-w-0 flex flex-col gap-4 md:overflow-hidden">
       {/* 顶部 4 张 KPI 卡（等高） */}
       <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5 shrink-0 [&>[data-slot=card]]:min-w-0">
         <Card className="shadow-xs gap-0 p-3.5 flex flex-col">
@@ -430,7 +430,7 @@ export function UpstreamsView({ timeRange, accounts, capital, profitSites, quali
       {/* 下方表卡 */}
       <Card
         data-slot="detail-card"
-        className="shadow-xs overflow-hidden flex flex-col min-w-0 p-4 flex-1 min-h-0"
+        className="dashboard-panel shadow-xs overflow-hidden flex flex-col min-w-0 p-4 md:flex-1 md:min-h-0"
       >
         <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0 gap-3 flex-wrap">
           <div className="flex items-center gap-2.5 flex-wrap">
@@ -489,9 +489,9 @@ export function UpstreamsView({ timeRange, accounts, capital, profitSites, quali
           </div>
         </CardHeader>
 
-        <CardContent className="p-0 flex flex-col flex-1 min-h-0">
+        <CardContent className="p-0 flex flex-col md:flex-1 md:min-h-0">
           <div
-            className="rounded-lg border border-border bg-card overflow-hidden flex-1 min-h-[300px] lg:min-h-0"
+            className="dashboard-table rounded-lg border border-border bg-card overflow-hidden md:flex-1 min-h-[300px] md:min-h-0"
           >
             <Table className="table-fixed text-sm [--name-column-width:136px] sm:[--name-column-width:210px]" style={{ minWidth: `calc(${tableMinWidth - UPSTREAMS_COL_PIXELS.account}px + var(--name-column-width))` }}>
               <colgroup>

@@ -37,18 +37,18 @@ export function QualityView({
   }, [accounts])
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
+    <div className="dashboard-view dashboard-quality dashboard-flow-fallback flex-1 min-h-0 min-w-0 flex flex-col gap-4 md:overflow-hidden">
       {/* 基础状态卡片：采用 2x2 自适应栅格，确保采集失败与缺快照账户在桌面与移动端均能完整读出原因与列表 */}
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4 shrink-0">
+      <section className="quality-panels grid grid-cols-1 md:grid-cols-2 gap-4 shrink-0 md:flex-1 md:min-h-0 md:grid-rows-[repeat(2,minmax(0,1fr))] [&>[data-slot=card]]:min-h-0">
         {/* 1. 数据库与模式状态 */}
-        <Card className="shadow-xs p-4 flex flex-col justify-between">
-          <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0">
+        <Card className="dashboard-panel shadow-xs p-4 flex flex-col justify-between">
+          <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               数据源
             </CardTitle>
             <Database className="size-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent className="p-0 flex-1 flex flex-col justify-between gap-3">
+          <CardContent className="p-0 flex-1 min-h-0 flex flex-col justify-between gap-3 md:overflow-y-auto">
             <div className="flex items-center gap-2">
               <Badge
                 variant="outline"
@@ -91,8 +91,8 @@ export function QualityView({
         <FreshnessCard accounts={accounts} />
 
         {/* 3. 采集错误告警 */}
-        <Card className="shadow-xs p-4 flex flex-col justify-between">
-          <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0">
+        <Card className="dashboard-panel shadow-xs p-4 flex flex-col justify-between">
+          <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0">
             <div className="flex items-center gap-2">
               <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
                 采集异常
@@ -105,7 +105,7 @@ export function QualityView({
             </div>
             <AlertTriangle className="size-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent className="p-0 flex-1 flex flex-col justify-between gap-2">
+          <CardContent className="p-0 flex-1 min-h-0 flex flex-col justify-between gap-2">
             {errors.length === 0 ? (
               <div className="flex flex-col justify-center flex-1 py-4 text-center">
                 <span className="text-[14px] leading-[20px] font-medium text-foreground">
@@ -113,7 +113,7 @@ export function QualityView({
                 </span>
               </div>
             ) : (
-              <ul className="flex flex-col gap-1.5 max-h-[140px] overflow-y-auto pr-1">
+              <ul className="flex flex-col gap-1.5 max-h-[140px] md:max-h-none md:flex-1 md:min-h-0 overflow-y-auto pr-1">
                 {errors.map((err, idx) => (
                   <li
                     key={idx}
@@ -134,8 +134,8 @@ export function QualityView({
         </Card>
 
         {/* 4. 缺快照账户 */}
-        <Card className="shadow-xs p-4 flex flex-col justify-between">
-          <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0">
+        <Card className="dashboard-panel shadow-xs p-4 flex flex-col justify-between">
+          <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0">
             <div className="flex items-center justify-between w-full">
               <div className="flex items-center gap-2">
                 <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
@@ -165,7 +165,7 @@ export function QualityView({
                   暂无缺快照记录
                 </div>
               ) : (
-                <div className="flex flex-wrap gap-1.5 overflow-y-auto max-h-[90px] p-0.5">
+                <div className="flex flex-wrap content-start gap-1.5 overflow-y-auto max-h-[90px] md:max-h-none md:flex-1 md:min-h-0 p-0.5">
                   {unavailableAccounts.map((acc) => (
                     <Badge
                       key={acc.id}

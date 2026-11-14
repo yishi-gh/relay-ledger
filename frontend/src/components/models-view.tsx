@@ -189,10 +189,9 @@ export function ModelsView({
 
   const visibleCols = ALL_COLUMNS.filter((c) => visibleKeys.includes(c.key))
   const tableMinWidth = visibleCols.reduce((sum, column) => sum + COL_PIXELS[column.key], 0)
-  const isScrollable = sortedRows.length > 10
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
+    <div className="dashboard-view flex-1 min-h-0 min-w-0 flex flex-col gap-4 md:overflow-hidden">
       {/* 1. 顶部 4 张 KPI 卡片 */}
       <section className="grid grid-cols-2 md:grid-cols-4 gap-3.5 shrink-0">
         <Card className="shadow-xs min-w-0 gap-0 p-3.5 flex flex-col">
@@ -239,10 +238,7 @@ export function ModelsView({
       {/* 2. 下方整幅表 */}
       <Card
         data-slot="detail-card"
-        className={cn(
-          "shadow-xs overflow-hidden flex flex-col min-w-0 p-4",
-          isScrollable ? "lg:flex-1 lg:min-h-0" : "h-fit"
-        )}
+        className="dashboard-panel shadow-xs overflow-hidden flex flex-col min-w-0 p-4 md:flex-1 md:min-h-0"
       >
         <CardHeader className="p-0 pb-2.5 flex flex-row items-center justify-between space-y-0 shrink-0">
           <div className="flex items-center gap-2">
@@ -263,9 +259,9 @@ export function ModelsView({
           </div>
         </CardHeader>
 
-        <CardContent className={cn("p-0 flex flex-col", isScrollable ? "lg:flex-1 lg:min-h-0" : "")}>
+        <CardContent className="p-0 flex flex-col md:flex-1 md:min-h-0">
           {notReady ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center border border-dashed border-border rounded-lg bg-muted/20">
+            <div className="flex flex-col items-center justify-center py-16 md:py-4 md:flex-1 md:min-h-0 md:overflow-auto text-center border border-dashed border-border rounded-lg bg-muted/20">
               <AlertCircle className="size-8 text-muted-foreground mb-2" />
               <span className="text-[14px] leading-[20px] font-medium text-foreground">
                 模型数据暂不可用
@@ -274,11 +270,7 @@ export function ModelsView({
             </div>
           ) : (
             <div
-              data-slot="table-container"
-              className={cn(
-                "rounded-lg border border-border bg-card overflow-x-auto",
-                isScrollable ? "lg:flex-1 lg:min-h-0 lg:overflow-auto" : ""
-              )}
+              className="dashboard-table rounded-lg border border-border bg-card overflow-hidden md:flex-1 md:min-h-0"
             >
               <Table className="table-fixed text-sm [--name-column-width:144px] sm:[--name-column-width:260px]" style={{ minWidth: `calc(${tableMinWidth - COL_PIXELS.model}px + var(--name-column-width))` }}>
                 <colgroup>

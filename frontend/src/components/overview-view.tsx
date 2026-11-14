@@ -120,11 +120,11 @@ export function OverviewView({
   const leadingShare = leadingChannel && channelRevenue > 0 ? leadingChannel.revenue! / channelRevenue : null
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto pr-1">
+    <div className="dashboard-view dashboard-overview dashboard-flow-fallback flex-1 min-h-0 min-w-0 flex flex-col gap-4 md:overflow-hidden">
       {/* 1. KPI 分层：主卡 + 3 张辅卡 (紧凑行, shrink-0) */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4 items-stretch shrink-0">
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-stretch shrink-0">
         {/* 主卡：本站售出 */}
-        <Card className="col-span-1 sm:col-span-2 xl:col-span-2 h-auto xl:h-full gap-0 py-0 shadow-xs flex flex-col">
+        <Card className="col-span-1 sm:col-span-2 lg:col-span-2 h-auto lg:h-full gap-0 py-0 shadow-xs flex flex-col">
           <CardHeader className="px-3.5 pt-3.5 pb-0 flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-[14px] leading-[20px] font-normal text-muted-foreground">
               本站售出
@@ -248,7 +248,7 @@ export function OverviewView({
         </Card>
 
         {/* 辅卡 3: 缓存率 */}
-        <Card data-slot="kpi-aux-card" className="col-span-1 sm:col-span-2 xl:col-span-1 h-auto xl:h-full gap-0 py-0 shadow-xs flex flex-col">
+        <Card data-slot="kpi-aux-card" className="col-span-1 sm:col-span-2 lg:col-span-1 h-auto lg:h-full gap-0 py-0 shadow-xs flex flex-col">
           <CardHeader className="px-3.5 pt-3.5 pb-0 flex flex-row items-center justify-between space-y-0">
             <div className="flex items-center gap-1">
               <CardTitle className="text-[14px] leading-[20px] font-normal text-muted-foreground">
@@ -276,17 +276,17 @@ export function OverviewView({
       </section>
 
       {/* 2. 趋势双卡：桌面 xl 并排保留售出图更宽 (1.6 : 1)，小屏与窄视口自适应上下堆叠 */}
-      <section className="grid grid-cols-1 xl:grid-cols-[1.6fr_1fr] gap-4 items-stretch flex-1 min-h-max">
+      <section className="overview-charts grid grid-cols-1 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-4 items-stretch md:flex-1 md:min-h-0 md:grid-rows-[repeat(2,minmax(0,1fr))] lg:grid-rows-[minmax(0,1fr)]">
         {/* 左卡：售出结构 (1.6fr) */}
-        <Card className="col-span-1 shadow-xs overflow-hidden flex flex-col min-w-0 p-4 gap-0 min-h-[350px]">
+        <Card className="dashboard-panel col-span-1 shadow-xs overflow-hidden flex flex-col min-w-0 p-4 gap-0 min-h-[350px] md:min-h-0">
           <CardHeader className="p-0 pb-2 shrink-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               售出结构
             </CardTitle>
           </CardHeader>
 
-          <CardContent className="p-0 pb-2 flex-1 min-h-[220px] flex flex-col w-full">
-            <div className="w-full min-w-0 h-[220px] sm:h-[240px] xl:h-[250px] flex-1 min-h-[200px]">
+          <CardContent className="p-0 pb-2 flex-1 min-h-[220px] md:min-h-0 flex flex-col w-full">
+            <div className="w-full min-w-0 h-[220px] sm:h-[240px] md:h-auto flex-1 min-h-[200px] md:min-h-0">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart
                   data={trendChartData}
@@ -380,7 +380,7 @@ export function OverviewView({
             </CardContent>
 
           {/* 图例在卡底：形如「● 站名  $12.34」并按金额降序 */}
-          <div className="pt-2.5 mt-auto border-t border-border/60 shrink-0">
+          <div className="pt-2.5 mt-auto border-t border-border/60 shrink-0 md:max-h-20 md:overflow-y-auto">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] leading-[16px] text-muted-foreground">
               {activeSites.map((site) => (
                 <div key={site.account_id} className="flex items-center gap-2">
@@ -401,15 +401,15 @@ export function OverviewView({
         </Card>
 
         {/* 右卡：调用流量 (1fr) */}
-        <Card className="col-span-1 shadow-xs overflow-hidden flex flex-col min-w-0 p-4 gap-0 min-h-[350px]">
+        <Card className="dashboard-panel col-span-1 shadow-xs overflow-hidden flex flex-col min-w-0 p-4 gap-0 min-h-[350px] md:min-h-0">
           <CardHeader className="p-0 pb-2 shrink-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
               调用流量
             </CardTitle>
           </CardHeader>
 
-          <CardContent className="p-0 pb-2 flex-1 min-h-[220px] flex flex-col w-full">
-            <div className="w-full min-w-0 h-[220px] sm:h-[240px] xl:h-[250px] flex-1 min-h-[200px]">
+          <CardContent className="p-0 pb-2 flex-1 min-h-[220px] md:min-h-0 flex flex-col w-full">
+            <div className="w-full min-w-0 h-[220px] sm:h-[240px] md:h-auto flex-1 min-h-[200px] md:min-h-0">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart
                   data={trafficChartData}
@@ -550,7 +550,7 @@ export function OverviewView({
         </Card>
       </section>
 
-      <FundingStrip capital={capital} accounts={accounts} />
+      <FundingStrip capital={capital} accounts={accounts} className="overview-funding" />
       <section className="grid shrink-0 grid-cols-1 gap-4 md:grid-cols-2">
         <Card className="min-w-0 gap-2 p-4 shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between p-0">

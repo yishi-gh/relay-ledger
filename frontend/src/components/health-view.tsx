@@ -195,8 +195,8 @@ export function HealthView({
     const healthTableMinPx = matrixColWidthPx + 155 + 72 + 65 + 60 + 80
 
     return (
-      <div className="flex min-w-0 max-w-full flex-col gap-2">
-        <div className="rounded-lg border border-border bg-card overflow-hidden [&_[data-slot=table-container]]:h-[clamp(180px,calc((100dvh-320px)/2),420px)] [&_[data-slot=table-container]]:overflow-y-auto max-md:[&_[data-slot=table-container]]:h-auto max-md:[&_[data-slot=table-container]]:max-h-none">
+      <div className="flex min-w-0 max-w-full flex-col gap-2 md:flex-1 md:min-h-0">
+        <div className="dashboard-table rounded-lg border border-border bg-card overflow-hidden md:flex-1 md:min-h-0">
           <Table className="table-fixed text-sm" style={{ width: "100%", minWidth: `${healthTableMinPx}px` }}>
             <colgroup>
               <col style={{ width: "155px" }} />
@@ -396,7 +396,7 @@ export function HealthView({
         </div>
 
         {/* 状态图例与口径说明 */}
-        <div className="flex items-center justify-between text-[12px] leading-[16px] text-muted-foreground flex-wrap gap-2 pt-1 px-0.5">
+        <div className="flex shrink-0 items-center justify-between text-[12px] leading-[16px] text-muted-foreground flex-wrap gap-2 pt-1 px-0.5">
           <div className="flex items-center gap-3.5 flex-wrap">
             <span className="font-medium text-foreground">状态图例：</span>
             {LEGEND.map((state) => (
@@ -424,7 +424,7 @@ export function HealthView({
   // 嵌入模式：作为卡片挂在明细下方，卡头含整体 3 指标紧凑摘要，无独立 3 大卡，自然纵向展开
   if (embedded) {
     return (
-      <Card className="shadow-xs overflow-hidden flex min-w-0 flex-col p-3 pb-2.5 gap-0 shrink-0">
+      <Card className="dashboard-panel health-panel shadow-xs overflow-hidden flex min-w-0 flex-col p-3 pb-2.5 gap-0 shrink-0 md:flex-1 md:min-h-0 md:basis-0">
         <CardHeader className="p-0 pb-1.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 space-y-0 shrink-0 flex-wrap">
           <div className="flex items-center gap-2.5 flex-wrap">
             <CardTitle className="text-[15px] leading-[22px] font-medium text-foreground">
@@ -479,7 +479,7 @@ export function HealthView({
           </div>
         </CardHeader>
 
-        <CardContent className="p-0 flex flex-col">
+        <CardContent className="p-0 flex flex-col md:flex-1 md:min-h-0">
           {renderTableContent()}
         </CardContent>
       </Card>
@@ -488,7 +488,7 @@ export function HealthView({
 
   // 独立健康页模式：顶部 3 张独立 KPI 卡 + 主表卡
   return (
-    <div className="flex-1 min-h-0 min-w-0 flex flex-col gap-4 overflow-y-auto pr-1">
+    <div className="dashboard-view flex-1 min-h-0 min-w-0 flex flex-col gap-4 md:overflow-hidden">
       {/* 1. 顶部 3 张 KPI：整体 uptime、总请求、总错误 */}
       <section className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 shrink-0">
         <Card className="shadow-xs gap-0 p-3.5 flex flex-col">
@@ -534,7 +534,7 @@ export function HealthView({
       </section>
 
       {/* 2. 主表：名称 + 每小时状态条 + uptime / 请求 / 错误 / Top 错误码 */}
-      <Card className="shadow-xs overflow-hidden flex flex-col min-w-0 p-3 pb-2.5">
+      <Card className="dashboard-panel shadow-xs overflow-hidden flex flex-col min-w-0 p-3 pb-2.5 md:flex-1 md:min-h-0">
         <CardHeader className="p-0 pb-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 space-y-0 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground whitespace-nowrap">
@@ -584,7 +584,7 @@ export function HealthView({
           </div>
         </CardHeader>
 
-        <CardContent className="p-0 flex flex-col">
+        <CardContent className="p-0 flex flex-col md:flex-1 md:min-h-0">
           {renderTableContent()}
         </CardContent>
       </Card>

@@ -235,9 +235,9 @@ export function SystemView({
   const currentCollector = servicesData?.collector ?? collector
 
   return (
-    <div className="flex-1 min-h-0 min-w-0 flex flex-col gap-4 overflow-y-auto pr-1">
+    <div className="dashboard-view dashboard-system dashboard-flow-fallback flex-1 min-h-0 min-w-0 flex flex-col gap-4 md:overflow-hidden">
       {/* 1. 后台任务服务健康概览卡片 (替代原静态 API 职责表) */}
-      <Card className="shadow-xs overflow-hidden flex min-w-0 flex-col p-4 shrink-0 gap-0">
+      <Card className="dashboard-panel service-panel shadow-xs overflow-hidden flex min-w-0 flex-col p-4 shrink-0 gap-0 md:flex-1 md:min-h-0">
         <CardHeader className="p-0 pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-0 shrink-0 gap-2">
           <div className="flex items-center gap-2.5 flex-wrap">
             <Server className="size-4 text-muted-foreground" />
@@ -312,8 +312,8 @@ export function SystemView({
           </div>
         )}
 
-        <CardContent className="p-0 flex flex-col">
-          <div className="rounded-lg border border-border bg-card overflow-hidden [&_[data-slot=table-container]]:max-h-[380px] [&_[data-slot=table-container]]:overflow-y-auto">
+        <CardContent className="p-0 flex flex-col md:flex-1 md:min-h-0">
+          <div className="dashboard-table rounded-lg border border-border bg-card overflow-hidden md:flex-1 md:min-h-0">
             <Table className="table-fixed text-sm" style={{ width: "100%", minWidth: `${servicesTableMinPx}px` }}>
               <colgroup>
                 <col style={{ width: "160px" }} />
@@ -439,7 +439,7 @@ export function SystemView({
           </div>
 
           {/* 状态图例 */}
-          <div className="flex items-center justify-between text-[12px] leading-[16px] text-muted-foreground flex-wrap gap-2 pt-2 px-1">
+          <div className="flex shrink-0 items-center justify-between text-[12px] leading-[16px] text-muted-foreground flex-wrap gap-2 pt-2 px-1">
             <div className="flex items-center gap-3.5 flex-wrap">
               <span className="font-medium text-foreground">状态图例：</span>
               {(["ok", "warn", "fail", "unknown", "none"] as const).map((st) => (
@@ -464,7 +464,7 @@ export function SystemView({
       </Card>
 
       {/* 2. 入口 Nginx HTTP 错误分时柱图 */}
-      <Card className="shadow-xs overflow-hidden flex flex-col p-4 shrink-0">
+      <Card className="dashboard-panel shadow-xs overflow-hidden flex flex-col p-4 shrink-0">
         <CardHeader className="p-0 pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-0 shrink-0 gap-2">
           <div className="flex items-center gap-2">
             <Activity className="size-4 text-muted-foreground" />
@@ -493,7 +493,7 @@ export function SystemView({
         )}
 
         <CardContent className="p-0 flex flex-col">
-          <div className="h-[220px] w-full min-w-0">
+          <div className="h-[220px] md:h-[clamp(160px,28dvh,220px)] w-full min-w-0">
             {errorsLoading && !errorsData ? (
               <div className="h-full flex items-center justify-center text-muted-foreground text-[13px]">
                 <RefreshCw className="size-4 animate-spin mr-2" />

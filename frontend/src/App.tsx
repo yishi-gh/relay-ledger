@@ -407,7 +407,7 @@ export function App() {
   return (
     <TooltipProvider>
       <SidebarProvider
-        className="min-h-screen lg:h-screen lg:max-h-screen lg:overflow-hidden"
+        className="min-h-dvh md:h-dvh md:max-h-dvh md:overflow-hidden"
         style={
           {
             "--sidebar-width": "10rem", // 160px
@@ -421,7 +421,7 @@ export function App() {
           onSelectView={navigate}
         />
 
-        <SidebarInset className="min-w-0 min-h-screen lg:h-screen lg:max-h-screen lg:overflow-hidden flex flex-col flex-1">
+        <SidebarInset className="min-w-0 min-h-dvh md:h-dvh md:max-h-dvh md:overflow-hidden flex flex-col flex-1 [&>header]:shrink-0">
           <TopBar
             title={VIEW_TITLES[currentView] || "Relay Ledger"}
             maxT={meta?.max_t ?? undefined}
@@ -433,7 +433,7 @@ export function App() {
             refreshing={loading}
           />
 
-          <main className="flex-1 min-h-0 lg:overflow-y-auto flex flex-col p-3.5 md:p-4 xl:p-4.5 min-w-0">
+          <main className="dashboard-main flex-1 min-h-0 md:overflow-hidden flex flex-col p-3.5 md:p-4 xl:p-4.5 min-w-0">
             {(rangeFailure || timeRangeError) && (
               <Alert variant="destructive" className="mb-4 shrink-0">
                 <AlertTriangle />
@@ -454,6 +454,7 @@ export function App() {
               </Alert>
             )}
 
+            <div className="dashboard-workspace flex-1 min-h-0 min-w-0 flex flex-col md:overflow-hidden">
             {!data && loadFailure ? (
               <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 text-center">
                 <AlertTriangle className="size-6 text-destructive" />
@@ -470,7 +471,7 @@ export function App() {
                     <Skeleton key={index} className="h-28 rounded-xl" />
                   ))}
                 </div>
-                <Skeleton className="flex-1 min-h-64 w-full rounded-xl" />
+                <Skeleton className="flex-1 min-h-64 md:min-h-0 w-full rounded-xl" />
               </div>
             ) : (
               <>
@@ -579,6 +580,7 @@ export function App() {
                 )}
               </>
             )}
+            </div>
           </main>
         </SidebarInset>
       </SidebarProvider>

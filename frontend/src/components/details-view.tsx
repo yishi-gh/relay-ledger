@@ -464,7 +464,7 @@ export function DetailsView({
   const pageTitle = fixedLevel === "channel" ? "渠道明细" : fixedLevel === "group" ? "分组明细" : "经营明细"
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto pr-1">
+    <div className="dashboard-view dashboard-details flex-1 min-h-0 min-w-0 flex flex-col gap-2 md:overflow-hidden">
       {/* 1. 顶部紧凑汇总指标行 */}
       <section className="grid grid-cols-2 md:grid-cols-4 gap-2 shrink-0">
         <Card className="shadow-xs min-w-0 gap-0 p-3.5 flex flex-col">
@@ -528,7 +528,7 @@ export function DetailsView({
       {/* 2. 统一明细大表卡片：显式 gap-0 清除卡片默认间距，使标题紧贴表头；行高 32px */}
       <Card
         data-slot="detail-card"
-        className="shadow-xs overflow-hidden flex flex-col min-w-0 p-3 pb-2.5 gap-0 shrink-0"
+        className="dashboard-panel shadow-xs overflow-hidden flex flex-col min-w-0 p-3 pb-2.5 gap-0 shrink-0 md:flex-1 md:min-h-0 md:basis-0"
       >
         <CardHeader className="p-0 pb-1.5 flex flex-row items-center justify-between space-y-0 shrink-0 gap-3 flex-wrap">
           <div className="flex items-center gap-2.5 flex-wrap">
@@ -578,8 +578,8 @@ export function DetailsView({
           </div>
         </CardHeader>
 
-        <CardContent className="p-0 flex flex-col">
-          <div className="rounded-lg border border-border bg-card overflow-hidden [&_[data-slot=table-container]]:h-[clamp(180px,calc((100dvh-320px)/2),420px)] [&_[data-slot=table-container]]:overflow-y-auto max-md:[&_[data-slot=table-container]]:h-auto max-md:[&_[data-slot=table-container]]:max-h-none">
+        <CardContent className="p-0 flex flex-col md:flex-1 md:min-h-0">
+          <div className="dashboard-table rounded-lg border border-border bg-card overflow-hidden md:flex-1 md:min-h-0">
             <Table className="table-fixed text-sm [--name-column-width:144px] sm:[--name-column-width:208px]" style={{ width: "100%", minWidth: `calc(${totalMinPx - 208}px + var(--name-column-width))` }}>
               <colgroup>
                 {visibleCols.map((col) => (
