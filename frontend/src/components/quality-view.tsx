@@ -13,11 +13,11 @@ import {
   QualityBadge,
   QualityEmptyState,
   QualityPanelHeader,
+  QualityStatusRow,
   type QualityTone,
 } from "@/components/quality-kit"
 import type { DateRange, RangeType } from "@/lib/api"
 import type { QualityData, UpstreamAccount } from "@/lib/api-types"
-import { cn } from "@/lib/utils"
 
 export type { CollectError, JobRun, QualityData } from "@/lib/api-types"
 
@@ -156,28 +156,13 @@ export function QualityView({
             ) : (
               <ul className="flex flex-col gap-1.5 max-h-[180px] md:max-h-none md:flex-1 md:min-h-0 overflow-y-auto pr-1">
                 {errors.map((err) => (
-                  <li
-                    key={err.key}
-                    className="flex gap-2 rounded-lg border border-border/60 bg-muted/20 p-2 text-[12px] leading-[16px]"
-                  >
-                    <span
-                      aria-hidden="true"
-                      className={cn(
-                        "mt-1.5 size-1.5 shrink-0 rounded-full",
-                        err.tone === "bad" ? "bg-rose-500" : "bg-amber-500"
-                      )}
+                  <li key={err.key}>
+                    <QualityStatusRow
+                      tone={err.tone}
+                      title={err.name}
+                      detail={err.reason}
+                      meta={formatTimestampShort(err.at)}
                     />
-                    <div className="min-w-0 flex-1 space-y-0.5">
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="min-w-0 break-words font-medium text-foreground" title={err.name}>
-                          {err.name}
-                        </span>
-                        <span className="shrink-0 font-mono text-[12px] leading-[16px] tabular-nums text-muted-foreground">
-                          {formatTimestampShort(err.at)}
-                        </span>
-                      </div>
-                      <p className="break-words text-muted-foreground">{err.reason}</p>
-                    </div>
                   </li>
                 ))}
               </ul>
@@ -216,15 +201,15 @@ export function QualityView({
                 detail="当前没有缺失快照的账户"
               />
             ) : (
-              <div className="flex max-h-[120px] flex-wrap content-start gap-1.5 overflow-y-auto p-0.5 md:max-h-none md:flex-1 md:min-h-0">
+              <div className="flex max-h-[240px] flex-col gap-1.5 overflow-y-auto pr-0.5 md:max-h-none md:flex-1 md:min-h-0">
                 {unavailableAccounts.map((acc) => (
-                  <span
+                  <QualityStatusRow
                     key={acc.id}
-                    className="max-w-full truncate rounded-md border border-border/60 bg-muted/20 px-2 py-1 text-[12px] leading-[16px] text-foreground"
+                    tone="warn"
                     title={acc.name || acc.id}
-                  >
-                    {acc.name || acc.id}
-                  </span>
+                    detail="缺少余额快照"
+                    meta={formatTimestampShort(acc.last_sync)}
+                  />
                 ))}
               </div>
             )}

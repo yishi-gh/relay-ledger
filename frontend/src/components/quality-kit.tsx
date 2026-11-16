@@ -13,6 +13,12 @@ const BADGE_TONES: Record<QualityTone, string> = {
   bad: "text-rose-600 dark:text-rose-400 border-rose-500/30 bg-rose-500/10",
   neutral: "text-muted-foreground border-border bg-muted/30",
 }
+const DOT_TONES: Record<QualityTone, string> = {
+  good: "bg-emerald-500",
+  warn: "bg-amber-500",
+  bad: "bg-rose-500",
+  neutral: "bg-muted-foreground/60",
+}
 
 export function QualityBadge({
   tone = "neutral",
@@ -66,6 +72,40 @@ export function QualityEmptyState({
       <Icon className="size-4 text-muted-foreground/60" />
       <span className="text-[14px] leading-[20px] font-medium text-foreground">{title}</span>
       {detail ? <span className="text-[12px] leading-[16px] text-muted-foreground">{detail}</span> : null}
+    </div>
+  )
+}
+
+export function QualityStatusRow({
+  tone = "neutral",
+  title,
+  detail,
+  meta,
+}: {
+  tone?: QualityTone
+  title: string
+  detail?: string
+  meta?: string
+}) {
+  return (
+    <div className="flex gap-2 rounded-lg border border-border/60 bg-muted/20 p-2 text-[12px] leading-[16px]">
+      <span
+        aria-hidden="true"
+        className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", DOT_TONES[tone])}
+      />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="flex items-start justify-between gap-2">
+          <span className="min-w-0 break-words font-medium text-foreground" title={title}>
+            {title}
+          </span>
+          {meta ? (
+            <span className="shrink-0 font-mono text-[12px] leading-[16px] tabular-nums text-muted-foreground">
+              {meta}
+            </span>
+          ) : null}
+        </div>
+        {detail ? <p className="break-words text-muted-foreground">{detail}</p> : null}
+      </div>
     </div>
   )
 }

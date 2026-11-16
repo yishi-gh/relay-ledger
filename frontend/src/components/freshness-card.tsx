@@ -2,9 +2,14 @@ import * as React from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { CheckCircle2, ChevronDown, Radio } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { formatBeijingClock } from "@/lib/formatters"
+import { formatBeijingClock, formatTimestampShort } from "@/lib/formatters"
 import { getServerSettings } from "@/lib/settings"
-import { QualityBadge, QualityEmptyState, QualityPanelHeader } from "@/components/quality-kit"
+import {
+  QualityBadge,
+  QualityEmptyState,
+  QualityPanelHeader,
+  QualityStatusRow,
+} from "@/components/quality-kit"
 
 export interface UpstreamLike {
   id?: string
@@ -49,7 +54,7 @@ export function FreshnessCard({ accounts = [], now, className }: FreshnessCardPr
       const last = typeof a.last_sync === "number" ? a.last_sync : null
       const diffMs = last ? clock - last : null
       const minutes = diffMs != null ? Math.max(0, Math.floor(diffMs / 60000)) : null
-      return { id: a.id, name: a.name || "未知账户", last, minutes }
+      return { id: a.id, name: a.name || a.id || "未知账户", last, minutes }
     })
     .filter((a) => a.last == null || (a.minutes != null && a.minutes > thresholds.warnMinutes))
     .sort((a, b) => {
@@ -74,7 +79,7 @@ export function FreshnessCard({ accounts = [], now, className }: FreshnessCardPr
         </QualityBadge>
       </QualityPanelHeader>
 
-      <CardContent className="p-0 flex-1 min-h-0 flex flex-col justify-between gap-2">
+      <CardContent className="p-0 flex-1 min-h-0 flex flex-col gap-2">
         {stale.length === 0 ? (
           <QualityEmptyState
             icon={CheckCircle2}
@@ -83,27 +88,21 @@ export function FreshnessCard({ accounts = [], now, className }: FreshnessCardPr
           />
         ) : (
           <>
-            <ul id="freshness-stale-list" className="flex min-w-0 flex-1 flex-col gap-1 overflow-y-auto pr-0.5">
+            <ul id="freshness-stale-list" className="flex max-h-[260px] min-w-0 flex-col gap-1.5 overflow-y-auto pr-0.5 md:max-h-[300px]">
               {visible.map((a) => (
-                <li
-                  key={a.id ?? a.name}
-                  className="flex items-center justify-between gap-2 text-[12px] leading-[16px] min-w-0"
-                >
-                  <span className="truncate text-muted-foreground" title={a.name}>
-                    {a.name}
-                  </span>
-                  <span
-                    className={cn(
-                      "font-mono tabular-nums shrink-0",
+                <li key={a.id ?? a.name}>
+                  <QualityStatusRow
+                    tone={
                       freshnessTone(a.minutes, thresholds) === "bad"
-                        ? "text-destructive font-semibold"
+                        ? "bad"
                         : freshnessTone(a.minutes, thresholds) === "warn"
-                          ? "text-[var(--chart-3)]"
-                          : "text-muted-foreground"
-                    )}
-                  >
-                    {formatFreshnessText(a.minutes)}
-                  </span>
+                          ? "warn"
+                          : "neutral"
+                    }
+                    title={a.name}
+                    detail={formatFreshnessText(a.minutes)}
+                    meta={a.last != null ? formatTimestampShort(a.last) : "—"}
+                  />
                 </li>
               ))}
             </ul>
@@ -124,7 +123,7 @@ export function FreshnessCard({ accounts = [], now, className }: FreshnessCardPr
           </>
         )}
 
-        <div className="text-[12px] leading-[16px] text-muted-foreground border-t border-border/60 pt-2 shrink-0">
+        <div className="mt-auto text-[12px] leading-[16px] text-muted-foreground border-t border-border/60 pt-2 shrink-0">
           上游账户共 {accounts.length} 个 · 阈值 {thresholds.warnMinutes} 分钟
         </div>
       </CardContent>
