@@ -88,7 +88,7 @@ export function QualityStatusRow({
   meta?: string
 }) {
   return (
-    <div className="flex gap-2 rounded-lg border border-border/60 bg-muted/20 p-2 text-[12px] leading-[16px]">
+    <div className="flex gap-2 rounded-lg border border-border/60 bg-muted/20 px-2 py-1.5 text-[12px] leading-[16px]">
       <span
         aria-hidden="true"
         className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", DOT_TONES[tone])}
