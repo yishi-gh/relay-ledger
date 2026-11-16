@@ -1,12 +1,13 @@
 import * as React from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Radio } from "lucide-react"
+import { Card, CardContent } from "@/components/ui/card"
+import { CheckCircle2, ChevronDown, Radio } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatBeijingClock } from "@/lib/formatters"
 import { getServerSettings } from "@/lib/settings"
+import { QualityBadge, QualityEmptyState, QualityPanelHeader } from "@/components/quality-kit"
 
 export interface UpstreamLike {
+  id?: string
   name?: string
   last_sync?: number | null
 }
@@ -39,6 +40,7 @@ function formatFreshnessText(minutes: number | null): string {
 
 export function FreshnessCard({ accounts = [], now, className }: FreshnessCardProps) {
   const [clockFallback] = React.useState(() => Date.now())
+  const [expanded, setExpanded] = React.useState(false)
   const clock = now ?? clockFallback
   const thresholds = getServerSettings().monitoring.freshness
 
@@ -47,7 +49,7 @@ export function FreshnessCard({ accounts = [], now, className }: FreshnessCardPr
       const last = typeof a.last_sync === "number" ? a.last_sync : null
       const diffMs = last ? clock - last : null
       const minutes = diffMs != null ? Math.max(0, Math.floor(diffMs / 60000)) : null
-      return { name: a.name || "未知账户", last, minutes }
+      return { id: a.id, name: a.name || "未知账户", last, minutes }
     })
     .filter((a) => a.last == null || (a.minutes != null && a.minutes > thresholds.warnMinutes))
     .sort((a, b) => {
@@ -57,82 +59,72 @@ export function FreshnessCard({ accounts = [], now, className }: FreshnessCardPr
       return (b.minutes ?? 0) - (a.minutes ?? 0)
     })
 
+  const visible = expanded ? stale : stale.slice(0, 3)
+
   const latest = accounts.reduce<number | null>((acc, a) => {
     const last = typeof a.last_sync === "number" ? a.last_sync : null
     return last != null && (acc == null || last > acc) ? last : acc
   }, null)
 
   return (
-    <Card className={cn("shadow-xs overflow-hidden flex flex-col gap-0 p-3.5", className)}>
-      <CardHeader className="p-0 pb-2.5 shrink-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-              数据新鲜度
-            </CardTitle>
-            {stale.length === 0 ? (
-              <Badge
-                variant="outline"
-                className="text-[12px] leading-[16px] h-5 px-1.5 font-medium text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
-              >
-                正常
-              </Badge>
-            ) : (
-              <Badge variant="destructive" className="text-[12px] leading-[16px] h-5 px-1.5 font-medium tabular-nums">
-                {stale.length} 个陈旧
-              </Badge>
-            )}
-          </div>
-          <Radio className="size-4 text-muted-foreground" />
-        </div>
-      </CardHeader>
+    <Card className={cn("dashboard-panel shadow-xs overflow-hidden flex flex-col gap-0 p-4", className)}>
+      <QualityPanelHeader title="数据新鲜度" icon={Radio}>
+        <QualityBadge tone={stale.length === 0 ? "good" : "bad"}>
+          {stale.length === 0 ? "正常" : `${stale.length} 个陈旧`}
+        </QualityBadge>
+      </QualityPanelHeader>
 
-      <CardContent className="p-0 flex-1 min-h-0 flex flex-col justify-between gap-1.5">
+      <CardContent className="p-0 flex-1 min-h-0 flex flex-col justify-between gap-2">
         {stale.length === 0 ? (
-          <div className="flex flex-col justify-center flex-1 min-h-0 py-1">
-            <span className="text-[14px] leading-[20px] text-foreground font-medium">
-              全部账户同步正常
-            </span>
-            <span className="text-[12px] leading-[16px] text-muted-foreground mt-0.5">
-              最近同步：
-              {latest
-                ? formatBeijingClock(latest)
-                : "—"}
-            </span>
-          </div>
+          <QualityEmptyState
+            icon={CheckCircle2}
+            title="全部账户同步正常"
+            detail={`最近同步：${latest ? formatBeijingClock(latest) : "—"}`}
+          />
         ) : (
-          <ul className="flex flex-col gap-1 min-w-0 flex-1 overflow-y-auto">
-            {stale.slice(0, 3).map((a) => (
-              <li
-                key={a.name}
-                className="flex items-center justify-between gap-2 text-[12px] leading-[16px] min-w-0"
-              >
-                <span className="truncate text-muted-foreground" title={a.name}>
-                  {a.name}
-                </span>
-                <span
-                  className={cn(
-                    "font-mono tabular-nums shrink-0",
-                    freshnessTone(a.minutes, thresholds) === "bad"
-                      ? "text-destructive font-semibold"
-                      : freshnessTone(a.minutes, thresholds) === "warn"
-                        ? "text-[var(--chart-3)]"
-                        : "text-muted-foreground"
-                  )}
+          <>
+            <ul id="freshness-stale-list" className="flex min-w-0 flex-1 flex-col gap-1 overflow-y-auto pr-0.5">
+              {visible.map((a) => (
+                <li
+                  key={a.id ?? a.name}
+                  className="flex items-center justify-between gap-2 text-[12px] leading-[16px] min-w-0"
                 >
-                  {formatFreshnessText(a.minutes)}
-                </span>
-              </li>
-            ))}
+                  <span className="truncate text-muted-foreground" title={a.name}>
+                    {a.name}
+                  </span>
+                  <span
+                    className={cn(
+                      "font-mono tabular-nums shrink-0",
+                      freshnessTone(a.minutes, thresholds) === "bad"
+                        ? "text-destructive font-semibold"
+                        : freshnessTone(a.minutes, thresholds) === "warn"
+                          ? "text-[var(--chart-3)]"
+                          : "text-muted-foreground"
+                    )}
+                  >
+                    {formatFreshnessText(a.minutes)}
+                  </span>
+                </li>
+              ))}
+            </ul>
             {stale.length > 3 ? (
-              <li className="text-[12px] leading-[16px] text-muted-foreground">
-                另有 {stale.length - 3} 个
-              </li>
+              <button
+                type="button"
+                aria-expanded={expanded}
+                aria-controls="freshness-stale-list"
+                onClick={() => setExpanded((value) => !value)}
+                className="inline-flex w-full shrink-0 items-center justify-center gap-1 rounded-md border border-border/60 bg-muted/20 px-2 py-1 text-[12px] leading-[16px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+              >
+                {expanded ? "收起" : `另有 ${stale.length - 3} 个`}
+                <ChevronDown
+                  className={cn("size-3.5 transition-transform", expanded && "rotate-180")}
+                />
+              </button>
             ) : null}
-          </ul>
+          </>
         )}
 
-        <div className="text-[12px] leading-[16px] text-muted-foreground border-t border-border/50 pt-1.5 shrink-0">
+        <div className="text-[12px] leading-[16px] text-muted-foreground border-t border-border/60 pt-2 shrink-0">
           上游账户共 {accounts.length} 个 · 阈值 {thresholds.warnMinutes} 分钟
         </div>
       </CardContent>

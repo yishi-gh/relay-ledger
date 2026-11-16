@@ -1,19 +1,40 @@
 import * as React from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { Card, CardContent } from "@/components/ui/card"
 import {
   Database,
   AlertTriangle,
   AlertCircle,
+  CheckCircle2,
   Info,
 } from "lucide-react"
-import { formatBeijingClock, formatNumber } from "@/lib/formatters"
+import { formatBeijingClock, formatNumber, formatTimestampShort } from "@/lib/formatters"
 import { FreshnessCard } from "@/components/freshness-card"
+import {
+  QualityBadge,
+  QualityEmptyState,
+  QualityPanelHeader,
+  type QualityTone,
+} from "@/components/quality-kit"
 import type { DateRange, RangeType } from "@/lib/api"
 import type { QualityData, UpstreamAccount } from "@/lib/api-types"
 import { cn } from "@/lib/utils"
 
 export type { CollectError, JobRun, QualityData } from "@/lib/api-types"
+
+function jobStatusTone(status?: string): QualityTone {
+  if (status === "ok" || status === "complete") return "good"
+  if (status === "partial") return "warn"
+  if (status === "error") return "bad"
+  return "neutral"
+}
+
+function jobStatusLabel(status?: string): string {
+  if (status === "ok") return "正常"
+  if (status === "complete") return "完成"
+  if (status === "partial") return "部分成功"
+  if (status === "error") return "失败"
+  return "未运行"
+}
 
 export interface QualityViewProps {
   quality: QualityData
@@ -30,72 +51,87 @@ export function QualityView({
 }: QualityViewProps) {
   const errors = [
     ...(quality.alerts || []).map((alert) => ({
-      account_id: alert.key,
+      key: `alert:${alert.key}`,
       name: alert.title,
-      reason: alert.detail || alert.severity,
+      reason: alert.detail || "活动告警",
       at: alert.last_seen_at,
+      tone: alert.severity === "error" ? "bad" as const : "warn" as const,
     })),
     ...(quality.collect_errors || [])
       .filter((e) => e.reason !== "not_configured")
       .map((e) => ({
-        account_id: e.account_id,
-        name: e.name,
+        key: `error:${e.account_id}:${e.at}`,
+        name: e.name || e.account_id,
         reason: e.reason,
         at: e.at,
+        tone: "bad" as const,
       })),
   ]
+  const schemaTone: QualityTone = quality.schema_ok === true
+    ? "good"
+    : quality.schema_ok === false ? "bad" : "neutral"
+  const schemaLabel = quality.schema_ok === true
+    ? "结构正常"
+    : quality.schema_ok === false ? "结构异常" : "未确认"
+  const errorTone: QualityTone = errors.some((item) => item.tone === "bad") ? "bad" : "warn"
+  const latestRuns = React.useMemo(() => {
+    const latest = new Map<string, { status: string; at: number }>()
+    for (const run of quality.job_runs || []) {
+      const current = latest.get(run.job)
+      const at = run.finished_at ?? run.started_at
+      if (!current || at > current.at) {
+        latest.set(run.job, { status: run.status, at })
+      }
+    }
+    return latest
+  }, [quality.job_runs])
+  const spendRun = latestRuns.get("collect-spend")
 
   const unavailableAccounts = React.useMemo(() => {
     return accounts.filter((a) => a.status === "unavailable")
   }, [accounts])
+  const missingTone: QualityTone = unavailableAccounts.length === 0 ? "good" : "warn"
 
   return (
     <div className="dashboard-view dashboard-quality dashboard-flow-fallback flex-1 min-h-0 min-w-0 flex flex-col gap-4 md:overflow-hidden">
       {/* 基础状态卡片：采用 2x2 自适应栅格，确保采集失败与缺快照账户在桌面与移动端均能完整读出原因与列表 */}
       <section className="quality-panels grid grid-cols-1 md:grid-cols-2 gap-4 shrink-0 md:flex-1 md:min-h-0 md:grid-rows-[repeat(2,minmax(0,1fr))] [&>[data-slot=card]]:min-h-0">
         {/* 1. 数据库与模式状态 */}
-        <Card className="dashboard-panel shadow-xs p-4 flex flex-col justify-between">
-          <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0">
-            <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-              数据源
-            </CardTitle>
-            <Database className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent className="p-0 flex-1 min-h-0 flex flex-col justify-between gap-3 md:overflow-y-auto">
-            <div className="flex items-center gap-2">
-              <Badge
-                variant="outline"
-                className={cn(
-                  "text-[12px] leading-[16px] h-5 px-1.5 font-medium",
-                  quality.schema_ok === true
-                    ? "text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
-                    : quality.schema_ok === false ? "text-rose-600 dark:text-rose-400 border-rose-500/30 bg-rose-500/10" : "text-muted-foreground"
-                )}
-              >
-                {quality.schema_ok === true ? "结构正常" : quality.schema_ok === false ? "结构异常" : "未确认"}
-              </Badge>
-              <span className="text-[12px] leading-[16px] text-muted-foreground font-mono tabular-nums">
+        <Card className="dashboard-panel shadow-xs p-4 gap-0 flex flex-col">
+          <QualityPanelHeader title="数据源" icon={Database}>
+            <QualityBadge tone={schemaTone}>{schemaLabel}</QualityBadge>
+          </QualityPanelHeader>
+          <CardContent className="p-0 flex-1 min-h-0 flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] leading-[16px] text-muted-foreground">
+              <span>自检时间</span>
+              <span className="font-mono tabular-nums text-foreground/80">
                 {quality.checked_at
-                  ? `自检时间: ${formatBeijingClock(quality.checked_at, true)}`
+                  ? formatBeijingClock(quality.checked_at, true)
                   : "自检中…"}
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border/70">
-              <div className="space-y-0.5 min-w-0">
-                <span className="text-[12px] leading-[16px] text-muted-foreground">源数据库有效记录</span>
-                <div className="text-[18px] leading-[24px] font-mono font-semibold tabular-nums text-foreground">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="min-w-0 rounded-lg border border-border/60 bg-muted/20 p-2.5">
+                <span className="block text-[12px] leading-[16px] text-muted-foreground">源数据库有效记录</span>
+                <div className="mt-1 font-mono text-[18px] font-semibold leading-[24px] tabular-nums text-foreground">
                   {formatNumber(quality.source_rows ?? null)}
-                  <span className="text-[12px] font-normal font-sans text-muted-foreground ml-1">行</span>
+                  <span className="ml-1 font-sans text-[12px] font-normal text-muted-foreground">行</span>
                 </div>
               </div>
-              <div className="space-y-0.5 min-w-0">
-                <span className="text-[12px] leading-[16px] text-muted-foreground">HTTP 错误记录</span>
-                <div className="text-[18px] leading-[24px] font-mono font-semibold tabular-nums text-foreground">
+              <div className="min-w-0 rounded-lg border border-border/60 bg-muted/20 p-2.5">
+                <span className="block text-[12px] leading-[16px] text-muted-foreground">HTTP 错误记录</span>
+                <div className="mt-1 font-mono text-[18px] font-semibold leading-[24px] tabular-nums text-foreground">
                   {formatNumber(quality.error_rows ?? null)}
-                  <span className="text-[12px] font-normal font-sans text-muted-foreground ml-1">条</span>
+                  <span className="ml-1 font-sans text-[12px] font-normal text-muted-foreground">条</span>
                 </div>
               </div>
+            </div>
+            <div className="mt-auto flex items-center justify-between gap-2 border-t border-border/60 pt-2 text-[12px] leading-[16px]">
+              <span className="text-muted-foreground">数据截止</span>
+              <span className="font-mono tabular-nums text-foreground/80">
+                {formatTimestampShort(quality.source_last_t)}
+              </span>
             </div>
           </CardContent>
         </Card>
@@ -104,94 +140,94 @@ export function QualityView({
         <FreshnessCard accounts={accounts} />
 
         {/* 3. 采集错误告警 */}
-        <Card className="dashboard-panel shadow-xs p-4 flex flex-col justify-between">
-          <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0">
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-                采集异常
-              </CardTitle>
-              {errors.length > 0 && (
-                <Badge variant="destructive" className="text-[12px] leading-[16px] h-5 px-1.5 font-medium tabular-nums">
-                  {errors.length} 项异常
-                </Badge>
-              )}
-            </div>
-            <AlertTriangle className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent className="p-0 flex-1 min-h-0 flex flex-col justify-between gap-2">
+        <Card className="dashboard-panel shadow-xs p-4 gap-0 flex flex-col">
+          <QualityPanelHeader title="采集异常" icon={AlertTriangle}>
+            <QualityBadge tone={errors.length === 0 ? "good" : errorTone}>
+              {errors.length === 0 ? "正常" : `${errors.length} 项`}
+            </QualityBadge>
+          </QualityPanelHeader>
+          <CardContent className="p-0 flex-1 min-h-0 flex flex-col">
             {errors.length === 0 ? (
-              <div className="flex flex-col justify-center flex-1 py-4 text-center">
-                <span className="text-[14px] leading-[20px] font-medium text-foreground">
-                  暂无采集异常记录
-                </span>
-              </div>
+              <QualityEmptyState
+                icon={CheckCircle2}
+                title="采集链路正常"
+                detail="当前没有活动告警"
+              />
             ) : (
-              <ul className="flex flex-col gap-1.5 max-h-[140px] md:max-h-none md:flex-1 md:min-h-0 overflow-y-auto pr-1">
-                {errors.map((err, idx) => (
+              <ul className="flex flex-col gap-1.5 max-h-[180px] md:max-h-none md:flex-1 md:min-h-0 overflow-y-auto pr-1">
+                {errors.map((err) => (
                   <li
-                    key={idx}
-                    className="flex flex-col gap-0.5 rounded-lg border border-rose-500/30 bg-rose-500/5 p-2 text-[12px] leading-[16px]"
+                    key={err.key}
+                    className="flex gap-2 rounded-lg border border-border/60 bg-muted/20 p-2 text-[12px] leading-[16px]"
                   >
-                    <div className="flex items-center justify-between font-medium text-rose-600 dark:text-rose-400">
-                      <span>{err.name || err.account_id}</span>
-                      <span className="font-mono text-[11px] text-muted-foreground">
-                        {formatBeijingClock(err.at, true)}
-                      </span>
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "mt-1.5 size-1.5 shrink-0 rounded-full",
+                        err.tone === "bad" ? "bg-rose-500" : "bg-amber-500"
+                      )}
+                    />
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="min-w-0 break-words font-medium text-foreground" title={err.name}>
+                          {err.name}
+                        </span>
+                        <span className="shrink-0 font-mono text-[12px] leading-[16px] tabular-nums text-muted-foreground">
+                          {formatTimestampShort(err.at)}
+                        </span>
+                      </div>
+                      <p className="break-words text-muted-foreground">{err.reason}</p>
                     </div>
-                    <span className="text-muted-foreground break-all">{err.reason}</span>
                   </li>
                 ))}
               </ul>
             )}
+            <div className="mt-auto flex shrink-0 items-center justify-between gap-2 border-t border-border/60 pt-2 text-[12px] leading-[16px]">
+              <span className="text-muted-foreground">最近采集</span>
+              <span className="flex items-center gap-1.5 font-mono tabular-nums text-foreground/80">
+                {formatTimestampShort(spendRun?.at)}
+                <QualityBadge tone={jobStatusTone(spendRun?.status)}>
+                  {jobStatusLabel(spendRun?.status)}
+                </QualityBadge>
+              </span>
+            </div>
           </CardContent>
         </Card>
 
         {/* 4. 缺快照账户 */}
-        <Card className="dashboard-panel shadow-xs p-4 flex flex-col justify-between">
-          <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0">
-            <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-2">
-                <CardTitle className="text-[16px] leading-[24px] font-medium text-foreground">
-                  缺快照
-                </CardTitle>
-                <Badge
-                  variant="outline"
-                  className="text-[12px] leading-[16px] h-5 px-1.5 font-medium tabular-nums text-muted-foreground border-border bg-muted/30"
-                >
-                  {unavailableAccounts.length} 个账户
-                </Badge>
-              </div>
-              <AlertCircle className="size-4 text-muted-foreground" />
-            </div>
-          </CardHeader>
-          <CardContent className="p-0 flex-1 min-h-0 flex flex-col justify-between gap-2">
-            <div className="rounded-lg border border-border/70 bg-muted/30 p-2.5 flex items-start gap-2 shrink-0">
-              <Info className="size-4 text-muted-foreground shrink-0 mt-0.5" />
-              <div className="text-[12px] leading-[16px] text-muted-foreground font-normal">
+        <Card className="dashboard-panel shadow-xs p-4 gap-0 flex flex-col">
+          <QualityPanelHeader title="缺快照" icon={AlertCircle}>
+            <QualityBadge tone={missingTone}>
+              {unavailableAccounts.length === 0 ? "完整" : `${unavailableAccounts.length} 个`}
+            </QualityBadge>
+          </QualityPanelHeader>
+          <CardContent className="p-0 flex-1 min-h-0 flex flex-col gap-2">
+            <div className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/20 p-2.5">
+              <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <span className="text-[12px] leading-[16px] text-muted-foreground">
                 仅影响成本核算
-              </div>
+              </span>
             </div>
 
-            <div className="flex-1 min-h-0 flex flex-col justify-start">
-              {unavailableAccounts.length === 0 ? (
-                <div className="text-[13px] leading-[18px] text-muted-foreground py-1">
-                  暂无缺快照记录
-                </div>
-              ) : (
-                <div className="flex flex-wrap content-start gap-1.5 overflow-y-auto max-h-[90px] md:max-h-none md:flex-1 md:min-h-0 p-0.5">
-                  {unavailableAccounts.map((acc) => (
-                    <Badge
-                      key={acc.id}
-                      variant="secondary"
-                      className="text-[12px] leading-[16px] py-0.5 px-2 font-normal text-foreground"
-                      title={acc.name || acc.id}
-                    >
-                      {acc.name || acc.id}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-            </div>
+            {unavailableAccounts.length === 0 ? (
+              <QualityEmptyState
+                icon={CheckCircle2}
+                title="区段成本可核算"
+                detail="当前没有缺失快照的账户"
+              />
+            ) : (
+              <div className="flex max-h-[120px] flex-wrap content-start gap-1.5 overflow-y-auto p-0.5 md:max-h-none md:flex-1 md:min-h-0">
+                {unavailableAccounts.map((acc) => (
+                  <span
+                    key={acc.id}
+                    className="max-w-full truncate rounded-md border border-border/60 bg-muted/20 px-2 py-1 text-[12px] leading-[16px] text-foreground"
+                    title={acc.name || acc.id}
+                  >
+                    {acc.name || acc.id}
+                  </span>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </section>
