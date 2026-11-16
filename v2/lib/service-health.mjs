@@ -20,6 +20,7 @@ export const SERVICE_RANGES = {
 export const FIXED_INTERVALS = {
   'http-errors': 15,
   'upstream-errors': 15,
+  'alert-check': 15,
   prune: 24 * 60,
   rollup: 24 * 60,
 };
@@ -27,8 +28,10 @@ export const FIXED_INTERVALS = {
 export const SERVICE_DEFINITIONS = [
   { id: 'collect-spend', label: '余额采集', collection: 'spend' },
   { id: 'collect-site-logs', label: '本站日志', collection: 'logs' },
+  { id: 'channel-state', label: '渠道状态', collection: 'logs' },
   { id: 'http-errors', label: '入口错误' },
   { id: 'upstream-errors', label: '上游错误' },
+  { id: 'alert-check', label: '告警检查' },
   { id: 'prune', label: '数据清理' },
   { id: 'rollup', label: '历史归档' },
 ];
@@ -114,7 +117,8 @@ function intervalFor(service, settings, collector) {
 
 function enabledFor(service, collector) {
   if (service.id === 'collect-spend') return true;
-  if (service.id === 'collect-site-logs') return logsEnabled(collector);
+  if (service.collection === 'logs') return logsEnabled(collector);
+  if (service.id === 'alert-check') return true;
   // 其它 job 没有可靠启停证据（CLI 开关、调度配置不在本接口读取范围）→ 不编造
   return null;
 }

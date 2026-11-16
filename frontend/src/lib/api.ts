@@ -157,6 +157,7 @@ export interface ChannelRoutesPayload {
     endpoint: string | null
     account_ids: string[]
     owner_source?: "explicit" | "auto" | "unmatched" | "ambiguous"
+    owner_reason?: "origin" | "brand" | null
     owner_candidates?: string[]
     model_mapping: Record<string, string> | null
     mapping_error: string | null

@@ -24,7 +24,7 @@
 # 采集只写自己的看板库与站点日志库，不写站点业务库，也不需要站点业务库的写权限。
 
 [Unit]
-Description=relay-ledger collector (balances + site logs)
+Description=relay-ledger collector (balances + site logs + channel state + alerts)
 After=network-online.target
 Wants=network-online.target
 
@@ -35,6 +35,8 @@ Group=relay-ledger
 WorkingDirectory=/opt/relay-ledger
 Environment=RELAY_LEDGER_INSTANCE=/etc/relay-ledger/instance.json
 Environment=NODE_ENV=production
+# 需要主动告警时取消注释并填写；不配置时告警只落库、在面板可见
+# Environment=RELAY_ALERT_WEBHOOK=https://hooks.example/relay
 ExecStart=/usr/bin/node v2/jobs/run-scheduler.mjs
 Restart=always
 RestartSec=10

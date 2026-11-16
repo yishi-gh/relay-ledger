@@ -72,7 +72,8 @@ test('services：24h 为 96 个 15 分钟整桶，DTO 字段固定', () => {
     assert.equal(payload.to % 900_000, 0, 'to 对齐整桶');
     assert.equal(payload.to - payload.from, 96 * 900_000);
     assert.deepEqual(payload.services.map((s) => s.id), [
-      'collect-spend', 'collect-site-logs', 'http-errors', 'upstream-errors', 'prune', 'rollup',
+      'collect-spend', 'collect-site-logs', 'channel-state', 'http-errors',
+      'upstream-errors', 'alert-check', 'prune', 'rollup',
     ]);
     for (const service of payload.services) {
       assert.deepEqual(Object.keys(service).sort(), [
@@ -177,7 +178,9 @@ test('services：日志关闭为 disabled，其它 job 不编造 enabled', () =>
     });
     assert.equal(serviceOf(payload, 'collect-site-logs').enabled, false);
     assert.equal(serviceOf(payload, 'collect-site-logs').state, 'disabled');
+    assert.equal(serviceOf(payload, 'channel-state').enabled, false);
     assert.equal(serviceOf(payload, 'collect-spend').enabled, true);
+    assert.equal(serviceOf(payload, 'alert-check').enabled, true);
     for (const id of ['http-errors', 'upstream-errors', 'prune', 'rollup']) {
       assert.equal(serviceOf(payload, id).enabled, null);
     }
@@ -202,6 +205,7 @@ test('services：采集器实际间隔优先于设置（CLI 覆盖）', () => {
     });
     assert.equal(serviceOf(payload, 'collect-spend').interval_minutes, 0.5);
     assert.equal(serviceOf(payload, 'collect-site-logs').interval_minutes, 1.5);
+    assert.equal(serviceOf(payload, 'channel-state').interval_minutes, 1.5);
     assert.equal(serviceOf(payload, 'upstream-errors').interval_minutes, 15);
   } finally {
     fx.close();
@@ -350,7 +354,7 @@ test('HTTP GET/HEAD /api/services：DTO、range 校验与真实 collector', asyn
   const body = await res.json();
   assert.deepEqual(Object.keys(body).sort(), ['bucket_ms', 'collector', 'from', 'generated_at', 'services', 'to']);
   assert.equal(body.collector.state, 'active');
-  assert.equal(body.services.length, 6);
+  assert.equal(body.services.length, 8);
   assert.equal(body.services.every((s) => s.buckets.length === 96), true);
   const serialized = JSON.stringify(body);
   assert.equal(serialized.includes('"detail"'), false);

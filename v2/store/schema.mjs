@@ -6,7 +6,7 @@
  * logs_daily 为聚合归档预留，当前只建表不写（明细超过保留期后仍能看历史）。
  */
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /** 余额快照的归一化要求：balance 必须已按账户 unit 折算（newapi 的 quota / quota_per_unit） */
 export const BALANCE_RAW_COLUMNS = {
@@ -107,6 +107,18 @@ export const DASHBOARD_SCHEMA = [
      finished_at INTEGER,
      status      TEXT,
      detail      TEXT
+   )`,
+
+  // 主动告警的当前状态：同一 key 只保留一行，用于去重、恢复和面板展示。
+  `CREATE TABLE IF NOT EXISTS alert_state (
+     alert_key    TEXT PRIMARY KEY,
+     severity     TEXT NOT NULL,
+     title        TEXT NOT NULL,
+     detail       TEXT,
+     first_seen_at INTEGER NOT NULL,
+     last_seen_at  INTEGER NOT NULL,
+     last_sent_at  INTEGER,
+     resolved_at   INTEGER
    )`,
 
   // 站点日志的按日聚合归档：明细超过保留期（或 raw_json 清空）后仍能看历史。

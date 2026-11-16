@@ -17,6 +17,7 @@
 #
 # 时间点：余额落在 :10/:25/:40/:55（整点后 10 秒的等价近似，cron 无法精确到秒），
 # 日志排在余额之后，避免同一分钟抢源库；两者都是 15 分钟一轮。
+# 注意：cron 模式不跑 channel_state 路由快照与 alert-check；需要这两项请用常驻 runner。
 
 # 余额与充值：每 15 分钟（:10 / :25 / :40 / :55）
 10,25,40,55 * * * * cd /opt/relay-ledger && RELAY_LEDGER_INSTANCE=/etc/relay-ledger/instance.json /usr/bin/node v2/jobs/collect-spend.mjs >> /var/lib/relay-ledger/logs/collect-spend.log 2>&1

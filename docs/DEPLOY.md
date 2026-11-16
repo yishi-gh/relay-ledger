@@ -230,6 +230,10 @@ proxy_set_header Cookie $http_cookie;
 推荐 `relay-collector` 常驻：余额与日志各 15 分钟一轮，按墙钟重新对齐槽位，重启不会长期盲窗，清理与归档也在同一个进程里。
 
 cron 备选见 `v2/deploy/crontab.example`：余额在 `:10/:25/:40/:55`，日志在 `:14/:29/:44/:59`，两行都带 `RELAY_LEDGER_INSTANCE`。两者只能选一个，同时启用会重复采集（数据幂等，但白费请求，也让上游更快触发限流）。
+cron 模式不跑 `channel_state` 路由快照与 `alert-check`；需要渠道状态和主动告警时请用常驻 runner。
+
+告警默认只写入看板库 `alert_state` 并显示在 `/api/quality.alerts`。要主动投递，在 `relay-collector.service` 中设置
+`Environment=RELAY_ALERT_WEBHOOK=https://...`（也可放 `EnvironmentFile`），重启采集器；告警检查在启动 9 分钟后首轮，之后每 15 分钟，同一告警 24 小时内不重复发送。
 
 nginx 错误码聚合默认读取 `/var/log/nginx/access.log`，运行用户需对该文件有读权限、对父目录有遍历权限，日志轮转后的新文件也要保持；不接入时在 `relay-collector.service` 的 `ExecStart` 追加 `--no-http-errors`。
 
@@ -242,7 +246,7 @@ sudo -u relay-ledger env RELAY_LEDGER_INSTANCE=/etc/relay-ledger/instance.json \
 
 curl -sI http://127.0.0.1:8788/ | head -n 5   # 200，HTML 为 no-cache
 curl -s http://127.0.0.1:8788/api/healthz
-curl -s http://127.0.0.1:8788/api/quality     # jobs、collect_errors、源库行数
+curl -s http://127.0.0.1:8788/api/quality     # jobs、collect_errors、alerts、源库行数
 curl -s http://127.0.0.1:8788/api/upstreams   # 余额、last_sync、last_job
 ```
 

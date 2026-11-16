@@ -28,9 +28,22 @@ export function QualityView({
   quality,
   accounts = [],
 }: QualityViewProps) {
-  const errors = (quality.collect_errors || []).filter(
-    (e) => e.reason !== "not_configured"
-  )
+  const errors = [
+    ...(quality.alerts || []).map((alert) => ({
+      account_id: alert.key,
+      name: alert.title,
+      reason: alert.detail || alert.severity,
+      at: alert.last_seen_at,
+    })),
+    ...(quality.collect_errors || [])
+      .filter((e) => e.reason !== "not_configured")
+      .map((e) => ({
+        account_id: e.account_id,
+        name: e.name,
+        reason: e.reason,
+        at: e.at,
+      })),
+  ]
 
   const unavailableAccounts = React.useMemo(() => {
     return accounts.filter((a) => a.status === "unavailable")

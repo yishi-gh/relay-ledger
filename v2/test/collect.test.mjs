@@ -865,6 +865,47 @@ test('session:false 的账户只用渠道 key 取余额：入账与上报消费�
   }
 });
 
+test('自动归属的新渠道 key 会进入余额候选，无需手工修改 channels', async () => {
+  const now = beijingDayStart(Date.now()) + 12 * 3600_000;
+  const dir = makeTempDir('v2-collect-auto-channel-');
+  const relayFile = path.join(dir, 'relay.db');
+  const relay = new DatabaseSync(relayFile);
+  relay.exec('CREATE TABLE channels (id INTEGER PRIMARY KEY, name TEXT, key TEXT, base_url TEXT)');
+  const ins = relay.prepare('INSERT INTO channels (id, name, key, base_url) VALUES (?, ?, ?, ?)');
+  ins.run(34, '旧 Gemini', null, 'https://www.xcmapi.com');
+  ins.run(40, '旧 Gemini 2', null, 'https://www.xcmapi.com');
+  ins.run(47, '鸡出没 kimi', 'sk-auto-fixture', 'https://xcmapi.org');
+  relay.close();
+
+  const dashboard = openTempDashboard(dir);
+  const config = makeConfig({
+    accounts: [sub2ApiAccount({
+      id: 'xcmapi',
+      name: '鸡出没API',
+      base_url: 'https://www.xcmapi.com',
+      channels: [34, 40],
+      session: false,
+    })],
+  });
+  const { fetchImpl, calls } = createMockFetch((u) => {
+    if (u.pathname === '/v1/usage') return jsonResponse({ balance: 0.30186506, unit: 'USD' });
+    throw new Error(`不应请求 ${u.pathname}`);
+  });
+
+  try {
+    const summary = await runCollectSpend({ config, db: dashboard, fetchImpl, now, relayDbFile: relayFile });
+    assert.equal(summary.status, 'ok');
+    assert.equal(summary.accounts[0].balance_source, 'channel_key');
+    assert.equal(summary.accounts[0].balance.value, 0.30186506);
+    assert.equal(calls.filter((c) => c.path === '/v1/usage').length, 1, '只尝试可用的 47 key');
+    const snap = dashboard.prepare('SELECT balance FROM balance_snapshot').get();
+    assert.equal(snap.balance, 0.30186506);
+  } finally {
+    dashboard.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('loadConfig 保留 session:false，缺省时为 true', () => {
   const dir = makeTempDir('v2-config-session-');
   const file = path.join(dir, 'accounts.json');

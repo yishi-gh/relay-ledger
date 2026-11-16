@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadConfig, resolveConfigFile } from '../lib/config.mjs';
+import { buildChannelAssociations } from '../lib/channel-associations.mjs';
 import { ensureDataDirs, INSTANCE } from '../lib/instance.mjs';
 import { evaluateLedger, round6 } from '../lib/ledger.mjs';
 import { beijingDayStart, DAY_MS, dayKey } from '../lib/time.mjs';
@@ -41,6 +42,13 @@ function authReason(err) {
 /** 认证不可用时不再继续请求其他接口 */
 function isAuthBlocked(reason) {
   return AUTH_REASONS.has(reason);
+}
+
+/** 自动归属渠道的 key 必须与账户最近快照接近，避免把不同余额池误当同一账户。 */
+function autoKeyBalanceTrusted(latestBalance, value) {
+  if (typeof latestBalance !== 'number' || !Number.isFinite(latestBalance)) return true;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+  return Math.abs(value - latestBalance) <= Math.max(0.001, Math.abs(latestBalance) * 0.005);
 }
 
 const V2_DIR = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -85,12 +93,18 @@ function summarizeAccount(record) {
 }
 
 /**
- * 按 account.channels 顺序试渠道 key，第一个成功即用；全部失败返回 null。
+ * 按归属后的渠道顺序试 key，第一个成功即用；全部失败返回 null。
+ * 自动归属渠道额外用最近快照校验余额，偏差过大时跳过并回退会话。
  * relay db 不存在时 relayDb 为 null，直接返回 null（调用方退回会话）。
  */
-async function channelKeyBalance(account, relayDb, { fetchImpl, timeoutMs } = {}) {
+async function channelKeyBalance(
+  account,
+  relayDb,
+  channelIds,
+  { fetchImpl, timeoutMs, autoChannels = new Set(), latestBalance = null } = {},
+) {
   if (account.kind !== 'sub2api') return null;
-  const channels = Array.isArray(account.channels) ? account.channels : [];
+  const channels = Array.isArray(channelIds) ? channelIds : [];
   if (!relayDb || channels.length === 0) return null;
   for (const channelId of channels) {
     const credential = getChannelCredential(relayDb, channelId);
@@ -101,7 +115,11 @@ async function channelKeyBalance(account, relayDb, { fetchImpl, timeoutMs } = {}
       timeoutMs,
       fetchImpl,
     });
-    if (res.status === 'ok' && typeof res.value === 'number') return res;
+    if (
+      res.status === 'ok'
+      && typeof res.value === 'number'
+      && (!autoChannels.has(channelId) || autoKeyBalanceTrusted(latestBalance, res.value))
+    ) return res;
   }
   return null;
 }
@@ -284,6 +302,26 @@ export async function runCollectSpend({
   const accounts = [];
   let rateLimited = false;
 
+  // 渠道 key 候选使用与 API 相同的派生归属：显式配置 + 同源/同品牌自动渠道。
+  let relayChannels = [];
+  const relayDbForChannels = openRelayDb(relayDbFile);
+  if (relayDbForChannels) {
+    try {
+      relayChannels = relayDbForChannels.prepare('SELECT id, name, base_url FROM channels').all();
+    } catch {
+      relayChannels = [];
+    } finally {
+      relayDbForChannels.close();
+    }
+  }
+  const associations = buildChannelAssociations({
+    accounts: config.accounts,
+    channels: relayChannels,
+  });
+  const effectiveById = new Map(
+    associations.accounts.map((item) => [String(item.id), item]),
+  );
+
   for (const account of config.accounts) {
     if (account.enabled === false) continue;
     // 没有上游账户的渠道（如 opencode go）：只统计售出，不采余额，也不计入失败
@@ -307,15 +345,22 @@ export async function runCollectSpend({
     };
 
     try {
+      const effective = effectiveById.get(String(account.id));
+      const channelIds = Array.isArray(effective?.channels) ? effective.channels : account.channels;
+      const autoChannels = new Set(effective?.auto_channels ?? []);
+      const previousSnapshot = readLatestSnapshot(db, account.id);
+
       // sub2api 先试中转站渠道 key：relay db 不存在时 openRelayDb 返回 null，静默退回会话
       let channelBalance = null;
-      if (account.kind === 'sub2api' && Array.isArray(account.channels) && account.channels.length > 0) {
+      if (account.kind === 'sub2api' && Array.isArray(channelIds) && channelIds.length > 0) {
         const relayDb = openRelayDb(relayDbFile);
         if (relayDb) {
           try {
-            channelBalance = await channelKeyBalance(account, relayDb, {
+            channelBalance = await channelKeyBalance(account, relayDb, channelIds, {
               fetchImpl,
               timeoutMs: upstream.timeout_ms,
+              autoChannels,
+              latestBalance: previousSnapshot?.balance ?? null,
             });
           } finally {
             relayDb.close();
@@ -456,8 +501,6 @@ export async function runCollectSpend({
         }
       }
       record.balance = { status: balance.status, reason: balance.reason, value: balance.value, unit: balance.unit };
-      // 推断充值要对比「上一条快照」，必须在写入本次快照之前取
-      const previousSnapshot = readLatestSnapshot(db, account.id);
       record.written.balance = writeBalance(db, account, now, balance);
 
       // 认证失败/账号不匹配时不再消耗后续请求，直接标不可用

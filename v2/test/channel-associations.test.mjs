@@ -10,7 +10,11 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 
 import { createApi, readRoutingSnapshotVersion } from '../lib/api.mjs';
-import { buildChannelAssociations, normalizeChannelOrigin } from '../lib/channel-associations.mjs';
+import {
+  buildChannelAssociations,
+  normalizeChannelBrand,
+  normalizeChannelOrigin,
+} from '../lib/channel-associations.mjs';
 import { createApiCache, respondApi } from '../server.mjs';
 import { replaceRoutingSnapshot, recordRoutingFailure, readRoutingSnapshot } from '../store/channel-routing.mjs';
 import { openDashboardDb } from '../store/dashboard.mjs';
@@ -39,6 +43,17 @@ test('origin：协议/端口/大小写归一，路径忽略，userinfo 与非 ht
   assert.equal(normalizeChannelOrigin('ftp://x.example.com/a'), null);
   assert.equal(normalizeChannelOrigin('not a url'), null);
   assert.equal(normalizeChannelOrigin(null), null);
+});
+
+test('brand：注册域名标签忽略子域与常见二级后缀，IP / userinfo / 通用词拒绝', () => {
+  assert.equal(normalizeChannelBrand('https://xcmapi.org'), 'xcmapi');
+  assert.equal(normalizeChannelBrand('https://www.xcmapi.com'), 'xcmapi');
+  assert.equal(normalizeChannelBrand('api.example.co.uk'), 'example');
+  assert.equal(normalizeChannelBrand('https://api.penguinsaichat.dpdns.org'), 'penguinsaichat');
+  assert.equal(normalizeChannelBrand('https://64.32.22.31'), null);
+  assert.equal(normalizeChannelBrand('https://user:pass@xcmapi.com'), null);
+  assert.equal(normalizeChannelBrand('https://api.com'), null);
+  assert.equal(normalizeChannelBrand(null), null);
 });
 
 // ---------------------------------------------------------------------------
@@ -78,6 +93,54 @@ test('显式别名 origin 唯一 → auto（无需 base_url 相同）', () => {
   assert.deepEqual(result.owners.get(30), ['a']);
   assert.equal(result.sources.get(30).source, 'auto');
   assert.deepEqual(result.accounts[0].auto_channels, [30]);
+});
+
+test('同品牌换域名 + 名称 token 唯一 → auto(brand)', () => {
+  const result = buildChannelAssociations({
+    accounts: [account('xcmapi', 'https://www.xcmapi.com', [], { name: '鸡出没API' })],
+    channels: [channel(47, 'https://xcmapi.org', { name: '鸡出没 kimi' })],
+  });
+  assert.deepEqual(result.owners.get(47), ['xcmapi']);
+  assert.deepEqual(result.sources.get(47), {
+    source: 'auto',
+    reason: 'brand',
+    candidates: ['xcmapi'],
+  });
+  assert.deepEqual(result.accounts[0].channels, [47]);
+  assert.deepEqual(result.accounts[0].auto_channels, [47]);
+});
+
+test('同品牌多账户：名称 token 唯一时消歧，仍多候选时 ambiguous', () => {
+  const accounts = [
+    account('xcmapi', 'https://www.xcmapi.com', [], { name: '鸡出没API' }),
+    account('other', 'https://xcmapi.net', [], { name: '熊出没API' }),
+  ];
+  const matched = buildChannelAssociations({
+    accounts,
+    channels: [channel(47, 'https://xcmapi.org', { name: '鸡出没 kimi' })],
+  });
+  assert.deepEqual(matched.owners.get(47), ['xcmapi']);
+  assert.deepEqual(matched.sources.get(47).candidates, ['xcmapi']);
+
+  const ambiguous = buildChannelAssociations({
+    accounts,
+    channels: [channel(48, 'https://xcmapi.org', { name: 'Sub2API' })],
+  });
+  assert.deepEqual(ambiguous.owners.get(48), []);
+  assert.equal(ambiguous.sources.get(48).source, 'ambiguous');
+  assert.deepEqual(ambiguous.sources.get(48).candidates, ['xcmapi', 'other']);
+});
+
+test('origin 唯一时优先于品牌别名，不因品牌候选变成歧义', () => {
+  const result = buildChannelAssociations({
+    accounts: [
+      account('origin', 'https://xcmapi.org'),
+      account('brand', 'https://www.xcmapi.com', [], { name: '鸡出没API' }),
+    ],
+    channels: [channel(47, 'https://xcmapi.org', { name: '鸡出没 kimi' })],
+  });
+  assert.deepEqual(result.owners.get(47), ['origin']);
+  assert.equal(result.sources.get(47).reason, 'origin');
 });
 
 test('两个来源合并后多候选 → ambiguous，不自动也不新增多 owner', () => {
@@ -367,6 +430,37 @@ test('售出归属一致：overview = profit 各账户 + unmapped，channels/mod
     assert.equal(acc.consumption, null);
   } finally {
     fx.close();
+  }
+});
+
+test('渠道名显示：channel_state 当前名优先于日志历史名', () => {
+  const dir = makeTempDir('v2-channel-name-');
+  const sourceFile = path.join(dir, 'source.db');
+  makeSourceDb(sourceFile, {
+    rows: [{ req_id: 'r1', t_ms: NOW - HOUR, channel_id: 47, channel_name: 'Sub2API', cost: 1 }],
+  });
+  const source = new DatabaseSync(sourceFile, { readOnly: true });
+  const dashboard = openDashboardDb(path.join(dir, 'dashboard.db'));
+  dashboard.prepare(
+    `INSERT INTO channel_state (channel_id, name, status, base_url, updated_at)
+     VALUES (47, '鸡出没 kimi', 1, 'https://xcmapi.org', ?)`,
+  ).run(NOW);
+  const api = createApi({
+    source,
+    dashboard,
+    config: { accounts: [] },
+    siteName: 't',
+    sourceLabel: 's',
+    now: () => NOW,
+  });
+  const params = new URLSearchParams({ from: String(NOW - 2 * HOUR), to: String(NOW) });
+  try {
+    assert.equal(api.channels(params).rows[0].channel_name, '鸡出没 kimi');
+    assert.equal(api.profit(params).unmapped.channels[0].channel_name, '鸡出没 kimi');
+  } finally {
+    source.close();
+    dashboard.close();
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

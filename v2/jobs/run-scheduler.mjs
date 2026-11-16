@@ -32,6 +32,7 @@ import { recordRoutingFailure, replaceRoutingSnapshot } from '../store/channel-r
 import { openDashboardDb, syncAccounts } from '../store/dashboard.mjs';
 import { openLogsDb } from '../store/site-logs.mjs';
 import { runCollectSpend } from './collect-spend.mjs';
+import { ALERT_WEBHOOK_ENV, openReadOnlySource, runCollectAlerts } from './collect-alerts.mjs';
 import {
   DEFAULT_LOG_FILE as HTTP_ERRORS_LOG_FILE,
   runCollectHttpErrors,
@@ -53,6 +54,10 @@ const V2_DIR = path.dirname(HERE);
 
 export const TASK_SPEND = 'collect-spend';
 export const TASK_LOGS = SITE_LOGS_JOB_NAME;
+/** 渠道状态与路由快照同步：与日志采集分开记录，失败不能被本站日志的 ok 掩盖 */
+export const TASK_CHANNEL_STATE = 'channel-state';
+/** 主动告警检查：独立 job，便于在服务页看到投递失败。 */
+export const TASK_ALERTS = 'alert-check';
 /** 与 prune-logs 的定时链日志名对齐：输出 `[run-scheduler] prune ok Xms` */
 export const TASK_PRUNE = 'prune';
 /** 归档任务（rollup-logs）：把超过保留期的明细按天聚合进 logs_daily 后删除。 */
@@ -83,6 +88,9 @@ export const DEFAULT_HTTP_ERRORS_INTERVAL_MS = 15 * 60 * 1000;
 /** 上游错误日志同步：启动 7 分钟后首轮，之后每 15 分钟。 */
 export const UPSTREAM_ERRORS_INITIAL_DELAY_MS = 7 * 60 * 1000;
 export const DEFAULT_UPSTREAM_ERRORS_INTERVAL_MS = 15 * 60 * 1000;
+/** 告警检查：启动 9 分钟后首轮，之后每 15 分钟；排在日志/余额采集之后。 */
+export const ALERTS_INITIAL_DELAY_MS = 9 * 60 * 1000;
+export const DEFAULT_ALERTS_INTERVAL_MS = 15 * 60 * 1000;
 /** setTimeout 的毫秒上限（超过会被 Node 截断成 1ms） */
 const MAX_INTERVAL_MS = 2_147_483_647;
 export const RUNTIME_SETTINGS_POLL_MS = 2000;
@@ -110,6 +118,7 @@ export const USAGE = `用法：
   （两者之后每 ${DEFAULT_HTTP_ERRORS_INTERVAL_MS}ms）。--once 不跑清理、错误码聚合与上游错误同步，
   手动清理用 node v2/jobs/prune-logs.mjs，错误码聚合用 node v2/jobs/collect-http-errors.mjs，
   上游错误同步用 node v2/jobs/collect-upstream-errors.mjs。
+  告警检查在启动 9 分钟后首轮，之后每 15 分钟；设置 RELAY_ALERT_WEBHOOK 才会主动投递。
   未显式传入采集间隔时采用运行时设置，未保存设置时取实例默认值；常驻进程自动采用后续修改。
   SIGINT / SIGTERM 会清掉定时器并正常退出。`;
 
@@ -604,7 +613,7 @@ async function withJobRun(job, run) {
     recordTaskJob(db, job, {
       startedAt,
       finishedAt: Date.now(),
-      status: 'ok',
+      status: typeof summary?.status === 'string' && summary.status ? summary.status : 'ok',
       detail: summarizeJobDetail(summary),
     });
     return summary;
@@ -781,6 +790,37 @@ export function syncChannelStates(
   return count;
 }
 
+/** 渠道状态同步的独立 job_runs 记录：成功/失败都不影响同轮的日志采集。 */
+export function syncChannelStatesWithJob(
+  dashboardDb,
+  relayDbFile = DEFAULT_DB_FILE,
+  { now = Date.now, openSource } = {},
+) {
+  const startedAt = now();
+  try {
+    const channelsSynced = syncChannelStates(dashboardDb, relayDbFile, { openSource });
+    recordTaskJob(dashboardDb, TASK_CHANNEL_STATE, {
+      startedAt,
+      finishedAt: now(),
+      status: 'ok',
+      detail: { channels_synced: channelsSynced },
+    });
+    return channelsSynced;
+  } catch (err) {
+    try {
+      recordTaskJob(dashboardDb, TASK_CHANNEL_STATE, {
+        startedAt,
+        finishedAt: now(),
+        status: 'error',
+        detail: { message: redactMessage(err?.message ?? err) },
+      });
+    } catch {
+      // 记录失败不能盖住原始错误
+    }
+    throw err;
+  }
+}
+
 async function runLogsRound() {
   const startedAt = Date.now();
   let jobDb = null;
@@ -791,7 +831,7 @@ async function runLogsRound() {
     // 渠道状态独立于日志采集：源库读不到时只打一行 warn，本轮照常采日志
     let channelsSynced = null;
     try {
-      channelsSynced = syncChannelStates(jobDb, DEFAULT_DB_FILE);
+      channelsSynced = syncChannelStatesWithJob(jobDb, DEFAULT_DB_FILE);
     } catch (err) {
       console.warn(`[run-scheduler] channel_state 同步失败：${redactMessage(err?.message ?? err)}`);
     }
@@ -837,6 +877,25 @@ async function runLogsRound() {
   }
 }
 
+async function runAlertsRound() {
+  const { file, writable } = resolveConfigFile(V2_DIR);
+  const config = loadConfig(file, { writable });
+  ensureDataDirs(INSTANCE);
+  const dashboard = openDashboardDb(INSTANCE.paths.dashboardFile);
+  const source = openReadOnlySource(SITE_DB_FILE);
+  try {
+    return await runCollectAlerts({
+      dashboard,
+      source,
+      config,
+      site: { id: INSTANCE.site.id, name: INSTANCE.site.name },
+    });
+  } finally {
+    source?.close();
+    dashboard.close();
+  }
+}
+
 export function createDefaultTasks({
   v2Dir = V2_DIR,
   pruneDaysRaw = DEFAULT_RAW_DAYS,
@@ -846,6 +905,7 @@ export function createDefaultTasks({
   return {
     spend: () => runSpendRound({ v2Dir }),
     logs: () => runLogsRound(),
+    alerts: () => withJobRun(TASK_ALERTS, () => runAlertsRound()),
     // 聚合自己会打一行汇总；常驻日志只保留 [run-scheduler] http-errors ok Xms
     httpErrors: () =>
       withJobRun(TASK_HTTP_ERRORS, () =>
@@ -927,6 +987,11 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
     }
   } catch (err) {
     errorLog(`[run-scheduler] 读取账户配置失败：${redactMessage(err?.message ?? err)}`);
+  }
+  if (!process.env[ALERT_WEBHOOK_ENV]) {
+    errorLog(
+      `[run-scheduler] 未配置 ${ALERT_WEBHOOK_ENV}：告警仍会落库并在面板显示，但不会主动投递。`,
+    );
   }
 
   const jobTasks =
@@ -1025,6 +1090,22 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
     }).start();
   }
 
+  let alertsLoop = null;
+  if (typeof jobTasks.alerts === 'function') {
+    const alertsRunner = createTaskRunner({
+      name: TASK_ALERTS,
+      run: jobTasks.alerts,
+      now,
+      log,
+      errorLog,
+    });
+    alertsLoop = createLoop({
+      delayMs: ALERTS_INITIAL_DELAY_MS,
+      intervalMs: DEFAULT_ALERTS_INTERVAL_MS,
+      task: alertsRunner,
+    }).start();
+  }
+
   log(
     `[run-scheduler] 常驻启动：${TASK_SPEND} 首轮 ${spendDelayMs}ms 后，之后每 ${spendIntervalMs}ms；` +
       (!options.noLogs
@@ -1045,7 +1126,11 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
       '；' +
       (upstreamErrorsLoop
         ? `${TASK_UPSTREAM_ERRORS} 首轮 ${UPSTREAM_ERRORS_INITIAL_DELAY_MS}ms 后，之后每 ${DEFAULT_UPSTREAM_ERRORS_INTERVAL_MS}ms`
-        : `${TASK_UPSTREAM_ERRORS} 已关闭`),
+        : `${TASK_UPSTREAM_ERRORS} 已关闭`) +
+      '；' +
+      (alertsLoop
+        ? `${TASK_ALERTS} 首轮 ${ALERTS_INITIAL_DELAY_MS}ms 后，之后每 ${DEFAULT_ALERTS_INTERVAL_MS}ms`
+        : `${TASK_ALERTS} 已关闭`),
   );
 
   let stopping = false;
@@ -1057,6 +1142,7 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
     rollupLoop?.stop();
     httpErrorsLoop?.stop();
     upstreamErrorsLoop?.stop();
+    alertsLoop?.stop();
     log(`[run-scheduler] 收到 ${signal}，定时器已清理，退出`);
     process.exitCode = 0;
     // 先让 stdout/stderr 刷出去；若还有在跑的请求，最多再等 1 秒强制退出

@@ -98,12 +98,22 @@ export interface CollectError {
   at: number
 }
 
+export interface QualityAlert {
+  key: string
+  severity: "error" | "warn" | string
+  title: string
+  detail?: string | null
+  first_seen_at: number
+  last_seen_at: number
+}
+
 export interface QualityData {
   source_last_t?: number | null
   source_rows?: number | null
   error_rows?: number | null
   job_runs?: JobRun[]
   collect_errors?: CollectError[]
+  alerts?: QualityAlert[]
   schema_ok?: boolean
   checked_at?: number | null
 }

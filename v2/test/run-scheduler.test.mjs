@@ -4,6 +4,9 @@
  */
 
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 
 import { nextHourDelayMs } from '../jobs/scheduler.mjs';
@@ -21,9 +24,13 @@ import {
   runOnce,
   shouldRunNow,
   SPEND_ALIGN_MS,
+  syncChannelStatesWithJob,
+  TASK_CHANNEL_STATE,
   TASK_LOGS,
   TASK_SPEND,
 } from '../jobs/run-scheduler.mjs';
+import { openDashboardDb } from '../store/dashboard.mjs';
+import { makeTempDir } from './helpers/fixture.mjs';
 
 function makeFakeTimer() {
   const timeouts = [];
@@ -392,4 +399,33 @@ test('createLoop：传 nextDelayMs 时每轮按墙钟重算，不再用 setInter
   loop.stop();
   assert.equal(timer.timeouts[2].cleared, true);
   assert.equal(loop.scheduled, false);
+});
+
+test('channel-state 独立 job：成功记录 channels_synced，失败记录 error', () => {
+  const dir = makeTempDir('v2-channel-state-job-');
+  const relayFile = path.join(dir, 'relay.db');
+  const relay = new DatabaseSync(relayFile);
+  relay.exec('CREATE TABLE channels (id INTEGER PRIMARY KEY, name TEXT, base_url TEXT)');
+  relay.prepare('INSERT INTO channels (id, name, base_url) VALUES (?, ?, ?)')
+    .run(47, '鸡出没 kimi', 'https://xcmapi.org');
+  relay.close();
+  const dashboard = openDashboardDb(path.join(dir, 'dashboard.db'));
+  try {
+    assert.equal(syncChannelStatesWithJob(dashboard, relayFile), 1);
+    const ok = dashboard.prepare(
+      'SELECT status, detail FROM job_runs WHERE job = ? ORDER BY id DESC LIMIT 1',
+    ).get(TASK_CHANNEL_STATE);
+    assert.equal(ok.status, 'ok');
+    assert.deepEqual(JSON.parse(ok.detail), { channels_synced: 1 });
+
+    assert.throws(() => syncChannelStatesWithJob(dashboard, path.join(dir, 'missing.db')), /源库不存在/);
+    const failed = dashboard.prepare(
+      'SELECT status, detail FROM job_runs WHERE job = ? ORDER BY id DESC LIMIT 1',
+    ).get(TASK_CHANNEL_STATE);
+    assert.equal(failed.status, 'error');
+    assert.match(JSON.parse(failed.detail).message, /源库不存在/);
+  } finally {
+    dashboard.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

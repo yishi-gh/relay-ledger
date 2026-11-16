@@ -15,6 +15,7 @@ import {
 import crypto from 'node:crypto';
 import { readChannelStates, readLiveChannelIds } from '../store/channel-state.mjs';
 import { readRoutingSnapshot } from '../store/channel-routing.mjs';
+import { listActiveAlerts } from '../store/alerts.mjs';
 import { buildChannelAssociations } from './channel-associations.mjs';
 import {
   computeMargin,
@@ -1247,7 +1248,14 @@ export function createApi({
 
     // 售出按日归档：day 粒度把归档日并入对应渠道/账户的日桶，hour 粒度不变
     const archive = granularity === 'day' ? archiveByDay(range, { withChannel: true }) : null;
-    const allRevenueRows = archive ? [...revenueRows, ...archive.rows] : revenueRows;
+    const channelStates = readChannelStates(dashboard);
+    const currentName = (channelId, fallback) =>
+      channelStates?.get(Number(channelId))?.name || fallback || '';
+    const allRevenueRows = (archive ? [...revenueRows, ...archive.rows] : revenueRows)
+      .map((row) => ({
+        ...row,
+        channel_name: currentName(row.channel_id, row.channel_name),
+      }));
 
     return {
       ...ledgerSeries(accounts, {
@@ -1264,6 +1272,9 @@ export function createApi({
     const range = resolveRange(searchParams);
     // channel_state 为空（旧库/首轮采集前）时返回 null：不过滤，保持旧行为
     const liveIds = readLiveChannelIds(dashboard);
+    const channelStates = readChannelStates(dashboard);
+    const currentName = (channelId, fallback) =>
+      channelStates?.get(Number(channelId))?.name || fallback || '';
     const agg = source.prepare(
       `SELECT channel_id,
               MAX(channel_name) AS channel_name,
@@ -1323,7 +1334,7 @@ export function createApi({
       const latency = latencyByChannel.get(key);
       return {
         channel_id: r.channel_id,
-        channel_name: r.channel_name ?? '',
+        channel_name: currentName(r.channel_id, r.channel_name),
         revenue: round6(r.revenue ?? 0),
         quota: r.quota ?? 0,
         tokens_total: (r.input_total ?? 0) + (r.output ?? 0),
@@ -1359,7 +1370,7 @@ export function createApi({
       }
       byChannel.set(key, {
         channel_id: r.channel_id,
-        channel_name: r.channel_name ?? '',
+        channel_name: currentName(r.channel_id, r.channel_name),
         revenue: round6(r.revenue ?? 0),
         quota: r.quota ?? 0,
         tokens_total: (r.input_total ?? 0) + (r.output ?? 0),
@@ -1848,6 +1859,14 @@ export function createApi({
       error_rows: errorRows,
       job_runs: jobs,
       collect_errors: collectErrors(),
+      alerts: listActiveAlerts(dashboard).map((alert) => ({
+        key: alert.alert_key,
+        severity: alert.severity,
+        title: alert.title,
+        detail: alert.detail,
+        first_seen_at: alert.first_seen_at,
+        last_seen_at: alert.last_seen_at,
+      })),
       jobs: {
         job: 'collect-spend',
         last_run_at: lastAt,
@@ -2294,6 +2313,7 @@ export function createApi({
         endpoint: safeOrigin(channel?.base_url),
         account_ids: associations.owners.get(id) ?? [],
         owner_source: owner.source,
+        owner_reason: owner.reason ?? null,
         owner_candidates: owner.candidates,
         model_mapping: mapping.model_mapping,
         mapping_error: mapping.mapping_error,

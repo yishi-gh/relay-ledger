@@ -47,6 +47,7 @@ v2/
 ├── jobs/
 │   ├── collect-spend.mjs 采集一轮：ensureAuth + 余额 + 入账 + 上报消费 → dashboard.db
 │   ├── collect-site-logs.mjs 采集本站消耗日志（默认直读站点 SQLite，可回退 HTTP 导出）→ db/sites/<site>.db
+│   ├── collect-alerts.mjs 检查连续失败、余额陈旧、渠道状态失败与未归属收入，投递 webhook
 │   ├── scheduler.mjs     整点对齐延迟 nextHourDelayMs（纯函数）
 │   └── run-scheduler.mjs 常驻采集入口：挂两个定时任务，供 systemd / 服务器使用
 ├── deploy/
@@ -109,6 +110,8 @@ v2/
 渠道行：`upstream_account` 从配置的 `channels` 反查（返回账户显示名）；一个渠道被多个账户声明时取第一个并标
 `margin_status = 'unallocated'`，只给账户级毛利。渠道无账户声明时为 `unconfigured`；
 渠道只属于已停用账户时为 `disabled_account`（账户仍在归属里，只是没有成本和余额）。
+没有显式 owner 的渠道会先按 origin、再按“注册域名标签 + 名称 token”自动归属；后者用于同品牌换域名
+（如 `xcmapi.org` / `www.xcmapi.com`），候选不唯一时不猜。
 
 渠道行的 `top_model` 是区间内 `SUM(cost)` 最高的模型：`{ model, revenue, tokens, per_1e8 }`。
 `tokens = input_total + output`（该模型自身口径），`per_1e8 = revenue / (tokens / 1e8)`；
@@ -129,7 +132,7 @@ v2/
 | `GET /api/models?from=&to=` | 按 `model` 聚合售出、请求、token、占比、额度/亿Token 与上游账户；归档无模型维度 |
 | `GET /api/capital?from=&to=` | 账户余额、区间成本/充值、固定 7 日日均与续航，并给可算账户的合计 |
 | `GET /api/upstreams?from=&to=` | 账户级账本：期初期末余额、credits、consumption、毛利 |
-| `GET /api/quality` | 源库最后时间、行数、error_logs 行数、job_runs、collect_errors、schema_ok |
+| `GET /api/quality` | 源库最后时间、行数、error_logs 行数、job_runs、collect_errors、活动告警、schema_ok |
 | `GET /api/errors?from=&to=` | nginx 4xx/5xx 按北京整点分桶（含空桶）、状态码 Top 8、路径组 Top 6；区间上限 31 天 |
 | `GET /api/status?from=&to=&level=channel\|group&bucket=15m\|1h` | 渠道/分组健康：成功请求、错误、可用率与分桶状态；只统计启用渠道 |
 | `GET /api/routes` | 渠道、账户归属、abilities 与最近 1 小时健康快照；不访问上游 |
@@ -352,9 +355,9 @@ node v2/jobs/run-scheduler.mjs --once
 - `scheduler.mjs`：只提供 `nextHourDelayMs(nowMs)`，即距「下一个整点 + 10 秒」的毫秒数
   （最小 1000ms，跨日跨月由时间戳自然处理）。`run-scheduler.mjs` 用它算余额采集的首轮延迟，
   常驻定时链在 `run-scheduler.mjs` 的 `createLoop` 里。
-- 每轮站点日志采集开始时，`run-scheduler.mjs` 会把源库 `channels` 整表同步进看板库
-  `channel_state`（`job_runs.detail.channels_synced` 记本轮写入数）；源库读不到时只打一行 warn，
-  不影响日志采集。首次部署时该表为空，接口按「不过滤」回退，跑完一轮日志采集后生效。
+- 每轮站点日志采集开始前，`run-scheduler.mjs` 会把源库 `channels` 整表同步进看板库
+  `channel_state`，并单独写 `channel-state` 的 `job_runs`（`channels_synced` 记本轮写入数）。
+  同步失败只影响该 job，日志采集仍继续；`/api/services` 会把 `channel-state` 标红，不再只打一行 warn。
 - `newapi.mjs`：`/api/user/self` 的 `quota` 按 `quota_per_unit` 折算 USD；
   `/api/log/self?type=1`（充值）与 `type=4`（赠额）分页求和；`/api/log/self/stat` 取上报消费。
   200 + `success:false` 且 message 是鉴权失败（“无效的令牌”“未登录”等）时判 `auth_failed`，
@@ -362,12 +365,13 @@ node v2/jobs/run-scheduler.mjs --once
 - `sub2api.mjs`：`/api/v1/auth/me` 的 `balanceUsd`（退回 `quota`），
   `/api/v1/usage/stats?period=today` 的 `total_actual_cost`；充值明确 `unsupported`，不写 0。
   另导出 `fetchBalanceByKey`：用中转站渠道 key 请求 `GET /v1/usage`，key 只进请求头。
-- `collect-spend.mjs`：sub2api 账户配置了 `channels` 时，先按顺序从 `--relay-db`（默认
+- `collect-spend.mjs`：sub2api 账户按“显式 channels + 自动归属 channels”的顺序，从 `--relay-db`（默认
   `/home/newapi/one-api.db`，环境变量 `RELAY_DB_FILE`）的 `channels.key` / `channels.base_url`
   请求 `GET {base_url}/v1/usage`，第一个成功即作为余额，`job_runs.detail` 记 `balance_source='channel_key'`；
   全部失败或 relay 库不存在时静默退回会话采集（`ensureAuth` + 上面的会话余额接口，
   `balance_source='session'`）。NewAPI 账户仍只走会话。每账户的 `status` / `reason` 写进
   `job_runs.detail`，供 `/api/quality.collect_errors` 使用；key 不进 detail、日志或错误信息。
+  自动归属渠道的 key 先用最近余额快照校验，偏差超过 0.5% / 0.001 USD 时跳过并回退会话，避免误用别的余额池。
   账户配置 `"session": false` 表示该站只有永久 API Key、没有可用会话（例如只发长期 PAT 的上游），
   采集器只用渠道 key 取余额，入账与上报消费记 `unconfigured` / `not_configured`——
   没有数据源不算采集失败，整轮仍是 `ok`，也不会出现在 `collect_errors` 里。
@@ -379,6 +383,10 @@ node v2/jobs/run-scheduler.mjs --once
   若本次余额高于上一条快照，先减去该区间内已记录的 `credit_event`，剩余部分补一条
   `source='balance_delta'` 的 `topup`（`note='inferred from balance rise'`）；余额下降或不变不记，
   同一 `(account_id, source, t_ms)` 不重复插入。
+- `collect-alerts.mjs`：每 15 分钟检查连续 4 轮余额采集未完全成功、`channel-state` 最近一次失败、
+  有启用渠道但余额超过 2 小时未更新、最近 24 小时未归属渠道售出 ≥ 1 USD。活动告警写入 `alert_state`
+  并出现在 `/api/quality.alerts`；配置 `RELAY_ALERT_WEBHOOK` 时 POST JSON 到 webhook，
+  同一告警 24 小时内不重复投递；未配置时只落库/面板可见。
 - `sources/upstream/http.mjs`：按 origin 串行 + 最小间隔；401/403 与 429 不重试（429 让整轮停止），
   5xx 与网络错误重试一次，超时直接失败；错误信息只含方法、状态码、path。
 - `newapi.mjs` / `sub2api.mjs` 只接收 `headers`，不复制认证逻辑；认证头由 `auth.mjs` 生成。
@@ -444,7 +452,7 @@ node v2/jobs/rollup-logs.mjs --keep-days=180 --vacuum    # 放宽保留期并回
 
 站点库 `logs` 没有 HTTP 状态码，4xx/5xx 只能从 nginx 访问日志补。采集任务把错误按
 「北京整点 × 状态码 × 路径组」累加进看板库 `http_errors_hourly`，用于回答
-「哪一小时、哪类接口、哪个状态码、多少次」。表结构（`IF NOT EXISTS`，`SCHEMA_VERSION` 不变）：
+「哪一小时、哪类接口、哪个状态码、多少次」。表结构（`IF NOT EXISTS`，不重写旧库）：
 
 ```sql
 CREATE TABLE IF NOT EXISTS http_errors_hourly (
@@ -516,12 +524,13 @@ test -f frontend/dist/index.html
 test -f shared/settings-defaults.json
 ```
 
-**A. 常驻 runner（推荐）**：一个进程管两个采集任务，余额对齐整点 +10 秒，站点日志每 1 小时。
+**A. 常驻 runner（推荐）**：一个进程管余额、站点日志、渠道状态与告警检查任务。
 
 ```bash
 node v2/jobs/run-scheduler.mjs                          # 余额每小时 + 站点日志每 1 小时
 node v2/jobs/run-scheduler.mjs --no-logs                # 只采余额
 node v2/jobs/run-scheduler.mjs --spend-interval-ms=1800000
+RELAY_ALERT_WEBHOOK=https://hooks.example/relay node v2/jobs/run-scheduler.mjs
 ```
 
 systemd 示例：`v2/deploy/relay-collector.service`（`Restart=always`、`RestartSec=10`）。
@@ -655,7 +664,7 @@ curl -i http://127.0.0.1:8790/login        # 200 + 登录页
 ## 看板库
 
 `v2/db/dashboard.db` 表：`upstream_account`、`channel_state`、`balance_snapshot`、`credit_event`、`credit_window`、
-`upstream_spend_daily`、`job_runs`、`schema_meta`。
+`upstream_spend_daily`、`job_runs`、`alert_state`、`schema_meta`。
 写入前上游卡片显示 `unavailable`，`job_runs` 为空数组；`collect-spend` 跑过一轮后才有余额与入账数据。
 
 写入约定（读取层不做任何换算与推断）：

@@ -34,7 +34,7 @@
 | 8 | `GET/HEAD /api/models?from=&to=` | 模型聚合：售出、请求、token、占比、额度/亿 Token 与上游账户 |
 | 9 | `GET/HEAD /api/capital?from=&to=` | 账户余额、区间成本 / 充值、7 日日均与续航 |
 | 10 | `GET/HEAD /api/upstreams?from=&to=` | 账户级账本：期初 / 期末余额、credits、consumption、毛利 |
-| 11 | `GET/HEAD /api/quality` | 源库最后时间、行数、任务记录、采集错误、缺快照账户与 schema 状态 |
+| 11 | `GET/HEAD /api/quality` | 源库最后时间、行数、任务记录、采集错误、活动告警、缺快照账户与 schema 状态 |
 | 12 | `GET/HEAD /api/errors?from=&to=` | nginx 4xx/5xx 按北京整点分桶、状态码 Top 8、路径组 Top 6；区间上限 31 天 |
 | 13 | `GET/HEAD /api/status?from=&to=&level=channel\|group&bucket=15m\|1h` | 渠道或分组健康；缺省 `level=channel`，桶宽按区间跨度选择 |
 | 14 | `GET/HEAD /api/routes` | 渠道路由与归属快照、abilities、最近 1 小时健康；只读看板库与源库 |
@@ -47,6 +47,11 @@
 各业务接口的响应字段、推导规则与归档并入行为见 [v2/README.md](./README.md#api)；本文只补充跨接口语义与独立端点。
 
 ## 端点语义补充
+
+### `/api/quality`
+
+- `collect_errors` 仍只来自最新一轮 `collect-spend`；`alerts` 是 `alert_state` 中 `resolved_at IS NULL` 的活动告警，含 `key / severity / title / detail / first_seen_at / last_seen_at`。
+- 告警由 `alert-check` 任务写入；未配置 `RELAY_ALERT_WEBHOOK` 时只落库，不影响接口返回。
 
 ### `/api/settings`
 
@@ -73,7 +78,7 @@
 ### `/api/routes`
 
 - 只读取看板库中的路由快照与源库日志，不调用上游接口。
-- 顶层含快照可用性、同步时间、错误、`channels`、`accounts`、`abilities` 与 `near_1h`。渠道项含 `id`、`name`、`status`、`state`、`endpoint`、`account_ids`、`owner_source`、`owner_candidates`、`model_mapping`、`mapping_error`；账户项含 `id`、`name`、`website`、`channel_ids`、`auto_channels`。
+- 顶层含快照可用性、同步时间、错误、`channels`、`accounts`、`abilities` 与 `near_1h`。渠道项含 `id`、`name`、`status`、`state`、`endpoint`、`account_ids`、`owner_source`、`owner_reason`（`origin` / `brand` / `null`）、`owner_candidates`、`model_mapping`、`mapping_error`；账户项含 `id`、`name`、`website`、`channel_ids`、`auto_channels`。
 - `near_1h` 使用最近 1 小时日志与 `upstream_error` 聚合，返回每渠道请求数、错误数、尝试数、可用率与状态，以及当前 `health` 阈值。
 
 ### `/api/status`

@@ -652,7 +652,9 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
 
       let ownerInfo: string | null = null
       if (channel.owner_source === "auto") {
-        ownerInfo = "关联方式: 自动匹配"
+        ownerInfo = channel.owner_reason === "brand"
+          ? "关联方式: 自动匹配（同品牌域名）"
+          : "关联方式: 自动匹配（同源）"
       } else if (channel.owner_source === "explicit") {
         ownerInfo = "关联方式: 明确配置"
       } else if (channel.owner_source === "ambiguous") {
@@ -1081,8 +1083,15 @@ export function ChannelRoutesView({ refreshKey }: ChannelRoutesViewProps) {
                     )}
                   </span>
                   {selectedChannel.owner_source === "auto" && (
-                    <span className="text-[11px] leading-[15px] text-muted-foreground truncate" title="根据接口网址自动匹配关联财务账户">
-                      关联方式：自动匹配
+                    <span
+                      className="text-[11px] leading-[15px] text-muted-foreground truncate"
+                      title={selectedChannel.owner_reason === "brand"
+                        ? "根据注册域名标签与渠道名称自动匹配关联财务账户"
+                        : "根据接口网址同源自动匹配关联财务账户"}
+                    >
+                      {selectedChannel.owner_reason === "brand"
+                        ? "关联方式：自动匹配（同品牌域名）"
+                        : "关联方式：自动匹配（同源）"}
                     </span>
                   )}
                   {selectedChannel.owner_source === "explicit" && (
