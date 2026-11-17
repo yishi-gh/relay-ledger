@@ -54,9 +54,12 @@ function runtime({ stored = {}, defaultRange, href = "http://localhost/?view=ove
     storage.set(PREFERENCES, JSON.stringify({ display: defaults.display, refresh: { ...defaults.refresh, defaultRange } }))
   }
   const requests = []
+  const collectionRequests = []
+  let collectionReply = null
   const failures = new Set()
   const held = new Map()
   const timers = new Map()
+  let nextTimerId = 0
   const windowListeners = new Map()
   const documentListeners = new Map()
   const historyCalls = []
@@ -68,7 +71,7 @@ function runtime({ stored = {}, defaultRange, href = "http://localhost/?view=ove
     },
     addEventListener(name, fn) { windowListeners.set(name, fn) },
     removeEventListener(name) { windowListeners.delete(name) },
-    setTimeout(callback, delay) { const id = timers.size + 1; timers.set(id, { callback, delay }); return id },
+    setTimeout(callback, delay) { const id = ++nextTimerId; timers.set(id, { callback, delay }); return id },
     clearTimeout(id) { timers.delete(id) },
     history: { state: { existing: true }, ...Object.fromEntries(["pushState", "replaceState"].map((method) => [method, (state, title, url) => {
       historyCalls.push({ method, state, url })
@@ -120,10 +123,17 @@ function runtime({ stored = {}, defaultRange, href = "http://localhost/?view=ove
   const ui = new Proxy({}, { get: (_target, key) => key === "__esModule" ? true : String(key) })
   const context = vm.createContext({
     console, window, document, URL, URLSearchParams, AbortController,
+    setTimeout: window.setTimeout, clearTimeout: window.clearTimeout,
     Date: class extends Date { static now() { return now } },
     fetch: async (input, options) => {
       const url = new URL(input)
+      if (url.pathname === "/api/refresh") {
+        collectionRequests.push({ url, options })
+        if (collectionReply) return collectionReply(url, options)
+        return Response.json({ groups: [{ resource: "logs", request_id: 1, completed_id: 1, state: "fresh", last_success_at: now - 1000, last_attempt_at: now - 1000, retry_at: null, error: null }], revision: "fixture" })
+      }
       requests.push({ url, options })
+      if (url.pathname === "/api/meta" && failures.has("/api/meta")) return Response.json({ error: { message: "meta unavailable" } }, { status: 503 })
       if (url.pathname === "/api/meta") return Response.json({ max_t: metaMaxT, rows: 10 })
       const range = { from: Number(url.searchParams.get("from")), to: Number(url.searchParams.get("to")) }
       if (url.pathname === "/api/overview") await held.get(range.from)?.promise
@@ -211,7 +221,7 @@ function runtime({ stored = {}, defaultRange, href = "http://localhost/?view=ove
     await new Promise(setImmediate)
     return render()
   }
-  return { load, requests, failures, held, storage, storageReads, historyCalls, window, timers, render, find, settle, setNow(value) { now = value } }
+  return { load, requests, collectionRequests, failures, held, storage, storageReads, historyCalls, window, timers, render, find, settle, setCollectionReply(reply) { collectionReply = reply }, setNow(value) { now = value } }
 }
 
 test("北京时间输入与范围不依赖 OS 时区，保留旧 24h/7d 锚点", () => {
@@ -420,6 +430,75 @@ test("真实 App 今日手动与自动刷新重算 now，资本旧入口 replace
   assert.equal(r.find("RankView").dateRange.to, NOW + 2 * HOUR)
   assert.equal(r.find("RankView").profitSites.length, 3)
   assert.equal(r.requests.filter(({ url }) => url.pathname === "/api/models").length, 0)
+})
+
+test("进入和切换页面检查过期，主动刷新 force，历史范围不补采", async () => {
+  const r = runtime()
+  r.render()
+  await r.settle()
+  assert.deepEqual(JSON.parse(r.collectionRequests[0].options.body), { view: "overview", force: false })
+  r.find("AppSidebar").onSelectView("models")
+  r.render()
+  await r.settle()
+  assert.deepEqual(JSON.parse(r.collectionRequests.at(-1).options.body), { view: "models", force: false })
+  r.find("TopBar").onRefresh()
+  await r.settle()
+  assert.deepEqual(JSON.parse(r.collectionRequests.at(-1).options.body), { view: "models", force: true })
+  const count = r.collectionRequests.length
+  r.find("TopBar").onTimeRangeChange("custom", { from: NOW - DAY, to: NOW - HOUR })
+  r.render()
+  await r.settle()
+  r.find("TopBar").onRefresh()
+  await r.settle()
+  r.find("AppSidebar").onSelectView("profit")
+  r.render()
+  await r.settle()
+  assert.equal(r.collectionRequests.length, count, "固定历史的进入、刷新、切页都不触发源头采集")
+})
+
+test("按需采集失败保留数据，读取失败不刷新成功时间", async () => {
+  const r = runtime({ defaultRange: "today" })
+  r.render()
+  await r.settle()
+  r.setCollectionReply(() => Response.json({ error: { code: "collector_unavailable", message: "采集进程离线" } }, { status: 503 }))
+  r.setNow(NOW + HOUR)
+  r.find("TopBar").onRefresh()
+  await r.settle()
+  assert.equal(r.find("OverviewView").kpiData.revenue, 1000)
+  assert.equal(r.find("AlertTitle").children, "本次采集未完成")
+  assert.match(r.find("AlertDescription").children.join(""), /采集进程离线/)
+  r.find("AppSidebar").onSelectView("settings")
+  r.render()
+  await r.settle()
+  const readAt = r.find("SettingsView").lastRefreshTime
+  r.failures.add("/api/meta")
+  r.setNow(NOW + 2 * HOUR)
+  r.find("TopBar").onRefresh()
+  await r.settle()
+  assert.equal(r.find("SettingsView").lastRefreshTime, readAt)
+  assert.equal(r.find("AlertTitle").children, "本次数据读取失败")
+})
+
+test("离开页面取消旧补采等待，迟到失败不覆盖新页面", async () => {
+  const r = runtime()
+  r.render()
+  await r.settle()
+  const hold = deferred()
+  r.setCollectionReply(async () => {
+    await hold.promise
+    return Response.json({ error: { message: "旧页面失败" } }, { status: 503 })
+  })
+  r.find("TopBar").onRefresh()
+  await r.settle()
+  const sourceSignal = r.collectionRequests.at(-1).options.signal
+  r.find("AppSidebar").onSelectView("settings")
+  r.render()
+  await r.settle()
+  assert.equal(sourceSignal.aborted, true)
+  hold.resolve()
+  await r.settle()
+  assert.equal(r.find("AlertTitle"), null)
+  assert.equal(r.find("AppSidebar").currentView, "settings")
 })
 
 test("损坏的自定义记忆只发送 24h 请求，错误在 App 可见", async () => {

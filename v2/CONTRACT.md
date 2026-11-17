@@ -16,11 +16,11 @@
 - 分页参数为整数；`page` 最小 1，`page_size` 范围 1..200，超过 200 收敛为 200。
 - API 错误响应统一为 `{"error":{"code":"...","message":"..."}}`。参数错误为 400，未知接口为 404，方法不允许为 405，服务端异常为 500；静态文件的 404 / 503 为纯文本。
 - 业务 JSON 响应统一 `Cache-Control: no-store`；站点图标的 404 JSON 是例外，使用 6 小时私有负缓存。业务接口成功响应可带 `X-Cache: HIT|MISS`；未知接口和普通错误响应不缓存。
-- `API_ROUTES` 中的业务接口响应有进程内缓存：key 为完整路径、查询串与渠道归属快照版本，默认 TTL 60 秒、最多 200 条，`API_CACHE_TTL_MS=0` 可关闭；`/api/healthz` 不缓存。设置 PATCH 成功后会清空缓存；设置、服务状态与站点图标不经过这张缓存表。
+- `API_ROUTES` 中的业务接口响应有进程内缓存：key 为完整路径、查询串、渠道归属快照版本与相关采集资源完成版本，默认 TTL 60 秒、最多 200 条，`API_CACHE_TTL_MS=0` 可关闭；`/api/healthz` 不缓存。采集完成（含部分失败）后相关缓存失效；设置 PATCH 成功后清空缓存。设置、采集刷新、服务状态与站点图标不经过这张缓存表。
 
 ## 端点索引
 
-以下共 19 个路径，覆盖 `v2/server.mjs` 的 16 个 `API_ROUTES` 与 3 个独立处理路径。
+以下共 20 个路径，覆盖 `v2/server.mjs` 的 16 个 `API_ROUTES` 与 4 个独立处理路径。
 
 | # | 方法与路径 | 说明 |
 | --- | --- | --- |
@@ -43,10 +43,20 @@
 | 17 | `GET/HEAD/PATCH /api/settings` | 运行时设置读取与更新；字段、校验区间与采集器状态见 [SETTINGS.md](../docs/SETTINGS.md) |
 | 18 | `GET/HEAD /api/services` | 采集服务健康时序；支持 `range=24h\|7d` 或成对 `from`/`to` |
 | 19 | `GET/HEAD /api/site-logo` | 站点 / 渠道 / 账户图标；`kind=channel\|account\|site`，`id` 按类型校验，`v` 只接受 2 |
+| 20 | `GET/HEAD/POST /api/refresh` | 按页面请求补采与查询进度；实际采集只在常驻采集进程执行 |
 
 各业务接口的响应字段、推导规则与归档并入行为见 [v2/README.md](./README.md#api)；本文只补充跨接口语义与独立端点。
 
 ## 端点语义补充
+
+### `/api/refresh`
+
+- `POST` 请求体严格为 `{view, force}`：页面使用侧栏标识，`force` 是布尔值。必须同源、`application/json`、正文不超过 1 KiB，否则分别返回 403/415/413。
+- `GET/HEAD ?view=...` 只读进度，不创建任务。未知页面返回 400，其它方法返回 405。
+- 业务日志、上游错误、入口错误和渠道配置成功后复用 1 分钟；余额及充值复用 5 分钟。`force=true` 可越过复用时限，仍合并在途任务，并受成功后 10 秒（余额 30 秒）冷却及失败后 30 秒起、最多 5 分钟的指数退避约束。
+- 响应为 `{groups, revision}`。每组含 `resource`、`request_id`、`completed_id`、`state`、`last_attempt_at`、`last_success_at`、`retry_at`、`error`；状态为 `queued/running/fresh/cooldown/error/disabled`。有排队或执行中任务返回 202，否则 200。客户端等待自己请求的 ID，不等待后续用户发起的新一轮。
+- 成功时间采用该轮开始时间，保守反映数据观察时刻；空增量成功会推进，失败、部分失败或源文件缺失不推进。采集未启用或进程心跳超过 90 秒明确显示不可用，不能视作采集成功。
+- 请求共用 `dashboard.db` 中的 `collection_refresh` 表，定时和按需任务通过同一入口原子认领。看板与采集进程须一起更新。固定自定义范围由前端只读取本地接口，不发送补采请求；采集不会回补历史余额。
 
 ### `/api/quality`
 

@@ -27,8 +27,9 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig, resolveConfigFile } from '../lib/config.mjs';
 import { ensureDataDirs, INSTANCE } from '../lib/instance.mjs';
 import { createRuntimeSettingsStore } from '../lib/runtime-settings.mjs';
+import { createCollectionRefreshStore, createOnDemandCollector } from '../lib/collection-refresh.mjs';
 import { replaceChannelStates } from '../store/channel-state.mjs';
-import { recordRoutingFailure, replaceRoutingSnapshot } from '../store/channel-routing.mjs';
+import { readRoutingSnapshot, recordRoutingFailure, replaceRoutingSnapshot } from '../store/channel-routing.mjs';
 import { openDashboardDb, syncAccounts } from '../store/dashboard.mjs';
 import { openLogsDb } from '../store/site-logs.mjs';
 import { runCollectSpend } from './collect-spend.mjs';
@@ -821,7 +822,7 @@ export function syncChannelStatesWithJob(
   }
 }
 
-async function runLogsRound() {
+async function runLogsRound({ syncChannels } = {}) {
   const startedAt = Date.now();
   let jobDb = null;
   let db = null;
@@ -831,7 +832,9 @@ async function runLogsRound() {
     // 渠道状态独立于日志采集：源库读不到时只打一行 warn，本轮照常采日志
     let channelsSynced = null;
     try {
-      channelsSynced = syncChannelStatesWithJob(jobDb, DEFAULT_DB_FILE);
+      channelsSynced = syncChannels
+        ? await syncChannels()
+        : syncChannelStatesWithJob(jobDb, DEFAULT_DB_FILE);
     } catch (err) {
       console.warn(`[run-scheduler] channel_state 同步失败：${redactMessage(err?.message ?? err)}`);
     }
@@ -904,7 +907,17 @@ export function createDefaultTasks({
 } = {}) {
   return {
     spend: () => runSpendRound({ v2Dir }),
-    logs: () => runLogsRound(),
+    logs: (options) => runLogsRound(options),
+    routes: () => {
+      const db = openDashboardDb(INSTANCE.paths.dashboardFile);
+      try {
+        const count = syncChannelStatesWithJob(db, DEFAULT_DB_FILE);
+        const snapshot = readRoutingSnapshot(db);
+        if (!snapshot.available || snapshot.error) throw new Error(snapshot.error ?? '渠道路由快照不可用');
+        return count;
+      }
+      finally { db.close(); }
+    },
     alerts: () => withJobRun(TASK_ALERTS, () => runAlertsRound()),
     // 聚合自己会打一行汇总；常驻日志只保留 [run-scheduler] http-errors ok Xms
     httpErrors: () =>
@@ -994,23 +1007,61 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
     );
   }
 
-  const jobTasks =
+  let jobTasks =
     tasks ?? createDefaultTasks({ pruneDaysRaw: prune.daysRaw, pruneDaysJobs: prune.daysJobs });
-  const collectionScheduler = createCollectionScheduler({
-    argv,
-    options,
-    tasks: jobTasks,
-    store: createRuntimeSettingsStore({
-      dataDir: INSTANCE.paths.dataDir,
-      collectionDefaults: {
-        logsMinutes: DEFAULT_LOGS_INTERVAL_MS / 60_000,
-        spendMinutes: DEFAULT_SPEND_INTERVAL_MS / 60_000,
+  let demandCollector = null;
+  let demandDb = null;
+  if (!options.once) {
+    const rawTasks = jobTasks;
+    demandDb = openDashboardDb(INSTANCE.paths.dashboardFile);
+    const resources = [
+      'spend',
+      ...(!options.noLogs ? ['routes', 'logs'] : []),
+      ...(upstreamErrors.enabled ? ['errors'] : []),
+      ...(httpErrors.enabled ? ['httpErrors'] : []),
+    ].filter((resource) => typeof rawTasks[resource === 'errors' ? 'upstreamErrors' : resource] === 'function');
+    demandCollector = createOnDemandCollector({
+      store: createCollectionRefreshStore(demandDb),
+      resources,
+      tasks: {
+        spend: () => rawTasks.spend(),
+        routes: () => rawTasks.routes(),
+        logs: () => rawTasks.logs({ syncChannels: () => demandCollector.run('routes') }),
+        errors: () => rawTasks.upstreamErrors(),
+        httpErrors: () => rawTasks.httpErrors(),
       },
-    }),
-    now,
-    log,
-    errorLog,
-  }).start();
+      logError: errorLog,
+    }).start();
+    jobTasks = {
+      ...rawTasks,
+      spend: () => demandCollector.run('spend'),
+      logs: () => demandCollector.run('logs'),
+      ...(resources.includes('errors') ? { upstreamErrors: () => demandCollector.run('errors') } : {}),
+      ...(resources.includes('httpErrors') ? { httpErrors: () => demandCollector.run('httpErrors') } : {}),
+    };
+  }
+  let collectionScheduler;
+  try {
+    collectionScheduler = createCollectionScheduler({
+      argv,
+      options,
+      tasks: jobTasks,
+      store: createRuntimeSettingsStore({
+        dataDir: INSTANCE.paths.dataDir,
+        collectionDefaults: {
+          logsMinutes: DEFAULT_LOGS_INTERVAL_MS / 60_000,
+          spendMinutes: DEFAULT_SPEND_INTERVAL_MS / 60_000,
+        },
+      }),
+      now,
+      log,
+      errorLog,
+    }).start();
+  } catch (error) {
+    await demandCollector?.stop();
+    demandDb?.close();
+    throw error;
+  }
 
   if (options.once) {
     const result = await runOnce({
@@ -1134,7 +1185,7 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
   );
 
   let stopping = false;
-  const shutdown = (signal) => {
+  const shutdown = async (signal) => {
     if (stopping) return;
     stopping = true;
     collectionScheduler.stop();
@@ -1143,10 +1194,10 @@ async function main(argv, { tasks, now = Date.now, log = console.log, errorLog =
     httpErrorsLoop?.stop();
     upstreamErrorsLoop?.stop();
     alertsLoop?.stop();
-    log(`[run-scheduler] 收到 ${signal}，定时器已清理，退出`);
+    log(`[run-scheduler] 收到 ${signal}，定时器已清理，等待采集收尾`);
     process.exitCode = 0;
-    // 先让 stdout/stderr 刷出去；若还有在跑的请求，最多再等 1 秒强制退出
-    setTimeout(() => process.exit(0), 1000).unref();
+    await demandCollector?.stop();
+    demandDb?.close();
   };
   process.once('SIGINT', () => shutdown('SIGINT'));
   process.once('SIGTERM', () => shutdown('SIGTERM'));

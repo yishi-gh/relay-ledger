@@ -44,7 +44,12 @@ function formatFreshnessText(minutes: number | null): string {
 }
 
 export function FreshnessCard({ accounts = [], now, className }: FreshnessCardProps) {
-  const [clockFallback] = React.useState(() => Date.now())
+  const [clockFallback, setClockFallback] = React.useState(() => Date.now())
+  React.useEffect(() => {
+    if (now != null) return
+    const timer = setInterval(() => { if (!document.hidden) setClockFallback(Date.now()) }, 1000)
+    return () => clearInterval(timer)
+  }, [now])
   const [expanded, setExpanded] = React.useState(false)
   const clock = now ?? clockFallback
   const thresholds = getServerSettings().monitoring.freshness

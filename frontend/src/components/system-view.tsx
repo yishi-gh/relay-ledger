@@ -58,6 +58,7 @@ export interface SystemViewProps {
   timeRange?: RangeType
   previewMode?: boolean
   lastRefreshTime?: number
+  refreshKey?: number
 }
 
 type ServicesSnapshot =
@@ -91,13 +92,14 @@ export function SystemView({
   timeRange = "24h",
   previewMode = false,
   lastRefreshTime,
+  refreshKey,
 }: SystemViewProps) {
   const { collector } = useSettings()
 
   // 1. 服务状态数据 (/api/services)
   const servicesFrom = timeRange === "today" || timeRange === "custom" ? dateRange?.from : undefined
   const servicesTo = timeRange === "today" || timeRange === "custom" ? dateRange?.to : undefined
-  const servicesRangeKey = `${timeRange}:${servicesFrom ?? ""}:${servicesTo ?? ""}:${lastRefreshTime ?? ""}`
+  const servicesRangeKey = `${timeRange}:${servicesFrom ?? ""}:${servicesTo ?? ""}:${refreshKey ?? lastRefreshTime ?? ""}`
   const [servicesSnapshot, setServicesSnapshot] = React.useState<ServicesSnapshot | null>(null)
   const servicesLoading = servicesSnapshot?.rangeKey !== servicesRangeKey
   const servicesData = servicesSnapshot?.rangeKey === servicesRangeKey ? servicesSnapshot.data : null
@@ -129,7 +131,7 @@ export function SystemView({
 
   // 2. HTTP 错误数据快照 (/api/errors)
   const [errorsSnapshot, setErrorsSnapshot] = React.useState<ErrorsSnapshot | null>(null)
-  const errorsRangeKey = dateRange ? `${dateRange.from}:${dateRange.to}:${lastRefreshTime ?? ""}` : null
+  const errorsRangeKey = dateRange ? `${dateRange.from}:${dateRange.to}:${refreshKey ?? lastRefreshTime ?? ""}` : null
   const errorsLoading =
     errorsRangeKey !== null && errorsSnapshot?.rangeKey !== errorsRangeKey
   const errorsData =
@@ -167,15 +169,25 @@ export function SystemView({
 
   React.useEffect(() => {
     let cancelled = false
-    fetchHealthz()
-      .then((res) => {
+    let inFlight = false
+    const probe = async () => {
+      if (inFlight || document.hidden) return
+      inFlight = true
+      try {
+        const res = await fetchHealthz()
         if (!cancelled) setHealthOk(Boolean(res?.ok))
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) setHealthOk(false)
-      })
+      } finally {
+        inFlight = false
+        if (!cancelled) setLastCheckMs(Date.now())
+      }
+    }
+    void probe()
+    const timer = setInterval(() => { void probe() }, 10000)
     return () => {
       cancelled = true
+      clearInterval(timer)
     }
   }, [])
 

@@ -6,7 +6,7 @@
  * logs_daily 为聚合归档预留，当前只建表不写（明细超过保留期后仍能看历史）。
  */
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /** 余额快照的归一化要求：balance 必须已按账户 unit 折算（newapi 的 quota / quota_per_unit） */
 export const BALANCE_RAW_COLUMNS = {
@@ -17,6 +17,20 @@ export const BALANCE_RAW_COLUMNS = {
 };
 
 export const DASHBOARD_SCHEMA = [
+  // 面板只入队，采集进程执行；每个数据源最多有一轮待执行或执行中的请求。
+  `CREATE TABLE IF NOT EXISTS collection_refresh (
+     resource TEXT PRIMARY KEY,
+     request_id INTEGER NOT NULL DEFAULT 0,
+     completed_id INTEGER NOT NULL DEFAULT 0,
+     running_pid INTEGER,
+     enabled INTEGER NOT NULL DEFAULT 0,
+     heartbeat_at INTEGER,
+     last_attempt_at INTEGER,
+     last_success_at INTEGER,
+     retry_at INTEGER NOT NULL DEFAULT 0,
+     failures INTEGER NOT NULL DEFAULT 0,
+     error TEXT
+   )`,
   // 上游账户（由 v2/secrets/accounts.json 同步，不含任何凭据）
   `CREATE TABLE IF NOT EXISTS upstream_account (
      id         TEXT PRIMARY KEY,

@@ -24,6 +24,7 @@ import {
   SHARED_DEFAULTS,
 } from './lib/runtime-settings.mjs';
 import { buildServiceHealth } from './lib/service-health.mjs';
+import { createCollectionRefreshStore, resourcesForView } from './lib/collection-refresh.mjs';
 import { createSiteLogoService } from './lib/site-logos.mjs';
 import { openDashboardDb, syncAccounts } from './store/dashboard.mjs';
 import { ensureAggIndexes, LOGS_SCHEMA } from './store/site-logs.mjs';
@@ -335,13 +336,13 @@ function cacheTtlFromEnv(raw = process.env.API_CACHE_TTL_MS) {
  * 跑一个 /api/* 请求并处理缓存。未知接口返回 null，由调用方回 404。
  * 返回的 payload 是 JSON 字符串，cache 是 'HIT' / 'MISS'（不缓存的接口为 null）。
  */
-export function respondApi({ api, cache, pathname, url }) {
+export function respondApi({ api, cache, pathname, url, collectionStore = null }) {
   const handler = API_ROUTES[pathname];
   if (!handler) return null;
   const cacheable = pathname !== '/api/healthz';
   // 归属随路由快照变化：key 带快照身份，旧 HIT 在快照更新后自动失效；TTL 与容量不变
   const version = cacheable && typeof api?.cacheVersion === 'function' ? api.cacheVersion() : 'none';
-  const key = `${pathname}${url.search}|v=${version}`;
+  const key = `${pathname}${url.search}|v=${version}${collectionStore ? `|c=${collectionStore.version(pathname)}` : ''}`;
   if (cacheable) {
     const hit = cache.get(key);
     if (hit !== null) return { payload: hit, cache: 'HIT' };
@@ -532,10 +533,48 @@ async function handleSettingsRequest({ req, res, head, settingsStore, cache }) {
   sendJson(res, 200, settingsPayload(settingsStore));
 }
 
-/**
- * 请求处理入口：抽成工厂后，测试可以注入临时库、临时 dataDir 与真实 listen(0)，
- * 生产路径（缓存、401/405、静态文件）保持不变。
- */
+async function handleRefreshRequest({ req, res, head, url, collectionStore }) {
+  if (!['GET', 'HEAD', 'POST'].includes(req.method)) {
+    sendError(res, 405, 'method_not_allowed', '采集刷新只支持 GET/HEAD/POST', { head });
+    return;
+  }
+  let view = url.searchParams.get('view');
+  let force = false;
+  if (req.method === 'POST') {
+    if (!originAllowed(req)) {
+      sendError(res, 403, 'forbidden_origin', '采集刷新请求必须来自同源页面');
+      return;
+    }
+    if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] ?? '')) {
+      sendError(res, 415, 'unsupported_media_type', '请求体必须使用 application/json');
+      return;
+    }
+    const body = await readLimitedBody(req, 1024);
+    if (body.tooLarge) { sendError(res, 413, 'payload_too_large', '采集请求体不能超过 1 KiB'); return; }
+    let value;
+    try { value = JSON.parse(body.text); }
+    catch { sendError(res, 400, 'bad_json', '采集请求不是合法 JSON'); return; }
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || Object.keys(value).some((key) => !['view', 'force'].includes(key))
+      || typeof value.view !== 'string' || typeof value.force !== 'boolean') {
+      sendError(res, 400, 'invalid_refresh', '采集请求必须是 {view, force} 对象');
+      return;
+    }
+    ({ view, force } = value);
+  }
+  const resources = resourcesForView(view);
+  if (!collectionStore) {
+    sendError(res, 503, 'collector_unavailable', '按需采集不可用，请确认面板与采集进程均已更新');
+    return;
+  }
+  const result = req.method === 'POST'
+    ? collectionStore.request(resources, { force })
+    : collectionStore.read(resources);
+  const pending = result.groups.some((group) => ['queued', 'running'].includes(group.state));
+  sendJson(res, pending ? 202 : 200, result, { head });
+}
+
+/** 请求处理入口：测试可注入临时库、采集状态和真实 listen(0)。 */
 export function createRequestHandler({
   api,
   cache,
@@ -543,6 +582,7 @@ export function createRequestHandler({
   dashboard = null,
   now = Date.now,
   logoService = null,
+  collectionStore = null,
   webDir = WEB_DIR,
 }) {
   return async (req, res) => {
@@ -550,6 +590,11 @@ export function createRequestHandler({
     try {
       const url = new URL(req.url ?? '/', 'http://localhost');
       const pathname = url.pathname;
+
+      if (pathname === '/api/refresh') {
+        await handleRefreshRequest({ req, res, head, url, collectionStore });
+        return;
+      }
 
       if (pathname === '/api/settings') {
         await handleSettingsRequest({ req, res, head, settingsStore, cache });
@@ -665,7 +710,7 @@ export function createRequestHandler({
       }
 
       if (pathname.startsWith('/api/')) {
-        const result = respondApi({ api, cache, pathname, url });
+        const result = respondApi({ api, cache, pathname, url, collectionStore });
         if (!result) {
           sendError(res, 404, 'not_found', `未知接口 ${pathname}`, { head });
           return;
@@ -796,7 +841,8 @@ function main() {
     resolveSource: (input) => api.siteLogoSource(input),
   });
 
-  const server = http.createServer(createRequestHandler({ api, cache, settingsStore, dashboard, logoService }));
+  const collectionStore = createCollectionRefreshStore(dashboard);
+  const server = http.createServer(createRequestHandler({ api, cache, settingsStore, dashboard, logoService, collectionStore }));
 
   server.on('error', (err) => {
     console.error(`[v2] 服务启动失败: ${err.message}`);

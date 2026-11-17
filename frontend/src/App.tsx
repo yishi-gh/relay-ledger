@@ -25,6 +25,8 @@ import {
 } from "@/lib/api"
 import { getInitialTimeRangeSelection, rememberTimeRange, useSettings } from "@/lib/settings"
 import { startAutoRefresh } from "@/lib/refresh"
+import { refreshCollection, type CollectionRefreshPayload } from "@/lib/collection-refresh"
+import { formatTimestampShort } from "@/lib/formatters"
 import { aggregateProfitBuckets, buildTrafficChartData } from "@/lib/dashboard-data"
 import { bucketLabel, getTimeRangeKey, validateCustomRange } from "@/lib/time-range"
 
@@ -167,10 +169,14 @@ export function App() {
   const { type: timeRange, customRange } = selection
   const [currentView, setCurrentView] = React.useState<ViewKey>(initialRoute.view)
   const [lastLoadedAt, setLastLoadedAt] = React.useState<number>(0)
+  const [viewRefreshKey, setViewRefreshKey] = React.useState(0)
   const [data, setData] = React.useState<DashboardData | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [loadFailure, setLoadFailure] = React.useState<string | null>(null)
   const [rangeFailure, setRangeFailure] = React.useState<string | null>(null)
+  const [collecting, setCollecting] = React.useState(false)
+  const [collection, setCollection] = React.useState<CollectionRefreshPayload | null>(null)
+  const [collectionFailure, setCollectionFailure] = React.useState<string | null>(null)
 
   // 首次挂载把老别名 URL 规范化为新 view key；state 已由 parseRouteState 解析好
   React.useEffect(() => {
@@ -182,6 +188,9 @@ export function App() {
   const requestSeqRef = React.useRef(0)
   const requestedRangeRef = React.useRef<string | null>(null)
   const lastLoadedAtRef = React.useRef(0)
+  const loadControllerRef = React.useRef<AbortController | null>(null)
+  const collectionControllerRef = React.useRef<AbortController | null>(null)
+  const previousViewRef = React.useRef(currentView)
 
   React.useEffect(() => {
     selectionRef.current = selection
@@ -190,12 +199,15 @@ export function App() {
   const performLoad = React.useCallback(
     async (range: RangeType, custom?: DateRange | null, options?: { clear?: boolean }) => {
       const seq = ++requestSeqRef.current
+      loadControllerRef.current?.abort()
+      const controller = new AbortController()
+      loadControllerRef.current = controller
       loadingRef.current = true
       setLoading(true)
       if (options?.clear) setData(null)
 
       try {
-        const result = await loadDashboard(range, custom ?? undefined)
+        const result = await loadDashboard(range, custom ?? undefined, undefined, { signal: controller.signal })
         if (seq !== requestSeqRef.current) return
         if (!result.meta || result.errors.includes("meta")) {
           // 后端不可用时不伪造数据：有旧数据就留住，没有就走致命错误卡。
@@ -205,6 +217,12 @@ export function App() {
         registerSiteColors(result.profit?.sites.map((site) => site.account_id) ?? [])
         setLoadFailure(null)
         setData(result)
+        setViewRefreshKey((value) => value + 1)
+        if (result.errors.length === 0) {
+          const loadedAt = Date.now()
+          lastLoadedAtRef.current = loadedAt
+          setLastLoadedAt(loadedAt)
+        }
       } catch (err) {
         if (seq !== requestSeqRef.current) return
         setLoadFailure(err instanceof Error ? err.message : String(err))
@@ -212,9 +230,6 @@ export function App() {
         if (seq === requestSeqRef.current) {
           loadingRef.current = false
           setLoading(false)
-          const loadedAt = Date.now()
-          lastLoadedAtRef.current = loadedAt
-          setLastLoadedAt(loadedAt)
         }
       }
     },
@@ -229,11 +244,64 @@ export function App() {
     void performLoad(timeRange, customRange, { clear: true })
   }, [performLoad, timeRange, customRange])
 
+  const refreshSources = React.useCallback(async (force: boolean) => {
+    collectionControllerRef.current?.abort()
+    const controller = new AbortController()
+    collectionControllerRef.current = controller
+    setCollectionFailure(null)
+    setCollection(null)
+    setCollecting(false)
+    // 自定义是固定窗口，采当前余额不能补回历史快照。
+    if (timeRange === "custom" || currentView === "settings") {
+      if (force) await performLoad(timeRange, customRange)
+      return
+    }
+    setCollecting(true)
+    let hadPending = false
+    try {
+      const result = await refreshCollection({
+        view: currentView, force, signal: controller.signal,
+        onProgress: (progress) => {
+          if (controller.signal.aborted) return
+          hadPending ||= progress.groups.some((group) => group.state === "queued" || group.state === "running")
+          setCollection(progress)
+        },
+      })
+      if (controller.signal.aborted) return
+      setCollection(result)
+      if (force || hadPending) await performLoad(timeRange, customRange)
+    } catch (error) {
+      if (controller.signal.aborted) return
+      setCollectionFailure(error instanceof Error ? error.message : String(error))
+      // 一组失败时，其它组可能已完成，重新读取但不将失败标成采集成功。
+      if (force || hadPending) await performLoad(timeRange, customRange)
+    } finally {
+      if (!controller.signal.aborted) setCollecting(false)
+    }
+  }, [currentView, timeRange, customRange, performLoad])
+
+  React.useEffect(() => {
+    let active = true
+    void Promise.resolve().then(() => {
+      if (!active) return
+      if (previousViewRef.current !== currentView) {
+        previousViewRef.current = currentView
+        void performLoad(timeRange, customRange)
+      }
+      void refreshSources(false)
+    })
+    return () => {
+      active = false
+      collectionControllerRef.current?.abort()
+    }
+  }, [currentView, timeRange, customRange, performLoad, refreshSources])
+
+  React.useEffect(() => () => { loadControllerRef.current?.abort() }, [])
+
   const handleRefresh = React.useCallback(() => {
-    if (loadingRef.current) return
-    const current = selectionRef.current
-    void performLoad(current.type, current.customRange)
-  }, [performLoad])
+    if (collecting) return
+    void refreshSources(true)
+  }, [collecting, refreshSources])
 
   const handleTimeRangeChange = React.useCallback((range: RangeType, custom?: DateRange) => {
     try {
@@ -430,10 +498,32 @@ export function App() {
             customRange={customRange}
             onTimeRangeChange={handleTimeRangeChange}
             onRefresh={handleRefresh}
-            refreshing={loading}
+            refreshing={loading || collecting}
           />
 
           <main className="dashboard-main flex-1 min-h-0 md:overflow-hidden flex flex-col p-3.5 md:p-4 xl:p-4.5 min-w-0">
+            {collectionFailure && (
+              <Alert variant="destructive" className="mb-4 shrink-0">
+                <AlertTriangle />
+                <AlertTitle>本次采集未完成</AlertTitle>
+                <AlertDescription>{collectionFailure}。当前保留已有数据。</AlertDescription>
+              </Alert>
+            )}
+            {data && loadFailure && (
+              <Alert variant="destructive" className="mb-4 shrink-0">
+                <AlertTriangle />
+                <AlertTitle>本次数据读取失败</AlertTitle>
+                <AlertDescription>{loadFailure}。当前保留已有数据。</AlertDescription>
+              </Alert>
+            )}
+            {(collecting || collection?.groups.length) ? (
+              <p role="status" aria-live="polite" className="mb-2 shrink-0 text-sm text-muted-foreground">
+                {collecting ? "正在更新采集数据，当前内容仍可查看…" : collection?.groups.map((group) => {
+                  const labels: Record<string, string> = { logs: "业务日志", errors: "上游错误", httpErrors: "入口错误", spend: "余额与充值", routes: "渠道配置" }
+                  return `${labels[group.resource] ?? group.resource}：${group.last_success_at == null ? "尚未成功采集" : formatTimestampShort(group.last_success_at)}`
+                }).join("；")}
+              </p>
+            ) : null}
             {(rangeFailure || timeRangeError) && (
               <Alert variant="destructive" className="mb-4 shrink-0">
                 <AlertTriangle />
@@ -509,7 +599,7 @@ export function App() {
                     users={currentUsers?.users || []}
                     profitSites={currentProfit?.sites || []}
                     dateRange={data?.range ?? null}
-                    refreshKey={lastLoadedAt}
+                    refreshKey={viewRefreshKey}
                     onNavigateChannelsDetail={() => navigate("channels_detail")}
                     onNavigateGroupsDetail={() => navigate("groups_detail")}
                   />
@@ -543,12 +633,12 @@ export function App() {
                     profitSites={currentProfit?.sites || []}
                     quality={currentProfit?.quality}
                     dateRange={data?.range ?? null}
-                    refreshKey={lastLoadedAt}
+                    refreshKey={viewRefreshKey}
                   />
                 )}
 
                 {currentView === "routes" && (
-                  <ChannelRoutesView refreshKey={lastLoadedAt} />
+                  <ChannelRoutesView refreshKey={viewRefreshKey} />
                 )}
 
                 {currentView === "quality" && (
@@ -569,6 +659,7 @@ export function App() {
                     timeRange={timeRange}
                     previewMode={import.meta.env.DEV && Boolean(meta?.preview)}
                     lastRefreshTime={lastLoadedAt}
+                    refreshKey={viewRefreshKey}
                   />
                 )}
 

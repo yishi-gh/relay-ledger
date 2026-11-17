@@ -18,7 +18,7 @@ const settingsStub = {
 /** 用真实 TS 源码验证格式与 URL，不做业务逻辑复制。 */
 function runtime({ stubs = {}, globals = {} } = {}) {
   const context = vm.createContext({
-    console, Date, URL, URLSearchParams, AbortController, Response, ...globals,
+    console, Date, URL, URLSearchParams, AbortController, Response, setTimeout, clearTimeout, ...globals,
   })
   const modules = new Map()
   function load(file) {

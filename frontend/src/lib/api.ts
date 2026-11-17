@@ -238,24 +238,37 @@ export async function fetchJson<T>(
     }
   }
 
-  const res = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-    signal: options?.signal,
-  })
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  if (options?.signal?.aborted) controller.abort()
+  options?.signal?.addEventListener("abort", abort, { once: true })
+  const timer = setTimeout(() => controller.abort(), 15000)
+  try {
+    const res = await fetch(url.toString(), {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal: controller.signal,
+    })
 
-  if (!res.ok) {
-    let message = `HTTP ${res.status}`
-    try {
-      const body = await res.json()
-      if (body?.error?.message) message = String(body.error.message)
-    } catch {
-      // 响应体不是 JSON 时保留 HTTP 状态说明
+    if (!res.ok) {
+      let message = `HTTP ${res.status}`
+      try {
+        const body = await res.json()
+        if (body?.error?.message) message = String(body.error.message)
+      } catch {
+        // 响应体不是 JSON 时保留 HTTP 状态说明
+      }
+      throw new ApiError(message, res.status)
     }
-    throw new ApiError(message, res.status)
-  }
 
-  return (await res.json()) as T
+    return (await res.json()) as T
+  } catch (error) {
+    if (controller.signal.aborted && !options?.signal?.aborted) throw new Error("接口请求超过15秒，请重试", { cause: error })
+    throw error
+  } finally {
+    clearTimeout(timer)
+    options?.signal?.removeEventListener("abort", abort)
+  }
 }
 
 export function fetchChannelRoutes(options?: { signal?: AbortSignal }): Promise<ChannelRoutesPayload> {
@@ -340,12 +353,12 @@ function settledValue<T>(result: PromiseSettledResult<T>): T | null {
   return result.status === "fulfilled" ? result.value : null
 }
 
-export async function loadDashboard(rangeType: RangeType, customRange?: DateRange, now?: number): Promise<DashboardData> {
+export async function loadDashboard(rangeType: RangeType, customRange?: DateRange, now?: number, options?: { signal?: AbortSignal }): Promise<DashboardData> {
   // 自定义输入先校验，避免损坏的记忆值触发任何接口请求。
   if (rangeType === "custom") validateCustomRange(customRange, now)
   let meta: Meta
   try {
-    meta = await fetchJson<Meta>("/api/meta")
+    meta = await fetchJson<Meta>("/api/meta", undefined, options)
   } catch {
     return emptyDashboard(["meta"])
   }
@@ -369,15 +382,15 @@ export async function loadDashboard(rangeType: RangeType, customRange?: DateRang
     qualityResult,
     capitalResult,
   ] = await Promise.allSettled([
-    fetchJson<Overview>("/api/overview", rangeParams),
-    fetchJson<TrendData>("/api/trend", { ...rangeParams, granularity }),
-    fetchJson<ProfitData>("/api/profit", { ...rangeParams, granularity }),
-    fetchJson<ChannelsPayload>("/api/channels", rangeParams),
-    fetchJson<GroupsPayload>("/api/groups", rangeParams),
-    fetchJson<UsersPayload>("/api/users", rangeParams),
-    fetchJson<UpstreamsPayload>("/api/upstreams", rangeParams),
-    fetchJson<QualityData>("/api/quality"),
-    fetchJson<CapitalPayload>("/api/capital", rangeParams),
+    fetchJson<Overview>("/api/overview", rangeParams, options),
+    fetchJson<TrendData>("/api/trend", { ...rangeParams, granularity }, options),
+    fetchJson<ProfitData>("/api/profit", { ...rangeParams, granularity }, options),
+    fetchJson<ChannelsPayload>("/api/channels", rangeParams, options),
+    fetchJson<GroupsPayload>("/api/groups", rangeParams, options),
+    fetchJson<UsersPayload>("/api/users", rangeParams, options),
+    fetchJson<UpstreamsPayload>("/api/upstreams", rangeParams, options),
+    fetchJson<QualityData>("/api/quality", undefined, options),
+    fetchJson<CapitalPayload>("/api/capital", rangeParams, options),
   ])
 
   const results = [
