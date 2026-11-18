@@ -488,7 +488,7 @@ test("按需采集失败保留数据，读取失败不刷新成功时间", async
   assert.equal(r.find("OverviewView").kpiData.revenue, 1000)
   assert.equal(r.find("AlertTitle").children, "本次采集未完成")
   assert.equal(r.find("Alert")["data-floating"], "collection")
-  assert.match(r.find("Alert").className, /border-red-500\/60/)
+  assert.match(r.find("Alert").className, /border-destructive\/50/)
   assert.match(textContent(r.find("AlertDescription").children), /采集进程离线/)
   r.find("button").onClick()
   r.render()
@@ -575,7 +575,7 @@ test("切页补采部分成功后只读取一次，并显示更新账户与异�
   assert.equal(r.requests.filter(({ url }) => url.pathname === "/api/meta").length, initialReads + 1)
   assert.equal(r.find("AlertTitle").children, "余额与充值部分成功")
   assert.equal(r.find("Alert")["data-floating"], "collection")
-  assert.match(r.find("Alert").className, /border-amber-500\/60/)
+  assert.match(r.find("Alert").className, /border-amber-500\/40/)
   assert.match(textContent(r.find("AlertDescription").children), /异常账户：网络错误/)
 })
 

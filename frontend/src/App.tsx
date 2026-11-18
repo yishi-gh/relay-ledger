@@ -516,13 +516,13 @@ export function App() {
                 data-floating="collection"
                 className={`pointer-events-auto relative max-h-[45dvh] overflow-y-auto pr-10 shadow-xl backdrop-blur-md ${
                   collectionFailure
-                    ? "border-red-500/60 bg-red-500/10 text-red-400"
-                    : "border-amber-500/60 bg-amber-500/10 text-amber-300"
+                    ? "border-destructive/50 bg-destructive/10 text-destructive"
+                    : "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400"
                 }`}
               >
-                <AlertTriangle className={collectionFailure ? undefined : "text-amber-400"} />
+                <AlertTriangle className={collectionFailure ? undefined : "text-amber-600 dark:text-amber-400"} />
                 <AlertTitle>{collectionFailure ? "本次采集未完成" : "余额与充值部分成功"}</AlertTitle>
-                <AlertDescription className={collectionFailure ? undefined : "text-amber-200/90"}>
+                <AlertDescription className={collectionFailure ? undefined : "text-amber-700/90 dark:text-amber-300/90"}>
                   {collectionFailure ? (
                     `${collectionFailure}。当前保留已有数据。`
                   ) : partialSpend?.spend_result ? (
