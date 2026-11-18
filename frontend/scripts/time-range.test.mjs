@@ -17,6 +17,12 @@ const PREFERENCES = "relay-ledger:preferences:v1"
 const LAST_RANGE = "relay-ledger:last-range"
 const plain = (value) => JSON.parse(JSON.stringify(value))
 
+function textContent(value) {
+  if (Array.isArray(value)) return value.map(textContent).join("")
+  if (value && typeof value === "object" && value.props) return textContent(value.props.children)
+  return value == null ? "" : String(value)
+}
+
 function deferred() {
   let resolvePromise
   const promise = new Promise((resolve) => { resolvePromise = resolve })
@@ -468,7 +474,11 @@ test("按需采集失败保留数据，读取失败不刷新成功时间", async
   await r.settle()
   assert.equal(r.find("OverviewView").kpiData.revenue, 1000)
   assert.equal(r.find("AlertTitle").children, "本次采集未完成")
-  assert.match(r.find("AlertDescription").children.join(""), /采集进程离线/)
+  assert.equal(r.find("Alert")["data-floating"], "collection")
+  assert.match(textContent(r.find("AlertDescription").children), /采集进程离线/)
+  r.find("button").onClick()
+  r.render()
+  assert.equal(r.find("AlertTitle"), null)
   r.find("AppSidebar").onSelectView("settings")
   r.render()
   await r.settle()
@@ -550,7 +560,8 @@ test("切页补采部分成功后只读取一次，并显示更新账户与异�
   await r.settle()
   assert.equal(r.requests.filter(({ url }) => url.pathname === "/api/meta").length, initialReads + 1)
   assert.equal(r.find("AlertTitle").children, "余额与充值部分成功")
-  assert.match(r.find("AlertDescription").children[1], /异常账户：网络错误/)
+  assert.equal(r.find("Alert")["data-floating"], "collection")
+  assert.match(textContent(r.find("AlertDescription").children), /异常账户：网络错误/)
 })
 
 test("meta 读取分别报告超时与 HTTP 错误，切换时间范围取消旧请求", async () => {
@@ -560,7 +571,7 @@ test("meta 读取分别报告超时与 HTTP 错误，切换时间范围取消旧
   r.failures.add("/api/meta")
   r.find("TopBar").onRefresh()
   await r.settle()
-  assert.match(r.find("AlertDescription").children.join(""), /meta.*HTTP 503/)
+  assert.match(textContent(r.find("AlertDescription").children), /meta.*HTTP 503/)
   r.setMetaReply(({ signal }) => new Promise((_, reject) => {
     signal.addEventListener("abort", () => reject(signal.reason), { once: true })
   }))
@@ -572,7 +583,7 @@ test("meta 读取分别报告超时与 HTTP 错误，切换时间范围取消旧
   timeout.callback()
   await r.settle()
   assert.equal(request.options.signal.aborted, true)
-  assert.match(r.find("AlertDescription").children.join(""), /meta.*15 秒/)
+  assert.match(textContent(r.find("AlertDescription").children), /meta.*15 秒/)
   r.find("TopBar").onRefresh()
   await r.settle()
   const obsolete = r.requests.at(-1)

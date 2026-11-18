@@ -1,5 +1,5 @@
 import * as React from "react"
-import { AlertTriangle } from "lucide-react"
+import { AlertTriangle, X } from "lucide-react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -177,6 +177,7 @@ export function App() {
   const [collecting, setCollecting] = React.useState(false)
   const [collection, setCollection] = React.useState<CollectionRefreshPayload | null>(null)
   const [collectionFailure, setCollectionFailure] = React.useState<string | null>(null)
+  const [dismissedCollectionNotice, setDismissedCollectionNotice] = React.useState<string | null>(null)
 
   // 首次挂载把老别名 URL 规范化为新 view key；state 已由 parseRouteState 解析好
   React.useEffect(() => {
@@ -372,6 +373,11 @@ export function App() {
   const currentUpstreams = data?.upstreams ?? null
   const currentQuality = data?.quality ?? null
   const partialSpend = collection?.groups.find((group) => group.state === "partial" && group.spend_result)
+  const collectionNoticeKey = collectionFailure
+    ? `failure:${collectionFailure}`
+    : partialSpend?.spend_result
+      ? `partial:${partialSpend.request_id}:${partialSpend.last_attempt_at ?? 0}`
+      : null
 
   // 1. KPI 逻辑计算（1 张主卡 + 3 张辅卡）
   const profitAgg = React.useMemo(
@@ -503,32 +509,49 @@ export function App() {
             refreshing={loading || collecting}
           />
 
-          <main className="dashboard-main flex-1 min-h-0 md:overflow-hidden flex flex-col p-3.5 md:p-4 xl:p-4.5 min-w-0">
-            {collectionFailure && (
-              <Alert variant="destructive" className="mb-4 shrink-0">
-                <AlertTriangle />
-                <AlertTitle>本次采集未完成</AlertTitle>
-                <AlertDescription>{collectionFailure}。当前保留已有数据。</AlertDescription>
+          {collectionNoticeKey && collectionNoticeKey !== dismissedCollectionNotice && (
+            <div className="pointer-events-none fixed inset-x-3 top-16 z-40 flex justify-center md:inset-x-auto md:right-6 md:w-[min(46rem,calc(100vw-15rem))]">
+              <Alert
+                variant={collectionFailure ? "destructive" : "default"}
+                data-floating="collection"
+                className="pointer-events-auto relative max-h-[45dvh] overflow-y-auto bg-card/95 pr-10 shadow-xl backdrop-blur-md"
+              >
+                <AlertTriangle className={collectionFailure ? undefined : "text-[var(--chart-3)]"} />
+                <AlertTitle>{collectionFailure ? "本次采集未完成" : "余额与充值部分成功"}</AlertTitle>
+                <AlertDescription>
+                  {collectionFailure ? (
+                    `${collectionFailure}。当前保留已有数据。`
+                  ) : partialSpend?.spend_result ? (
+                    <>
+                      <span title={partialSpend.spend_result.updated_accounts.join("、")}>
+                        已更新 {partialSpend.spend_result.updated_accounts.length} 个账户余额
+                        {partialSpend.last_attempt_at != null
+                          ? `（${formatTimestampShort(partialSpend.last_attempt_at)}）`
+                          : ""}。
+                      </span>
+                      {partialSpend.spend_result.issues.map(({ name, reason }) => `${name}：${reason}`).join("；")}
+                    </>
+                  ) : null}
+                </AlertDescription>
+                <button
+                  type="button"
+                  aria-label="关闭采集提示"
+                  title="关闭"
+                  onClick={() => setDismissedCollectionNotice(collectionNoticeKey)}
+                  className="absolute right-2 top-2 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                >
+                  <X className="size-4" />
+                </button>
               </Alert>
-            )}
+            </div>
+          )}
+
+          <main className="dashboard-main flex-1 min-h-0 md:overflow-hidden flex flex-col p-3.5 md:p-4 xl:p-4.5 min-w-0">
             {data && loadFailure && (
               <Alert variant="destructive" className="mb-4 shrink-0">
                 <AlertTriangle />
                 <AlertTitle>本次数据读取失败</AlertTitle>
                 <AlertDescription>{loadFailure}。当前保留已有数据。</AlertDescription>
-              </Alert>
-            )}
-            {partialSpend?.spend_result && !collecting && (
-              <Alert className="mb-2 shrink-0">
-                <AlertTriangle />
-                <AlertTitle>余额与充值部分成功</AlertTitle>
-                <AlertDescription>
-                  <span title={partialSpend.spend_result.updated_accounts.join("、")}>
-                    已更新 {partialSpend.spend_result.updated_accounts.length} 个账户余额
-                    {partialSpend.last_attempt_at != null ? `（${formatTimestampShort(partialSpend.last_attempt_at)}）` : ""}。
-                  </span>
-                  {partialSpend.spend_result.issues.map(({ name, reason }) => `${name}：${reason}`).join("；")}
-                </AlertDescription>
               </Alert>
             )}
             {(collecting || collection?.groups.length) ? (

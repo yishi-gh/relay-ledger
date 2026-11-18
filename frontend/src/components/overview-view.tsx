@@ -101,12 +101,6 @@ export function OverviewView({
   quality,
   channels,
 }: OverviewViewProps) {
-  // 判断是否需要显示可核算售出差异说明
-  const showRevenueClarification =
-    kpiData.accountableRevenue != null &&
-    kpiData.revenue != null &&
-    kpiData.accountableRevenue < kpiData.revenue
-
   const isRawUnit = getPreferences().display.unitSystem === "raw"
   // 为数字和单位预留完整刻度宽度，避免中文单位折行。
   const tokenAxisWidth = isRawUnit ? 108 : 76
@@ -118,9 +112,27 @@ export function OverviewView({
   const channelRevenue = rankedChannels?.reduce((sum, channel) => sum + channel.revenue!, 0) ?? 0
   const leadingChannel = rankedChannels?.[0]
   const leadingShare = leadingChannel && channelRevenue > 0 ? leadingChannel.revenue! / channelRevenue : null
+  const channelSegments = channelRevenue > 0 && rankedChannels
+    ? [
+        ...rankedChannels.slice(0, 6).map((channel, index) => ({
+          key: String(channel.channel_id),
+          label: channel.channel_name || `渠道 #${channel.channel_id}`,
+          share: channel.revenue! / channelRevenue,
+          color: `var(--chart-${(index % 12) + 1})`,
+        })),
+        ...(rankedChannels.length > 6
+          ? [{
+              key: "other",
+              label: "其他渠道",
+              share: rankedChannels.slice(6).reduce((sum, channel) => sum + channel.revenue!, 0) / channelRevenue,
+              color: "var(--muted-foreground)",
+            }]
+          : []),
+      ]
+    : []
 
   return (
-    <div className="dashboard-view dashboard-overview dashboard-flow-fallback flex-1 min-h-0 min-w-0 flex flex-col gap-4 md:overflow-hidden">
+    <div className="dashboard-view dashboard-overview dashboard-flow-fallback flex-1 min-h-0 min-w-0 flex flex-col gap-4 md:overflow-y-auto">
       {/* 1. KPI 分层：主卡 + 3 张辅卡 (紧凑行, shrink-0) */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-stretch shrink-0">
         {/* 主卡：本站售出 */}
@@ -201,12 +213,6 @@ export function OverviewView({
                 </div>
               </div>
 
-              {/* 口径差异说明小字 */}
-              {showRevenueClarification && (
-                <div className="text-[12px] leading-[16px] text-muted-foreground mt-2 pt-1.5 border-t border-border/50">
-                  成本/利润按可核算售出 {formatCurrency(kpiData.accountableRevenue)} 计算，不含外部账户与缺快照时段
-                </div>
-              )}
             </div>
           </CardContent>
         </Card>
@@ -276,7 +282,7 @@ export function OverviewView({
       </section>
 
       {/* 2. 趋势双卡：桌面 xl 并排保留售出图更宽 (1.6 : 1)，小屏与窄视口自适应上下堆叠 */}
-      <section className="overview-charts grid grid-cols-1 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-4 items-stretch md:flex-1 md:min-h-0 md:grid-rows-[repeat(2,minmax(0,1fr))] lg:grid-rows-[minmax(0,1fr)]">
+      <section className="overview-charts grid shrink-0 grid-cols-1 gap-4 md:grow md:basis-0 md:grid-rows-[repeat(2,minmax(260px,1fr))] lg:min-h-[280px] lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] lg:grid-rows-[minmax(280px,1fr)]">
         {/* 左卡：售出结构 (1.6fr) */}
         <Card className="dashboard-panel col-span-1 shadow-xs overflow-hidden flex flex-col min-w-0 p-4 gap-0 min-h-[350px] md:min-h-0">
           <CardHeader className="p-0 pb-2 shrink-0">
@@ -520,33 +526,6 @@ export function OverviewView({
             </div>
           </CardContent>
 
-          {/* 卡底指标说明与窗口汇总：仅保留 Token 消耗与缓存命中率两项 */}
-          <div className="pt-2.5 mt-auto border-t border-border/60 shrink-0">
-            <div className="flex items-center justify-between text-[12px] leading-[16px] text-muted-foreground flex-wrap gap-x-4 gap-y-1.5">
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-0.5 bg-[var(--chart-2)] rounded-full shrink-0" />
-                <span>Token:</span>
-                <span
-                  className="font-mono tabular-nums font-semibold text-foreground text-[13px]"
-                  title={kpiData.tokens != null ? `${formatRawNumber(kpiData.tokens)} Tokens` : undefined}
-                >
-                  {formatTokens(kpiData.tokens)}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-0.5 border-t-2 border-dashed border-[var(--chart-3)] shrink-0" />
-                <span className="inline-flex items-center gap-1">
-                  <span>缓存率:</span>
-                  {kpiData.isCache7d && (
-                    <span className="text-[12px] text-muted-foreground" title="24 小时窗口暂无独立缓存统计，当前引用近 7 天整体缓存率">(7d)</span>
-                  )}
-                </span>
-                <span className="font-mono tabular-nums font-semibold text-foreground text-[13px]">
-                  {formatPercent(kpiData.cacheRate)}
-                </span>
-              </div>
-            </div>
-          </div>
         </Card>
       </section>
 
@@ -568,10 +547,35 @@ export function OverviewView({
             <CardTitle className="text-[14px] font-medium">渠道集中</CardTitle>
             <span className="text-[12px] text-muted-foreground">在售渠道</span>
           </CardHeader>
-          <CardContent className="flex min-w-0 items-center gap-3 p-0">
-            <span className="min-w-0 flex-1 truncate text-[13px]" title={leadingChannel?.channel_name}>{leadingChannel?.channel_name || (leadingChannel ? `渠道 #${leadingChannel.channel_id}` : "暂无售出")}</span>
-            <span className="h-1 w-24 shrink-0 overflow-hidden rounded-full bg-muted" aria-hidden="true"><span className="block h-full rounded-full bg-primary/60" style={{ width: `${(leadingShare ?? 0) * 100}%` }} /></span>
-            <span className="text-[20px] font-semibold tabular-nums">{formatPercent(leadingShare)}</span>
+          <CardContent className="flex min-w-0 flex-col gap-2 p-0">
+            {channelSegments.length > 0 ? (
+              <>
+                <div
+                  className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted"
+                  role="img"
+                  aria-label={`渠道售出占比：${channelSegments.map((segment) => `${segment.label} ${formatPercent(segment.share)}`).join("，")}`}
+                >
+                  {channelSegments.map((segment) => (
+                    <span
+                      key={segment.key}
+                      title={`${segment.label}：${formatPercent(segment.share)}`}
+                      className="h-full min-w-px first:rounded-l-full last:rounded-r-full"
+                      style={{ width: `${segment.share * 100}%`, backgroundColor: segment.color }}
+                    />
+                  ))}
+                </div>
+                <div className="flex min-w-0 items-center justify-between gap-3 text-[12px] leading-[16px]">
+                  <span className="min-w-0 truncate text-muted-foreground" title={leadingChannel?.channel_name}>
+                    {leadingChannel?.channel_name || (leadingChannel ? `渠道 #${leadingChannel.channel_id}` : "暂无售出")}
+                  </span>
+                  <span className="shrink-0 font-mono font-semibold tabular-nums text-foreground">
+                    最高 {formatPercent(leadingShare)}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <span className="text-[13px] text-muted-foreground">暂无售出</span>
+            )}
           </CardContent>
         </Card>
       </section>
