@@ -488,6 +488,7 @@ test("按需采集失败保留数据，读取失败不刷新成功时间", async
   assert.equal(r.find("OverviewView").kpiData.revenue, 1000)
   assert.equal(r.find("AlertTitle").children, "本次采集未完成")
   assert.equal(r.find("Alert")["data-floating"], "collection")
+  assert.match(r.find("Alert").className, /border-red-500\/60/)
   assert.match(textContent(r.find("AlertDescription").children), /采集进程离线/)
   r.find("button").onClick()
   r.render()
@@ -574,6 +575,7 @@ test("切页补采部分成功后只读取一次，并显示更新账户与异�
   assert.equal(r.requests.filter(({ url }) => url.pathname === "/api/meta").length, initialReads + 1)
   assert.equal(r.find("AlertTitle").children, "余额与充值部分成功")
   assert.equal(r.find("Alert")["data-floating"], "collection")
+  assert.match(r.find("Alert").className, /border-amber-500\/60/)
   assert.match(textContent(r.find("AlertDescription").children), /异常账户：网络错误/)
 })
 
@@ -600,8 +602,14 @@ test("总览渠道占比支持悬停明细，新鲜度压缩为未同步计数",
     },
   })
   r.render()
-  assert.ok(r.findAll("CardTitle").some((props) => props.children === "渠道占比"))
-  assert.ok(r.findAll("span").some((props) => props.title === "渠道甲：75.0%"))
+  const cardTitles = r.findAll("CardTitle")
+  for (const title of ["核算覆盖", "渠道占比"]) {
+    assert.ok(cardTitles.some((props) => props.children === title && props.className.includes("text-[16px]")))
+  }
+  assert.ok(r.findAll("TooltipContent").some((props) => {
+    const text = textContent(props.children)
+    return text.includes("渠道甲") && text.includes("75.0%")
+  }))
 
   const compact = runtime({
     entry: "src/components/freshness-card.tsx",

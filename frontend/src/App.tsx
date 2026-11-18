@@ -510,15 +510,19 @@ export function App() {
           />
 
           {collectionNoticeKey && collectionNoticeKey !== dismissedCollectionNotice && (
-            <div className="pointer-events-none fixed inset-x-3 top-16 z-40 flex justify-center md:inset-x-auto md:right-6 md:w-[min(46rem,calc(100vw-15rem))]">
+            <div className="pointer-events-none fixed left-1/2 top-16 z-40 flex w-[calc(100%-1.5rem)] max-w-[46rem] -translate-x-1/2 justify-center">
               <Alert
                 variant={collectionFailure ? "destructive" : "default"}
                 data-floating="collection"
-                className="pointer-events-auto relative max-h-[45dvh] overflow-y-auto bg-card/95 pr-10 shadow-xl backdrop-blur-md"
+                className={`pointer-events-auto relative max-h-[45dvh] overflow-y-auto pr-10 shadow-xl backdrop-blur-md ${
+                  collectionFailure
+                    ? "border-red-500/60 bg-red-500/10 text-red-400"
+                    : "border-amber-500/60 bg-amber-500/10 text-amber-300"
+                }`}
               >
-                <AlertTriangle className={collectionFailure ? undefined : "text-[var(--chart-3)]"} />
+                <AlertTriangle className={collectionFailure ? undefined : "text-amber-400"} />
                 <AlertTitle>{collectionFailure ? "本次采集未完成" : "余额与充值部分成功"}</AlertTitle>
-                <AlertDescription>
+                <AlertDescription className={collectionFailure ? undefined : "text-amber-200/90"}>
                   {collectionFailure ? (
                     `${collectionFailure}。当前保留已有数据。`
                   ) : partialSpend?.spend_result ? (

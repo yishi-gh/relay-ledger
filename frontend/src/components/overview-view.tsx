@@ -541,7 +541,7 @@ export function OverviewView({
       <section className="grid shrink-0 grid-cols-1 gap-4 md:grid-cols-2">
         <Card className="min-w-0 gap-2 p-4 shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between p-0">
-            <CardTitle className="text-[14px] font-medium">核算覆盖</CardTitle>
+            <CardTitle className="text-[16px] leading-[24px] font-medium">核算覆盖</CardTitle>
             <span className="text-[12px] text-muted-foreground">当前区间</span>
           </CardHeader>
           <CardContent className="flex flex-wrap items-baseline gap-x-5 gap-y-1 p-0 text-[12px] text-muted-foreground">
@@ -552,7 +552,7 @@ export function OverviewView({
         </Card>
         <Card className="min-w-0 gap-2 p-4 shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between p-0">
-            <CardTitle className="text-[14px] font-medium">渠道占比</CardTitle>
+            <CardTitle className="text-[16px] leading-[24px] font-medium">渠道占比</CardTitle>
             <span className="text-[12px] text-muted-foreground">在售渠道</span>
           </CardHeader>
           <CardContent className="flex min-w-0 flex-col gap-2 p-0">
@@ -564,16 +564,24 @@ export function OverviewView({
                   aria-label={`渠道售出占比：${channelSegments.map((segment) => `${segment.label} ${formatPercent(segment.share)}`).join("，")}`}
                 >
                   {channelSegments.map((segment) => (
-                    <span
-                      key={segment.key}
-                      title={`${segment.label}：${formatPercent(segment.share)}`}
-                      className="h-full min-w-px first:rounded-l-full last:rounded-r-full"
-                      style={{ width: `${segment.share * 100}%`, backgroundColor: segment.color }}
-                    />
+                    <Tooltip key={segment.key}>
+                      <TooltipTrigger
+                        render={
+                          <span
+                            className="h-full min-w-px cursor-pointer transition-opacity first:rounded-l-full last:rounded-r-full hover:opacity-80"
+                            style={{ width: `${segment.share * 100}%`, backgroundColor: segment.color }}
+                          />
+                        }
+                      />
+                      <TooltipContent side="top" sideOffset={4}>
+                        <span className="font-semibold">{segment.label}</span>
+                        <span className="font-mono tabular-nums">{formatPercent(segment.share)}</span>
+                      </TooltipContent>
+                    </Tooltip>
                   ))}
                 </div>
                 <div className="flex min-w-0 items-center justify-between gap-3 text-[12px] leading-[16px]">
-                  <span className="min-w-0 truncate text-muted-foreground" title={leadingChannel?.channel_name}>
+                  <span className="min-w-0 truncate text-muted-foreground">
                     {leadingChannel?.channel_name || (leadingChannel ? `渠道 #${leadingChannel.channel_id}` : "暂无售出")}
                   </span>
                   <span className="shrink-0 font-mono font-semibold tabular-nums text-foreground">
