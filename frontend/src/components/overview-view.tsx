@@ -114,18 +114,26 @@ export function OverviewView({
   const channelRevenue = rankedChannels?.reduce((sum, channel) => sum + channel.revenue!, 0) ?? 0
   const leadingChannel = rankedChannels?.[0]
   const leadingShare = leadingChannel && channelRevenue > 0 ? leadingChannel.revenue! / channelRevenue : null
+  const siteIdByName = new Map(activeSites.map((site) => [site.name, site.account_id]))
   const channelSegments = channelRevenue > 0 && rankedChannels
     ? [
-        ...rankedChannels.slice(0, 6).map((channel, index) => ({
-          key: String(channel.channel_id),
-          label: channel.channel_name || `渠道 #${channel.channel_id}`,
-          share: channel.revenue! / channelRevenue,
-          color: `var(--chart-${(index % 12) + 1})`,
-        })),
+        ...rankedChannels.slice(0, 6).map((channel) => {
+          const accountId = channel.upstream_account
+            ? siteIdByName.get(channel.upstream_account)
+            : undefined
+          return {
+            key: String(channel.channel_id),
+            label: channel.channel_name || `渠道 #${channel.channel_id}`,
+            revenue: channel.revenue!,
+            share: channel.revenue! / channelRevenue,
+            color: accountId ? getSiteColor(accountId) : "var(--muted-foreground)",
+          }
+        }),
         ...(rankedChannels.length > 6
           ? [{
               key: "other",
               label: "其他渠道",
+              revenue: rankedChannels.slice(6).reduce((sum, channel) => sum + channel.revenue!, 0),
               share: rankedChannels.slice(6).reduce((sum, channel) => sum + channel.revenue!, 0) / channelRevenue,
               color: "var(--muted-foreground)",
             }]
@@ -576,7 +584,9 @@ export function OverviewView({
                       />
                       <TooltipContent side="top" sideOffset={4}>
                         <span className="font-semibold">{segment.label}</span>
-                        <span className="font-mono tabular-nums">{formatPercent(segment.share)}</span>
+                        <span className="font-mono font-semibold tabular-nums text-foreground">
+                          {formatCurrency(segment.revenue)} · {formatPercent(segment.share)}
+                        </span>
                       </TooltipContent>
                     </Tooltip>
                   ))}

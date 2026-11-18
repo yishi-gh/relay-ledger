@@ -597,10 +597,10 @@ test("总览渠道占比支持悬停明细，新鲜度压缩为未同步计数",
       ],
       trendChartData: [],
       trafficChartData: [],
-      getSiteColor: () => "var(--chart-1)",
+      getSiteColor: (accountId) => `var(--${accountId})`,
       channels: [
-        { channel_id: 1, channel_name: "渠道甲", revenue: 75 },
-        { channel_id: 2, channel_name: "渠道乙", revenue: 25 },
+        { channel_id: 1, channel_name: "渠道甲", upstream_account: "Eula", revenue: 75 },
+        { channel_id: 2, channel_name: "渠道乙", upstream_account: "其他站", revenue: 25 },
       ],
     },
   })
@@ -616,8 +616,12 @@ test("总览渠道占比支持悬停明细，新鲜度压缩为未同步计数",
   assert.equal(chartContents.length, 2)
   assert.ok(r.findAll("TooltipContent").some((props) => {
     const text = textContent(props.children)
-    return text.includes("渠道甲") && text.includes("75.0%")
+    return text.includes("渠道甲") && text.includes("$75.00") && text.includes("75.0%")
   }))
+  assert.deepEqual(
+    r.findAll("TooltipTrigger").map((props) => props.render.props.style.backgroundColor),
+    ["var(--a)", "var(--b)"],
+  )
 
   const compact = runtime({
     entry: "src/components/freshness-card.tsx",
