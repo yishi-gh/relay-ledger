@@ -258,12 +258,13 @@ export async function fetchJson<T>(
       } catch {
         // 响应体不是 JSON 时保留 HTTP 状态说明
       }
-      throw new ApiError(message, res.status)
+      throw new ApiError(message === `HTTP ${res.status}` ? message : `HTTP ${res.status}：${message}`, res.status)
     }
 
     return (await res.json()) as T
   } catch (error) {
-    if (controller.signal.aborted && !options?.signal?.aborted) throw new Error("接口请求超过15秒，请重试", { cause: error })
+    options?.signal?.throwIfAborted()
+    if (controller.signal.aborted) throw new Error("接口请求超时（15 秒），请重试", { cause: error })
     throw error
   } finally {
     clearTimeout(timer)
@@ -332,23 +333,6 @@ export function computeRange(meta: Meta, rangeType: RangeType, customRange?: Dat
   return { from: beijingDayStart(maxT) - 6 * DAY_MS, to: maxT }
 }
 
-export function emptyDashboard(errors: string[]): DashboardData {
-  return {
-    meta: null,
-    range: null,
-    overview: null,
-    trend: null,
-    profit: null,
-    channels: null,
-    groups: null,
-    users: null,
-    upstreams: null,
-    quality: null,
-    capital: null,
-    errors,
-  }
-}
-
 function settledValue<T>(result: PromiseSettledResult<T>): T | null {
   return result.status === "fulfilled" ? result.value : null
 }
@@ -359,12 +343,13 @@ export async function loadDashboard(rangeType: RangeType, customRange?: DateRang
   let meta: Meta
   try {
     meta = await fetchJson<Meta>("/api/meta", undefined, options)
-  } catch {
-    return emptyDashboard(["meta"])
+  } catch (error) {
+    options?.signal?.throwIfAborted()
+    throw new Error(`读取元数据（meta）失败：${error instanceof Error ? error.message : String(error)}`, { cause: error })
   }
 
   if ((rangeType === "24h" || rangeType === "7d") && (typeof meta.max_t !== "number" || !Number.isFinite(meta.max_t))) {
-    return emptyDashboard(["meta"])
+    throw new Error("元数据（meta）缺少有效的数据截止时间")
   }
 
   const range = computeRange(meta, rangeType, customRange, now)
@@ -392,6 +377,7 @@ export async function loadDashboard(rangeType: RangeType, customRange?: DateRang
     fetchJson<QualityData>("/api/quality", undefined, options),
     fetchJson<CapitalPayload>("/api/capital", rangeParams, options),
   ])
+  options?.signal?.throwIfAborted()
 
   const results = [
     overviewResult,

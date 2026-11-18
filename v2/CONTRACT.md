@@ -54,7 +54,8 @@
 - `POST` 请求体严格为 `{view, force}`：页面使用侧栏标识，`force` 是布尔值。必须同源、`application/json`、正文不超过 1 KiB，否则分别返回 403/415/413。
 - `GET/HEAD ?view=...` 只读进度，不创建任务。未知页面返回 400，其它方法返回 405。
 - 业务日志、上游错误、入口错误和渠道配置成功后复用 1 分钟；余额及充值复用 5 分钟。`force=true` 可越过复用时限，仍合并在途任务，并受成功后 10 秒（余额 30 秒）冷却及失败后 30 秒起、最多 5 分钟的指数退避约束。
-- 响应为 `{groups, revision}`。每组含 `resource`、`request_id`、`completed_id`、`state`、`last_attempt_at`、`last_success_at`、`retry_at`、`error`；状态为 `queued/running/fresh/cooldown/error/disabled`。有排队或执行中任务返回 202，否则 200。客户端等待自己请求的 ID，不等待后续用户发起的新一轮。
+- 响应为 `{groups, revision}`。每组含 `resource`、`request_id`、`completed_id`、`state`、`last_attempt_at`、`last_success_at`、`retry_at`、`error`；状态为 `queued/running/fresh/partial/cooldown/error/disabled`。有排队或执行中任务返回 202，否则 200。客户端等待自己请求的 ID，不等待后续用户发起的新一轮。
+- 余额与充值一轮部分成功且写入余额快照时，状态为 `partial`，附 `spend_result.updated_accounts`（名称数组）与 `spend_result.issues`（名称、原因）。页面进入后五分钟内可复用已更新数据，手动刷新遵守 `retry_at`；`last_success_at` 仍表示上次完整成功。
 - 成功时间采用该轮开始时间，保守反映数据观察时刻；空增量成功会推进，失败、部分失败或源文件缺失不推进。采集未启用或进程心跳超过 90 秒明确显示不可用，不能视作采集成功。
 - 请求共用 `dashboard.db` 中的 `collection_refresh` 表，定时和按需任务通过同一入口原子认领。看板与采集进程须一起更新。固定自定义范围由前端只读取本地接口，不发送补采请求；采集不会回补历史余额。
 

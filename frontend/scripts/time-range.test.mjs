@@ -56,6 +56,7 @@ function runtime({ stored = {}, defaultRange, href = "http://localhost/?view=ove
   const requests = []
   const collectionRequests = []
   let collectionReply = null
+  let metaReply = null
   const failures = new Set()
   const held = new Map()
   const timers = new Map()
@@ -133,6 +134,7 @@ function runtime({ stored = {}, defaultRange, href = "http://localhost/?view=ove
         return Response.json({ groups: [{ resource: "logs", request_id: 1, completed_id: 1, state: "fresh", last_success_at: now - 1000, last_attempt_at: now - 1000, retry_at: null, error: null }], revision: "fixture" })
       }
       requests.push({ url, options })
+      if (url.pathname === "/api/meta" && metaReply) return metaReply(options)
       if (url.pathname === "/api/meta" && failures.has("/api/meta")) return Response.json({ error: { message: "meta unavailable" } }, { status: 503 })
       if (url.pathname === "/api/meta") return Response.json({ max_t: metaMaxT, rows: 10 })
       const range = { from: Number(url.searchParams.get("from")), to: Number(url.searchParams.get("to")) }
@@ -221,7 +223,7 @@ function runtime({ stored = {}, defaultRange, href = "http://localhost/?view=ove
     await new Promise(setImmediate)
     return render()
   }
-  return { load, requests, collectionRequests, failures, held, storage, storageReads, historyCalls, window, timers, render, find, settle, setCollectionReply(reply) { collectionReply = reply }, setNow(value) { now = value } }
+  return { load, requests, collectionRequests, failures, held, storage, storageReads, historyCalls, window, timers, render, find, settle, setCollectionReply(reply) { collectionReply = reply }, setMetaReply(reply) { metaReply = reply }, setNow(value) { now = value } }
 }
 
 test("北京时间输入与范围不依赖 OS 时区，保留旧 24h/7d 锚点", () => {
@@ -499,6 +501,86 @@ test("离开页面取消旧补采等待，迟到失败不覆盖新页面", async
   await r.settle()
   assert.equal(r.find("AlertTitle"), null)
   assert.equal(r.find("AppSidebar").currentView, "settings")
+})
+
+test("连续切页合并同一时间窗口的读取，保留在途 meta 请求", async () => {
+  const r = runtime()
+  const gate = deferred()
+  r.setMetaReply(async () => {
+    await gate.promise
+    return Response.json({ max_t: MAX_T, rows: 10 })
+  })
+  r.render()
+  await r.settle()
+  const initialMeta = r.requests.find(({ url }) => url.pathname === "/api/meta")
+  for (const view of ["profit", "models"]) {
+    r.find("AppSidebar").onSelectView(view)
+    await r.settle()
+  }
+  assert.equal(r.requests.filter(({ url }) => url.pathname === "/api/meta").length, 1)
+  assert.equal(initialMeta.options.signal.aborted, false)
+  gate.resolve()
+  await r.settle()
+  assert.equal(r.find("AlertTitle"), null)
+})
+
+test("切页补采部分成功后只读取一次，并显示更新账户与异常原因", async () => {
+  const r = runtime({ href: "http://localhost/?view=models" })
+  r.render()
+  await r.settle()
+  const initialReads = r.requests.filter(({ url }) => url.pathname === "/api/meta").length
+  const partial = {
+    resource: "spend", request_id: 2, completed_id: 2, state: "partial",
+    last_success_at: NOW - 7 * DAY, last_attempt_at: NOW, retry_at: NOW + 30_000, error: null,
+    spend_result: {
+      updated_accounts: Array.from({ length: 7 }, (_, index) => `账户 ${index + 1}`),
+      issues: [{ name: "异常账户", reason: "网络错误" }],
+    },
+  }
+  r.setCollectionReply((_url, { method }) => Response.json({
+    revision: "new",
+    groups: [method === "POST" ? { ...partial, state: "queued", completed_id: 1, spend_result: undefined } : partial],
+  }))
+  r.find("AppSidebar").onSelectView("overview")
+  await r.settle()
+  assert.equal(r.requests.filter(({ url }) => url.pathname === "/api/meta").length, initialReads)
+  const poll = [...r.timers.values()].find((timer) => timer.delay === 1000)
+  assert.ok(poll)
+  poll.callback()
+  await r.settle()
+  assert.equal(r.requests.filter(({ url }) => url.pathname === "/api/meta").length, initialReads + 1)
+  assert.equal(r.find("AlertTitle").children, "余额与充值部分成功")
+  assert.match(r.find("AlertDescription").children[1], /异常账户：网络错误/)
+})
+
+test("meta 读取分别报告超时与 HTTP 错误，切换时间范围取消旧请求", async () => {
+  const r = runtime()
+  r.render()
+  await r.settle()
+  r.failures.add("/api/meta")
+  r.find("TopBar").onRefresh()
+  await r.settle()
+  assert.match(r.find("AlertDescription").children.join(""), /meta.*HTTP 503/)
+  r.setMetaReply(({ signal }) => new Promise((_, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+  }))
+  r.find("TopBar").onRefresh()
+  await r.settle()
+  const request = r.requests.at(-1)
+  const timeout = [...r.timers.values()].find((timer) => timer.delay === 15_000)
+  assert.ok(timeout)
+  timeout.callback()
+  await r.settle()
+  assert.equal(request.options.signal.aborted, true)
+  assert.match(r.find("AlertDescription").children.join(""), /meta.*15 秒/)
+  r.find("TopBar").onRefresh()
+  await r.settle()
+  const obsolete = r.requests.at(-1)
+  r.setMetaReply(() => Response.json({ max_t: MAX_T, rows: 10 }))
+  r.find("TopBar").onTimeRangeChange("today")
+  await r.settle()
+  assert.equal(obsolete.options.signal.aborted, true)
+  assert.equal(r.find("AlertTitle"), null)
 })
 
 test("损坏的自定义记忆只发送 24h 请求，错误在 App 可见", async () => {

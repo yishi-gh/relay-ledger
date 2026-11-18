@@ -1,5 +1,10 @@
 export type CollectionResource = "logs" | "errors" | "httpErrors" | "spend" | "routes"
-export type CollectionState = "queued" | "running" | "fresh" | "error" | "cooldown" | "disabled"
+export type CollectionState = "queued" | "running" | "fresh" | "partial" | "error" | "cooldown" | "disabled"
+
+interface SpendRefreshResult {
+  updated_accounts: string[]
+  issues: { name: string; reason: string }[]
+}
 
 export interface CollectionRefreshGroup {
   resource: CollectionResource
@@ -10,6 +15,7 @@ export interface CollectionRefreshGroup {
   last_attempt_at: number | null
   retry_at: number | null
   error: string | null
+  spend_result?: SpendRefreshResult
 }
 
 export interface CollectionRefreshPayload {
@@ -97,17 +103,25 @@ function waitForPoll(milliseconds: number, signal: AbortSignal): Promise<void> {
 
 function parsePayload(body: unknown): CollectionRefreshPayload {
   const payload = body as CollectionRefreshPayload | null
-  const states: CollectionState[] = ["queued", "running", "fresh", "error", "cooldown", "disabled"]
+  const states: CollectionState[] = ["queued", "running", "fresh", "partial", "error", "cooldown", "disabled"]
   if (!payload || typeof payload.revision !== "string" || !Array.isArray(payload.groups)
     || payload.groups.some((group) => !group || !Object.hasOwn(RESOURCE_LABELS, group.resource)
       || !states.includes(group.state)
       || !Number.isSafeInteger(group.request_id) || group.request_id < 0
       || !Number.isSafeInteger(group.completed_id) || group.completed_id < 0
+      || (group.state === "partial" && (group.resource !== "spend" || !validSpendResult(group.spend_result)))
       || (group.error !== null && typeof group.error !== "string"))
     || new Set(payload.groups.map((group) => group.resource)).size !== payload.groups.length) {
     throw new CollectionRefreshError("采集刷新响应格式错误", "INVALID_RESPONSE")
   }
   return payload
+}
+
+function validSpendResult(result: SpendRefreshResult | undefined): boolean {
+  return Array.isArray(result?.updated_accounts) && result.updated_accounts.length > 0
+    && result.updated_accounts.every((name) => typeof name === "string")
+    && Array.isArray(result.issues)
+    && result.issues.every((issue) => issue && typeof issue.name === "string" && typeof issue.reason === "string")
 }
 
 /** 只提交一次采集请求，随后只读状态；固定历史窗口由调用方直接读取本地数据。 */

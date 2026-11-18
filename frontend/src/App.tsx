@@ -171,7 +171,7 @@ export function App() {
   const [lastLoadedAt, setLastLoadedAt] = React.useState<number>(0)
   const [viewRefreshKey, setViewRefreshKey] = React.useState(0)
   const [data, setData] = React.useState<DashboardData | null>(null)
-  const [loading, setLoading] = React.useState(false)
+  const [loading, setLoading] = React.useState(true)
   const [loadFailure, setLoadFailure] = React.useState<string | null>(null)
   const [rangeFailure, setRangeFailure] = React.useState<string | null>(null)
   const [collecting, setCollecting] = React.useState(false)
@@ -185,10 +185,8 @@ export function App() {
 
   const selectionRef = React.useRef(selection)
   const loadingRef = React.useRef(false)
-  const requestSeqRef = React.useRef(0)
-  const requestedRangeRef = React.useRef<string | null>(null)
   const lastLoadedAtRef = React.useRef(0)
-  const loadControllerRef = React.useRef<AbortController | null>(null)
+  const activeLoadRef = React.useRef<{ key: string; controller: AbortController; promise: Promise<void> } | null>(null)
   const collectionControllerRef = React.useRef<AbortController | null>(null)
   const previousViewRef = React.useRef(currentView)
 
@@ -197,23 +195,18 @@ export function App() {
   }, [selection])
 
   const performLoad = React.useCallback(
-    async (range: RangeType, custom?: DateRange | null, options?: { clear?: boolean }) => {
-      const seq = ++requestSeqRef.current
-      loadControllerRef.current?.abort()
+    (range: RangeType, custom?: DateRange | null, options?: { clear?: boolean }) => {
+      const key = getTimeRangeKey(range, custom ?? null)
+      const active = activeLoadRef.current
+      if (active?.key === key && !active.controller.signal.aborted) return active.promise
+      active?.controller.abort()
       const controller = new AbortController()
-      loadControllerRef.current = controller
       loadingRef.current = true
       setLoading(true)
       if (options?.clear) setData(null)
 
-      try {
-        const result = await loadDashboard(range, custom ?? undefined, undefined, { signal: controller.signal })
-        if (seq !== requestSeqRef.current) return
-        if (!result.meta || result.errors.includes("meta")) {
-          // 后端不可用时不伪造数据：有旧数据就留住，没有就走致命错误卡。
-          setLoadFailure("后端接口不可用（meta）")
-          return
-        }
+      const promise = loadDashboard(range, custom ?? undefined, undefined, { signal: controller.signal }).then((result) => {
+        if (controller.signal.aborted) return
         registerSiteColors(result.profit?.sites.map((site) => site.account_id) ?? [])
         setLoadFailure(null)
         setData(result)
@@ -223,28 +216,32 @@ export function App() {
           lastLoadedAtRef.current = loadedAt
           setLastLoadedAt(loadedAt)
         }
-      } catch (err) {
-        if (seq !== requestSeqRef.current) return
+      }).catch((err) => {
+        if (controller.signal.aborted) return
         setLoadFailure(err instanceof Error ? err.message : String(err))
-      } finally {
-        if (seq === requestSeqRef.current) {
+      }).finally(() => {
+        if (activeLoadRef.current?.controller === controller) {
+          activeLoadRef.current = null
           loadingRef.current = false
           setLoading(false)
         }
-      }
+      })
+      activeLoadRef.current = { key, controller, promise }
+      return promise
     },
     []
   )
 
   // 自定义起止也参与窗口标识；同为 custom 的两次选择必须清除旧窗口并重新加载。
   React.useEffect(() => {
-    const key = getTimeRangeKey(timeRange, customRange)
-    if (requestedRangeRef.current === key) return
-    requestedRangeRef.current = key
-    void performLoad(timeRange, customRange, { clear: true })
+    let active = true
+    void Promise.resolve().then(() => {
+      if (active) void performLoad(timeRange, customRange, { clear: true })
+    })
+    return () => { active = false }
   }, [performLoad, timeRange, customRange])
 
-  const refreshSources = React.useCallback(async (force: boolean) => {
+  const refreshSources = React.useCallback(async (force: boolean, viewChanged = false) => {
     collectionControllerRef.current?.abort()
     const controller = new AbortController()
     collectionControllerRef.current = controller
@@ -253,7 +250,7 @@ export function App() {
     setCollecting(false)
     // 自定义是固定窗口，采当前余额不能补回历史快照。
     if (timeRange === "custom" || currentView === "settings") {
-      if (force) await performLoad(timeRange, customRange)
+      if (force || viewChanged) await performLoad(timeRange, customRange)
       return
     }
     setCollecting(true)
@@ -266,15 +263,19 @@ export function App() {
           hadPending ||= progress.groups.some((group) => group.state === "queued" || group.state === "running")
           setCollection(progress)
         },
+      }).catch((error) => {
+        if (!controller.signal.aborted) {
+          setCollectionFailure(error instanceof Error ? error.message : String(error))
+        }
+        return null
       })
       if (controller.signal.aborted) return
-      setCollection(result)
-      if (force || hadPending) await performLoad(timeRange, customRange)
-    } catch (error) {
-      if (controller.signal.aborted) return
-      setCollectionFailure(error instanceof Error ? error.message : String(error))
-      // 一组失败时，其它组可能已完成，重新读取但不将失败标成采集成功。
-      if (force || hadPending) await performLoad(timeRange, customRange)
+      if (result) setCollection(result)
+      // 首屏可能已在读本地快照。采集完成后读一次新结果，避免中途取消首屏。
+      if (hadPending) await activeLoadRef.current?.promise
+      if (!controller.signal.aborted && (force || hadPending || viewChanged)) {
+        await performLoad(timeRange, customRange)
+      }
     } finally {
       if (!controller.signal.aborted) setCollecting(false)
     }
@@ -284,19 +285,17 @@ export function App() {
     let active = true
     void Promise.resolve().then(() => {
       if (!active) return
-      if (previousViewRef.current !== currentView) {
-        previousViewRef.current = currentView
-        void performLoad(timeRange, customRange)
-      }
-      void refreshSources(false)
+      const viewChanged = previousViewRef.current !== currentView
+      previousViewRef.current = currentView
+      void refreshSources(false, viewChanged)
     })
     return () => {
       active = false
       collectionControllerRef.current?.abort()
     }
-  }, [currentView, timeRange, customRange, performLoad, refreshSources])
+  }, [currentView, refreshSources])
 
-  React.useEffect(() => () => { loadControllerRef.current?.abort() }, [])
+  React.useEffect(() => () => { activeLoadRef.current?.controller.abort() }, [])
 
   const handleRefresh = React.useCallback(() => {
     if (collecting) return
@@ -310,8 +309,10 @@ export function App() {
       rememberTimeRange(range, next.customRange ?? undefined)
       if (getTimeRangeKey(next.type, next.customRange) === getTimeRangeKey(selectionRef.current.type, selectionRef.current.customRange)) return
       // 选择生效时立即使旧异步请求过期，防止新 effect 开始前写回旧窗口。
-      requestSeqRef.current += 1
+      activeLoadRef.current?.controller.abort()
+      collectionControllerRef.current?.abort()
       selectionRef.current = next
+      setLoading(true)
       setData(null)
       setLoadFailure(null)
       setSelection(next)
@@ -370,6 +371,7 @@ export function App() {
   const currentUsers = data?.users ?? null
   const currentUpstreams = data?.upstreams ?? null
   const currentQuality = data?.quality ?? null
+  const partialSpend = collection?.groups.find((group) => group.state === "partial" && group.spend_result)
 
   // 1. KPI 逻辑计算（1 张主卡 + 3 张辅卡）
   const profitAgg = React.useMemo(
@@ -516,11 +518,26 @@ export function App() {
                 <AlertDescription>{loadFailure}。当前保留已有数据。</AlertDescription>
               </Alert>
             )}
+            {partialSpend?.spend_result && !collecting && (
+              <Alert className="mb-2 shrink-0">
+                <AlertTriangle />
+                <AlertTitle>余额与充值部分成功</AlertTitle>
+                <AlertDescription>
+                  <span title={partialSpend.spend_result.updated_accounts.join("、")}>
+                    已更新 {partialSpend.spend_result.updated_accounts.length} 个账户余额
+                    {partialSpend.last_attempt_at != null ? `（${formatTimestampShort(partialSpend.last_attempt_at)}）` : ""}。
+                  </span>
+                  {partialSpend.spend_result.issues.map(({ name, reason }) => `${name}：${reason}`).join("；")}
+                </AlertDescription>
+              </Alert>
+            )}
             {(collecting || collection?.groups.length) ? (
               <p role="status" aria-live="polite" className="mb-2 shrink-0 text-sm text-muted-foreground">
                 {collecting ? "正在更新采集数据，当前内容仍可查看…" : collection?.groups.map((group) => {
                   const labels: Record<string, string> = { logs: "业务日志", errors: "上游错误", httpErrors: "入口错误", spend: "余额与充值", routes: "渠道配置" }
-                  return `${labels[group.resource] ?? group.resource}：${group.last_success_at == null ? "尚未成功采集" : formatTimestampShort(group.last_success_at)}`
+                  const time = group.last_success_at == null ? "暂无记录" : formatTimestampShort(group.last_success_at)
+                  const label = labels[group.resource] ?? group.resource
+                  return group.state === "partial" ? `${label}（上次完整成功）：${time}` : `${label}：${time}`
                 }).join("；")}
               </p>
             ) : null}
@@ -548,7 +565,7 @@ export function App() {
             {!data && loadFailure ? (
               <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 text-center">
                 <AlertTriangle className="size-6 text-destructive" />
-                <div className="text-[14px] leading-[20px] font-medium">后端接口不可用</div>
+                <div className="text-[14px] leading-[20px] font-medium">数据读取失败</div>
                 <div className="text-[12px] leading-[16px] text-muted-foreground max-w-md">{loadFailure}</div>
                 <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading}>
                   重试

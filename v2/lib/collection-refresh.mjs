@@ -48,6 +48,21 @@ function cleanError(value) {
     .slice(0, 300);
 }
 
+function incompleteError(resource) {
+  return `${COLLECTION_RESOURCES[resource].label}采集未完整成功，请查看数据质量`;
+}
+
+function spendIssue(account) {
+  if (account.balance?.status === 'unconfigured') return '未配置余额来源';
+  if (account.balance?.reason === 'network_error') return '网络错误';
+  if (account.balance?.status !== 'ok') return '余额采集未成功';
+  if (account.ledger?.reason === 'exception') return '账本采集异常';
+  if (account.balance_source === 'session' && ['unavailable', 'partial'].includes(account.credits?.status)) {
+    return '充值记录未完整采到';
+  }
+  return null;
+}
+
 export function createCollectionRefreshStore(db, { now = Date.now, isAlive = processAlive, pid = process.pid } = {}) {
   const rowOf = (resource) => db.prepare('SELECT * FROM collection_refresh WHERE resource = ?').get(resource);
   function transaction(run) {
@@ -66,19 +81,43 @@ export function createCollectionRefreshStore(db, { now = Date.now, isAlive = pro
         error = '上次采集进程已退出，请重试', retry_at = 0 WHERE resource = ?`).run(resource);
     }
   }
+  function partialSpend(row) {
+    if (row?.error !== incompleteError('spend') || row.last_attempt_at == null) return null;
+    // 复用采集器已写入的本轮记录，也能识别升级前的部分成功。
+    const run = db.prepare(`SELECT status, detail FROM job_runs
+      WHERE job = 'collect-spend' AND started_at >= ? ORDER BY id DESC LIMIT 1`).get(row.last_attempt_at);
+    if (run?.status !== 'partial') return null;
+    let accounts;
+    try { accounts = JSON.parse(run.detail)?.accounts; }
+    catch { return null; }
+    if (!Array.isArray(accounts)) return null;
+    const updated_accounts = [];
+    const issues = [];
+    for (const account of accounts) {
+      if (!account) continue;
+      const name = [account.name, account.id].find((value) => typeof value === 'string' && value) ?? '未知账户';
+      if (account.written?.balance === true) updated_accounts.push(name);
+      const reason = spendIssue(account);
+      if (reason) issues.push({ name, reason });
+    }
+    return updated_accounts.length > 0 ? { updated_accounts, issues } : null;
+  }
   function group(resource) {
     const row = rowOf(resource);
+    let spendResult = null;
     let state = 'fresh';
     if (!row?.enabled || now() - (row.heartbeat_at ?? 0) > 90_000) state = 'disabled';
     else if (row.running_pid) state = 'running';
     else if (row.request_id > row.completed_id) state = 'queued';
+    else if (resource === 'spend' && (spendResult = partialSpend(row))) state = 'partial';
     else if (row.retry_at > now()) state = 'cooldown';
     else if (row.error) state = 'error';
     return {
       resource, request_id: row?.request_id ?? 0, completed_id: row?.completed_id ?? 0, state,
       last_success_at: row?.last_success_at ?? null, last_attempt_at: row?.last_attempt_at ?? null,
       retry_at: row?.retry_at || null,
-      error: state === 'disabled' ? `${COLLECTION_RESOURCES[resource].label}采集未启用或采集进程未响应` : row?.error ?? null,
+      error: state === 'disabled' ? `${COLLECTION_RESOURCES[resource].label}采集未启用或采集进程未响应` : spendResult ? null : row?.error ?? null,
+      ...(spendResult ? { spend_result: spendResult } : {}),
     };
   }
   function read(resources) {
@@ -100,7 +139,11 @@ export function createCollectionRefreshStore(db, { now = Date.now, isAlive = pro
         if (row.running_pid || row.request_id > row.completed_id) continue;
         if (!row.enabled || now() - (row.heartbeat_at ?? 0) > 90_000) continue;
         if (row.retry_at > now()) continue;
-        if (!force && row.last_success_at != null && now() - row.last_success_at < COLLECTION_RESOURCES[resource].ttl && !row.error) continue;
+        if (!force) {
+          const ttl = COLLECTION_RESOURCES[resource].ttl;
+          if (!row.error && row.last_success_at != null && now() - row.last_success_at < ttl) continue;
+          if (resource === 'spend' && row.last_attempt_at != null && now() - row.last_attempt_at < ttl && partialSpend(row)) continue;
+        }
         db.prepare('UPDATE collection_refresh SET request_id = request_id + 1, error = NULL WHERE resource = ?').run(resource);
       }
       return read(resources);
@@ -182,7 +225,7 @@ export function createOnDemandCollector({ store, tasks, resources, timer = globa
       try {
         const result = await tasks[resource]();
         const failed = result?.missing || (result?.status && result.status !== 'ok');
-        store.finish(resource, attempt, failed ? `${COLLECTION_RESOURCES[resource].label}采集未完整成功，请查看数据质量` : null);
+        store.finish(resource, attempt, failed ? incompleteError(resource) : null);
         return result;
       } catch (error) {
         store.finish(resource, attempt, cleanError(error.message ?? error));

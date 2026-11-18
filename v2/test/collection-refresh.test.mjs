@@ -108,6 +108,39 @@ function finishSuccess(store, resource) {
   return attempt;
 }
 
+test('余额部分成功显示已写入和异常账户，并按五分钟复用可用数据', async (t) => {
+  const fx = fixture(t, { registered: ['spend'] });
+  finishSuccess(fx.store, 'spend');
+  const at = BASE + 60_000;
+  fx.heartbeatAt(at);
+  const accounts = [
+    ...Array.from({ length: 7 }, (_, i) => ({ name: `账户 ${i + 1}`, balance: { status: 'ok' }, written: { balance: true } })),
+    { name: '网络异常账户', balance: { status: 'unavailable', reason: 'network_error' } },
+    { name: '未配置账户', balance: { status: 'unconfigured' } },
+  ];
+  const collector = fx.collector({ spend: async () => {
+    fx.db.prepare('INSERT INTO job_runs (job, started_at, finished_at, status, detail) VALUES (?, ?, ?, ?, ?)')
+      .run('collect-spend', at, at, 'partial', JSON.stringify({ accounts }));
+    return { status: 'partial', accounts };
+  } });
+  await collector.run('spend');
+  const group = fx.connect(202).read(['spend']).groups[0];
+  assert.equal(group.state, 'partial');
+  assert.equal(group.error, null);
+  assert.equal(group.last_success_at, BASE);
+  assert.equal(group.spend_result.updated_accounts.length, 7);
+  assert.deepEqual(group.spend_result.issues, [
+    { name: '网络异常账户', reason: '网络错误' },
+    { name: '未配置账户', reason: '未配置余额来源' },
+  ]);
+  fx.heartbeatAt(at + 29_999);
+  assert.equal(fx.store.request(['spend'], { force: true }).groups[0].state, 'partial');
+  fx.heartbeatAt(at + 299_999);
+  assert.equal(fx.store.request(['spend']).groups[0].state, 'partial');
+  fx.heartbeatAt(at + 300_000);
+  assert.equal(fx.store.request(['spend']).groups[0].state, 'queued');
+});
+
 test('页面白名单只请求该页需要的数据，设置页不采集，拒绝原型属性和未知页', () => {
   const expected = {
     overview: ['routes', 'spend', 'logs'],
