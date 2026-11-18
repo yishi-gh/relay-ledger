@@ -294,7 +294,8 @@ export function OverviewView({
           </CardHeader>
 
           <CardContent className="p-0 pb-2 flex-1 min-h-[220px] md:min-h-0 flex flex-col w-full">
-            <div className="w-full min-w-0 h-[220px] sm:h-[240px] md:h-auto flex-1 min-h-[200px] md:min-h-0">
+            <div className="flex min-h-0 w-full flex-1 flex-col gap-3 sm:flex-row">
+              <div className="w-full min-w-0 h-[220px] sm:h-auto sm:flex-1 min-h-[200px] sm:min-h-0">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart
                   data={trendChartData}
@@ -385,27 +386,27 @@ export function OverviewView({
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
-            </CardContent>
-
-          {/* 图例在卡底：形如「● 站名  $12.34」并按金额降序 */}
-          <div className="pt-2.5 mt-auto border-t border-border/60 shrink-0 md:max-h-20 md:overflow-y-auto">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] leading-[16px] text-muted-foreground">
-              {activeSites.map((site) => (
-                <div key={site.account_id} className="flex items-center gap-2">
-                  <span
-                    className="size-2.5 rounded-xs shrink-0"
-                    style={{ backgroundColor: getSiteColor(site.account_id) }}
-                  />
-                  <span className="max-w-[110px] sm:max-w-[130px] line-clamp-2" title={site.name}>
-                    {site.name}
-                  </span>
-                  <span className="font-mono tabular-nums text-foreground/90 font-semibold text-[14px] whitespace-nowrap">
-                    {formatCurrency(site.revenue)}
-                  </span>
-                </div>
-              ))}
+              <aside
+                aria-label="售出结构图例"
+                className="flex max-h-24 w-full shrink-0 flex-wrap content-start gap-x-4 gap-y-1.5 overflow-y-auto border-t border-border/60 pt-2 text-[12px] leading-[16px] text-muted-foreground sm:block sm:h-auto sm:max-h-none sm:w-36 sm:overflow-y-auto sm:border-l sm:border-t-0 sm:pl-3 sm:pt-0 xl:w-48"
+              >
+                {activeSites.map((site) => (
+                  <div key={site.account_id} className="flex min-w-0 items-center gap-2 sm:mb-1.5">
+                    <span
+                      className="size-2.5 shrink-0 rounded-xs"
+                      style={{ backgroundColor: getSiteColor(site.account_id) }}
+                    />
+                    <span className="min-w-0 flex-1 truncate" title={site.name}>
+                      {site.name}
+                    </span>
+                    <span className="shrink-0 font-mono text-[13px] font-semibold tabular-nums text-foreground/90">
+                      {formatCurrency(site.revenue)}
+                    </span>
+                  </div>
+                ))}
+              </aside>
             </div>
-          </div>
+          </CardContent>
         </Card>
 
         {/* 右卡：调用流量 (1fr) */}

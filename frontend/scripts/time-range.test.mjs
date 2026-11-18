@@ -591,7 +591,10 @@ test("总览渠道占比支持悬停明细，新鲜度压缩为未同步计数",
         upstreamCost: 40, profit: 60, margin: 0.6, coveredBuckets: 1,
         bucketCount: 1, isCache7d: false, accountableRevenue: 100,
       },
-      activeSites: [],
+      activeSites: [
+        { account_id: "a", name: "Eula", revenue: 75 },
+        { account_id: "b", name: "其他站", revenue: 25 },
+      ],
       trendChartData: [],
       trafficChartData: [],
       getSiteColor: () => "var(--chart-1)",
@@ -606,6 +609,11 @@ test("总览渠道占比支持悬停明细，新鲜度压缩为未同步计数",
   for (const title of ["核算覆盖", "渠道占比"]) {
     assert.ok(cardTitles.some((props) => props.children === title && props.className.includes("text-[16px]")))
   }
+  const legend = r.findAll("aside").find((props) => props["aria-label"] === "售出结构图例")
+  assert.ok(legend)
+  assert.match(textContent(legend.children), /Eula.*其他站/s)
+  const chartContents = r.findAll("CardContent").filter((props) => props.className.includes("min-h-[220px] md:min-h-0"))
+  assert.equal(chartContents.length, 2)
   assert.ok(r.findAll("TooltipContent").some((props) => {
     const text = textContent(props.children)
     return text.includes("渠道甲") && text.includes("75.0%")
