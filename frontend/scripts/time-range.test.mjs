@@ -43,6 +43,11 @@ function profitFixture(range, granularity) {
     ],
     series: {
       revenue_by_site: { a: [10, 20], b: [100, 30], ext: [700, 700] },
+      revenue_by_channel: [
+        { channel_id: 1, channel_name: "渠道甲", account_id: "a", points: [10, 20] },
+        { channel_id: 2, channel_name: "渠道乙", account_id: "b", points: [100, 30] },
+        { channel_id: 3, channel_name: "外部渠道", account_id: "ext", points: [700, 700] },
+      ],
       cost_by_site: { a: [4, null], b: [null, 9], ext: [0, 0] },
     },
     quality: { accounts_missing_balance: ["b"] },
@@ -162,7 +167,7 @@ function runtime({ stored = {}, defaultRange, href = "http://localhost/?view=ove
         "/api/overview": { range, revenue: 1000, requests: 500, tokens: { total: 900 }, cache_rate: 0.4 },
         "/api/trend": { granularity, points: [{ bucket: "2026-11-11 08:00", requests: 7, tokens: 70, cache_rate: 0.5 }] },
         "/api/profit": profitFixture(range, granularity),
-        "/api/channels": { rows: [{ id: 1, name: "渠道" }] },
+        "/api/channels": { rows: [{ channel_id: 1, channel_name: "渠道甲", revenue: 30 }] },
         "/api/groups": { groups: [{ group: "g" }] },
         "/api/users": { users: [{ id: 1, revenue: 30 }], total_revenue: 100 },
         "/api/upstreams": { accounts: [{ account_id: "a", name: "A" }] },
@@ -591,13 +596,16 @@ test("总览渠道占比支持悬停明细，新鲜度压缩为未同步计数",
         upstreamCost: 40, profit: 60, margin: 0.6, coveredBuckets: 1,
         bucketCount: 1, isCache7d: false, accountableRevenue: 100,
       },
-      activeSites: [
-        { account_id: "a", name: "Eula", revenue: 75 },
-        { account_id: "b", name: "其他站", revenue: 25 },
+      activeChannels: [
+        { key: "channel:1", channel_id: 1, name: "渠道甲", revenue: 75 },
+        { key: "channel:2", channel_id: 2, name: "渠道乙", revenue: 25 },
       ],
-      trendChartData: [],
+      trendChartData: [
+        { label: "08:00", fullLabel: "2026-11-11 08:00", "channel:1": 50, "channel:2": 20 },
+        { label: "09:00", fullLabel: "2026-11-11 09:00", "channel:1": 25, "channel:2": 5 },
+      ],
       trafficChartData: [],
-      getSiteColor: (accountId) => `var(--${accountId})`,
+      getChannelColor: (channelId) => `var(--channel-${channelId})`,
       channels: [
         { channel_id: 1, channel_name: "渠道甲", upstream_account: "Eula", revenue: 75 },
         { channel_id: 2, channel_name: "渠道乙", upstream_account: "其他站", revenue: 25 },
@@ -609,9 +617,7 @@ test("总览渠道占比支持悬停明细，新鲜度压缩为未同步计数",
   for (const title of ["核算覆盖", "渠道占比"]) {
     assert.ok(cardTitles.some((props) => props.children === title && props.className.includes("text-[16px]")))
   }
-  const legend = r.findAll("aside").find((props) => props["aria-label"] === "售出结构图例")
-  assert.ok(legend)
-  assert.match(textContent(legend.children), /Eula.*其他站/s)
+  assert.equal(r.findAll("aside").some((props) => props["aria-label"] === "售出结构图例"), false)
   const chartContents = r.findAll("CardContent").filter((props) => props.className.includes("min-h-[220px] md:min-h-0"))
   assert.equal(chartContents.length, 2)
   assert.ok(r.findAll("TooltipContent").some((props) => {
@@ -620,7 +626,7 @@ test("总览渠道占比支持悬停明细，新鲜度压缩为未同步计数",
   }))
   assert.deepEqual(
     r.findAll("TooltipTrigger").map((props) => props.render.props.style.backgroundColor),
-    ["var(--a)", "var(--b)"],
+    ["var(--channel-1)", "var(--channel-2)"],
   )
 
   const compact = runtime({
@@ -644,6 +650,21 @@ test("总览渠道占比支持悬停明细，新鲜度压缩为未同步计数",
   assert.equal(compact.find("QualityStatusRow"), null)
   card.onClick()
   assert.equal(opened, 1)
+})
+
+test("总览售出结构按渠道生成分桶序列", async () => {
+  const r = runtime({ defaultRange: "today" })
+  r.render()
+  await r.settle()
+  const overview = r.find("OverviewView")
+  assert.deepEqual(overview.activeChannels.map((channel) => channel.channel_id), [3, 2, 1])
+  assert.deepEqual(Object.keys(overview.trendChartData[0]).sort(), [
+    "channel:1",
+    "channel:2",
+    "channel:3",
+    "fullLabel",
+    "label",
+  ])
 })
 
 test("meta 读取分别报告超时与 HTTP 错误，切换时间范围取消旧请求", async () => {

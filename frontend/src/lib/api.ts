@@ -89,12 +89,19 @@ export interface ProfitSite {
   bucket_count: number
 }
 
+export interface ChannelRevenueSeries {
+  channel_id: number
+  channel_name: string
+  account_id: string | null
+  points: (number | null)[]
+}
+
 export interface ProfitSeries {
   revenue_by_site: Record<string, (number | null)[]>
   cost_by_site: Record<string, (number | null)[]>
   profit_by_site?: Record<string, (number | null)[]>
   margin_by_site?: Record<string, (number | null)[]>
-  revenue_by_channel?: unknown
+  revenue_by_channel?: ChannelRevenueSeries[]
 }
 
 export interface ProfitQuality {

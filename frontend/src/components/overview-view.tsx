@@ -52,10 +52,11 @@ export interface KpiData {
   accountableRevenue: number | null
 }
 
-export interface ActiveSite {
-  account_id: string
+export interface ActiveChannel {
+  key: string
+  channel_id: number
   name: string
-  revenue?: number | null
+  revenue: number
 }
 
 export type TrendChartItem = Record<string, string | number | null | undefined>
@@ -77,10 +78,10 @@ function MetricTrend({ values, label, color }: { values: (number | null)[]; labe
 interface OverviewViewProps {
   timeRange: RangeType
   kpiData: KpiData
-  activeSites: ActiveSite[]
+  activeChannels: ActiveChannel[]
   trendChartData: TrendChartItem[]
   trafficChartData: TrafficChartPoint[]
-  getSiteColor: (accountId: string) => string
+  getChannelColor: (channelId: number) => string
   capital?: import("@/lib/api").CapitalPayload | null
   accounts?: { name?: string; last_sync?: number | null }[]
   profitData?: ProfitData | null
@@ -92,10 +93,10 @@ interface OverviewViewProps {
 export function OverviewView({
   timeRange,
   kpiData,
-  activeSites,
+  activeChannels,
   trendChartData,
   trafficChartData,
-  getSiteColor,
+  getChannelColor,
   capital,
   accounts,
   profitData,
@@ -114,31 +115,14 @@ export function OverviewView({
   const channelRevenue = rankedChannels?.reduce((sum, channel) => sum + channel.revenue!, 0) ?? 0
   const leadingChannel = rankedChannels?.[0]
   const leadingShare = leadingChannel && channelRevenue > 0 ? leadingChannel.revenue! / channelRevenue : null
-  const siteIdByName = new Map(activeSites.map((site) => [site.name, site.account_id]))
   const channelSegments = channelRevenue > 0 && rankedChannels
-    ? [
-        ...rankedChannels.slice(0, 6).map((channel) => {
-          const accountId = channel.upstream_account
-            ? siteIdByName.get(channel.upstream_account)
-            : undefined
-          return {
-            key: String(channel.channel_id),
-            label: channel.channel_name || `渠道 #${channel.channel_id}`,
-            revenue: channel.revenue!,
-            share: channel.revenue! / channelRevenue,
-            color: accountId ? getSiteColor(accountId) : "var(--muted-foreground)",
-          }
-        }),
-        ...(rankedChannels.length > 6
-          ? [{
-              key: "other",
-              label: "其他渠道",
-              revenue: rankedChannels.slice(6).reduce((sum, channel) => sum + channel.revenue!, 0),
-              share: rankedChannels.slice(6).reduce((sum, channel) => sum + channel.revenue!, 0) / channelRevenue,
-              color: "var(--muted-foreground)",
-            }]
-          : []),
-      ]
+    ? rankedChannels.map((channel) => ({
+        key: String(channel.channel_id),
+        label: channel.channel_name || `渠道 #${channel.channel_id}`,
+        revenue: channel.revenue!,
+        share: channel.revenue! / channelRevenue,
+        color: getChannelColor(channel.channel_id),
+      }))
     : []
 
   return (
@@ -302,8 +286,7 @@ export function OverviewView({
           </CardHeader>
 
           <CardContent className="p-0 pb-2 flex-1 min-h-[220px] md:min-h-0 flex flex-col w-full">
-            <div className="flex min-h-0 w-full flex-1 flex-col gap-3 sm:flex-row">
-              <div className="w-full min-w-0 h-[220px] sm:h-auto sm:flex-1 min-h-[200px] sm:min-h-0">
+            <div className="w-full min-w-0 h-[220px] sm:h-[240px] md:h-auto flex-1 min-h-[200px] md:min-h-0">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart
                   data={trendChartData}
@@ -333,10 +316,10 @@ export function OverviewView({
                     content={({ active, payload }) => {
                       if (!active || !payload || !payload.length) return null
                       const point = payload[0].payload
-                      const siteItems = payload
+                      const channelItems = payload
                         .filter((p) => p.dataKey !== "requests" && typeof p.value === "number" && p.value > 0)
                         .sort((a, b) => Number(b.value) - Number(a.value))
-                      const totalRev = siteItems.reduce(
+                      const totalRev = channelItems.reduce(
                         (sum, item) => sum + (typeof item.value === "number" ? item.value : 0),
                         0
                       )
@@ -347,24 +330,24 @@ export function OverviewView({
                             {point.fullLabel}
                           </div>
                           <div className="space-y-1 max-h-[160px] overflow-y-auto">
-                            {siteItems.map((item) => {
-                              const siteId = item.dataKey as string
+                            {channelItems.map((item) => {
+                              const channel = activeChannels.find((entry) => entry.key === item.dataKey)
                               return (
                                 <div
-                                    key={siteId}
-                                    className="flex items-center justify-between gap-3 text-muted-foreground text-[12px]"
-                                  >
-                                    <div className="flex items-center gap-2 truncate max-w-[140px]">
-                                      <span
-                                        className="size-2 rounded-full shrink-0"
-                                        style={{ backgroundColor: getSiteColor(siteId) }}
-                                      />
-                                      <span className="truncate">{item.name}</span>
-                                    </div>
-                                    <span className="font-mono text-foreground tabular-nums font-semibold">
-                                      {formatCurrency(Number(item.value))}
-                                    </span>
+                                  key={String(item.dataKey)}
+                                  className="flex items-center justify-between gap-3 text-muted-foreground text-[12px]"
+                                >
+                                  <div className="flex items-center gap-2 truncate max-w-[140px]">
+                                    <span
+                                      className="size-2 rounded-full shrink-0"
+                                      style={{ backgroundColor: channel ? getChannelColor(channel.channel_id) : "var(--muted-foreground)" }}
+                                    />
+                                    <span className="truncate">{item.name}</span>
                                   </div>
+                                  <span className="font-mono text-foreground tabular-nums font-semibold">
+                                    {formatCurrency(Number(item.value))}
+                                  </span>
+                                </div>
                                 )
                               })}
                             </div>
@@ -378,14 +361,14 @@ export function OverviewView({
                         )
                       }}
                     />
-                    {activeSites.map((site) => (
+                    {activeChannels.map((channel) => (
                       <Bar
-                        key={site.account_id}
+                        key={channel.key}
                         yAxisId="left"
-                        dataKey={site.account_id}
-                        name={site.name}
+                        dataKey={channel.key}
+                        name={channel.name}
                         stackId="revenue"
-                        fill={getSiteColor(site.account_id)}
+                        fill={getChannelColor(channel.channel_id)}
                         stroke="none"
                         maxBarSize={timeRange === "24h" ? 20 : 42}
                         isAnimationActive={false}
@@ -393,26 +376,6 @@ export function OverviewView({
                     ))}
                   </ComposedChart>
                 </ResponsiveContainer>
-              </div>
-              <aside
-                aria-label="售出结构图例"
-                className="flex max-h-24 w-full shrink-0 flex-wrap content-start gap-x-4 gap-y-1.5 overflow-y-auto border-t border-border/60 pt-2 text-[12px] leading-[16px] text-muted-foreground sm:block sm:h-auto sm:max-h-none sm:w-36 sm:overflow-y-auto sm:border-l sm:border-t-0 sm:pl-3 sm:pt-0 xl:w-48"
-              >
-                {activeSites.map((site) => (
-                  <div key={site.account_id} className="flex min-w-0 items-center gap-2 sm:mb-1.5">
-                    <span
-                      className="size-2.5 shrink-0 rounded-xs"
-                      style={{ backgroundColor: getSiteColor(site.account_id) }}
-                    />
-                    <span className="min-w-0 flex-1 truncate" title={site.name}>
-                      {site.name}
-                    </span>
-                    <span className="shrink-0 font-mono text-[13px] font-semibold tabular-nums text-foreground/90">
-                      {formatCurrency(site.revenue)}
-                    </span>
-                  </div>
-                ))}
-              </aside>
             </div>
           </CardContent>
         </Card>

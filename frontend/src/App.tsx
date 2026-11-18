@@ -30,19 +30,18 @@ import { formatTimestampShort } from "@/lib/formatters"
 import { aggregateProfitBuckets, buildTrafficChartData } from "@/lib/dashboard-data"
 import { bucketLabel, getTimeRangeKey, validateCustomRange } from "@/lib/time-range"
 
-// 全局稳定的站点颜色映射表：首次出现的 account_id 按字典序分配固定色位，之后跨刷新/切窗口都不跳色
-const SITE_COLOR_MAP: Record<string, string> = {}
+const CHANNEL_COLOR_MAP: Record<string, string> = {}
 
-function registerSiteColors(accountIds: string[]) {
-  const missing = accountIds.filter((id) => SITE_COLOR_MAP[id] === undefined).sort()
+function registerChannelColors(channelIds: string[]) {
+  const missing = channelIds.filter((id) => CHANNEL_COLOR_MAP[id] === undefined).sort()
   for (const id of missing) {
-    const index = Object.keys(SITE_COLOR_MAP).length
-    SITE_COLOR_MAP[id] = `var(--chart-${(index % 12) + 1})`
+    const index = Object.keys(CHANNEL_COLOR_MAP).length
+    CHANNEL_COLOR_MAP[id] = `var(--chart-${(index % 12) + 1})`
   }
 }
 
-function getSiteColor(accountId: string): string {
-  return SITE_COLOR_MAP[accountId] || "var(--chart-1)"
+function getChannelColor(channelId: number): string {
+  return CHANNEL_COLOR_MAP[String(channelId)] || "var(--muted-foreground)"
 }
 
 const VALID_VIEWS: ViewKey[] = [
@@ -208,7 +207,10 @@ export function App() {
 
       const promise = loadDashboard(range, custom ?? undefined, undefined, { signal: controller.signal }).then((result) => {
         if (controller.signal.aborted) return
-        registerSiteColors(result.profit?.sites.map((site) => site.account_id) ?? [])
+        registerChannelColors([
+          ...(result.profit?.series.revenue_by_channel ?? []).map((channel) => String(channel.channel_id)),
+          ...(result.channels?.rows ?? []).map((channel) => String(channel.channel_id)),
+        ])
         setLoadFailure(null)
         setData(result)
         setViewRefreshKey((value) => value + 1)
@@ -432,16 +434,22 @@ export function App() {
     }
   }, [timeRange, overview, currentProfit, currentTrend, profitAgg])
 
-  // 2. 售出堆叠柱数据
-  const activeSites = React.useMemo(() => {
+  // 2. 售出堆叠柱数据：统一按渠道分组，与下方渠道占比使用同一 channel_id。
+  const activeChannels = React.useMemo(() => {
     if (!currentProfit) return []
-    return currentProfit.sites
-      .filter((s) => (s.revenue ?? 0) > 0)
-      .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
+    return (currentProfit.series.revenue_by_channel ?? [])
+      .map((channel) => ({
+        key: `channel:${channel.channel_id}`,
+        channel_id: channel.channel_id,
+        name: channel.channel_name || `渠道 #${channel.channel_id}`,
+        revenue: channel.points.reduce<number>((sum, value) => sum + (value ?? 0), 0),
+      }))
+      .filter((channel) => channel.revenue > 0)
+      .sort((a, b) => b.revenue - a.revenue || a.channel_id - b.channel_id)
   }, [currentProfit])
 
   const trendChartData = React.useMemo(() => {
-    if (!currentProfit) return []
+    if (!currentProfit || activeChannels.length === 0) return []
     return currentProfit.buckets.map((bucket, index) => {
       const label = bucketLabel(bucket.label, currentProfit.granularity)
 
@@ -450,18 +458,17 @@ export function App() {
         fullLabel: bucket.label,
       }
 
-      // 堆叠各站点的售出金额
-      const revBySite = currentProfit.series.revenue_by_site
-      for (const site of currentProfit.sites) {
-        const val = revBySite[site.account_id]?.[index]
+      // 堆叠各渠道的售出金额
+      for (const channel of currentProfit.series.revenue_by_channel ?? []) {
+        const val = channel.points[index]
         if (val != null && val > 0) {
-          pointData[site.account_id] = val
+          pointData[`channel:${channel.channel_id}`] = val
         }
       }
 
       return pointData
     })
-  }, [currentProfit])
+  }, [activeChannels, currentProfit])
 
   // 调用流量：独立于 profit，按实际查询范围生成稠密北京桶；缺桶是真实零请求
   const trafficChartData = React.useMemo(
@@ -613,10 +620,10 @@ export function App() {
                   <OverviewView
                     timeRange={timeRange}
                     kpiData={kpiData}
-                    activeSites={activeSites}
+                    activeChannels={activeChannels}
                     trendChartData={trendChartData}
                     trafficChartData={trafficChartData}
-                    getSiteColor={getSiteColor}
+                    getChannelColor={getChannelColor}
                     capital={data?.capital ?? null}
                     accounts={currentUpstreams?.accounts || []}
                     profitData={currentProfit}
