@@ -15,6 +15,8 @@ interface FundingStripProps {
   accounts?: UpstreamLike[]
   now?: number
   className?: string
+  compactFreshness?: boolean
+  onNavigateFreshness?: () => void
 }
 
 function Metric({
@@ -23,30 +25,44 @@ function Metric({
   hint,
   hintTitle,
   tone,
+  secondaryValue,
+  secondaryTitle,
 }: {
   label: string
   value: string
   hint?: string
   hintTitle?: string
   tone?: "warn" | "bad"
+  secondaryValue?: string
+  secondaryTitle?: string
 }) {
   return (
     <div className="flex flex-col gap-1 min-w-0">
       <span className="text-[12px] leading-[16px] text-muted-foreground truncate">
         {label}
       </span>
-      <span
-        className={cn(
-          "text-[20px] leading-[24px] font-semibold font-mono tabular-nums whitespace-nowrap",
-          tone === "bad"
-            ? "text-destructive"
-            : tone === "warn"
-              ? "text-[var(--chart-3)]"
-              : "text-foreground"
-        )}
-      >
-        {value}
-      </span>
+      <div className="flex min-w-0 items-baseline gap-2">
+        <span
+          className={cn(
+            "shrink-0 text-[20px] leading-[24px] font-semibold font-mono tabular-nums whitespace-nowrap",
+            tone === "bad"
+              ? "text-destructive"
+              : tone === "warn"
+                ? "text-[var(--chart-3)]"
+                : "text-foreground"
+          )}
+        >
+          {value}
+        </span>
+        {secondaryValue ? (
+          <span
+            className="min-w-0 truncate text-[14px] leading-[20px] font-medium text-foreground/80"
+            title={secondaryTitle ?? secondaryValue}
+          >
+            {secondaryValue}
+          </span>
+        ) : null}
+      </div>
       {hint ? (
         <span
           className="text-[12px] leading-[16px] text-muted-foreground truncate"
@@ -59,7 +75,14 @@ function Metric({
   )
 }
 
-export function FundingStrip({ capital, accounts = [], now, className }: FundingStripProps) {
+export function FundingStrip({
+  capital,
+  accounts = [],
+  now,
+  className,
+  compactFreshness = false,
+  onNavigateFreshness,
+}: FundingStripProps) {
   const total = capital?.total
   // 续航看最短：哪个上游账户最先耗尽，就报它——平均值会掩盖单点风险。
   // 防御性过滤：channels_live === 0 的账户不参与最短续航计算。
@@ -89,7 +112,6 @@ export function FundingStrip({ capital, accounts = [], now, className }: Funding
           <Metric
             label="上游总余额"
             value={formatCurrency(total?.balance ?? null)}
-            hint={`${total?.accounts_counted ?? accounts.length} 个账户`}
           />
           <Metric
             label="7 日日均成本"
@@ -98,18 +120,9 @@ export function FundingStrip({ capital, accounts = [], now, className }: Funding
           <Metric
             label="最早预计耗尽"
             value={runway == null ? "—" : `${runway.toFixed(1)} 天`}
-            hint={
-              shortest
-                ? `上游账户 ${shortest.name}`
-                : runway == null
-                  ? "缺余额或成本"
-                  : "余额 ÷ 日均成本"
-            }
-            hintTitle={
-              shortest
-                ? `上游账户 ${shortest.name}：最先耗尽，余额 ÷ 日均成本`
-                : undefined
-            }
+            hint={runway == null ? "缺余额或成本" : undefined}
+            secondaryValue={shortest?.name}
+            secondaryTitle={shortest ? `${shortest.name}：最先耗尽，余额 ÷ 日均成本` : undefined}
             tone={runwayTone}
           />
           <Metric
@@ -119,7 +132,12 @@ export function FundingStrip({ capital, accounts = [], now, className }: Funding
         </CardContent>
       </Card>
 
-      <FreshnessCard accounts={accounts} now={now} />
+      <FreshnessCard
+        accounts={accounts}
+        now={now}
+        compact={compactFreshness}
+        onSelect={onNavigateFreshness}
+      />
     </section>
   )
 }

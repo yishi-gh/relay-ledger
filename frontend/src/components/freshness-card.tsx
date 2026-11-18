@@ -1,6 +1,6 @@
 import * as React from "react"
 import { Card, CardContent } from "@/components/ui/card"
-import { CheckCircle2, ChevronDown, Radio } from "lucide-react"
+import { CheckCircle2, ChevronDown, ChevronRight, Radio } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatBeijingClock, formatTimestampShort } from "@/lib/formatters"
 import { getServerSettings } from "@/lib/settings"
@@ -21,6 +21,8 @@ export interface FreshnessCardProps {
   accounts?: UpstreamLike[]
   now?: number
   className?: string
+  compact?: boolean
+  onSelect?: () => void
 }
 
 /** 分钟后按陈旧程度分档：warnMinutes 内正常，dangerMinutes 内告警，超过或缺失即失效/未同步 */
@@ -43,7 +45,7 @@ function formatFreshnessText(minutes: number | null): string {
   return `陈旧 ${hours}小时 ${mins}分`
 }
 
-export function FreshnessCard({ accounts = [], now, className }: FreshnessCardProps) {
+export function FreshnessCard({ accounts = [], now, className, compact = false, onSelect }: FreshnessCardProps) {
   const [clockFallback, setClockFallback] = React.useState(() => Date.now())
   React.useEffect(() => {
     if (now != null) return
@@ -75,6 +77,49 @@ export function FreshnessCard({ accounts = [], now, className }: FreshnessCardPr
     const last = typeof a.last_sync === "number" ? a.last_sync : null
     return last != null && (acc == null || last > acc) ? last : acc
   }, null)
+
+  if (compact) {
+    const label = stale.length === 0 ? "全部已同步" : `${stale.length} 个未同步`
+    const activate = () => onSelect?.()
+    return (
+      <Card
+        role={onSelect ? "button" : undefined}
+        tabIndex={onSelect ? 0 : undefined}
+        onClick={activate}
+        onKeyDown={(event) => {
+          if (!onSelect || (event.key !== "Enter" && event.key !== " ")) return
+          event.preventDefault()
+          activate()
+        }}
+        aria-label={`数据新鲜度：${label}${onSelect ? "，点击查看详情" : ""}`}
+        className={cn(
+          "dashboard-panel min-h-[76px] justify-center p-4 shadow-xs",
+          onSelect && "cursor-pointer transition-colors hover:bg-muted/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+          className,
+        )}
+      >
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <Radio className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate text-[14px] font-semibold">数据新鲜度</span>
+          </span>
+          <span className="inline-flex shrink-0 items-center gap-2">
+            <span
+              className={cn(
+                "rounded-md px-2 py-1 text-[12px] font-medium",
+                stale.length === 0
+                  ? "bg-emerald-500/10 text-emerald-400"
+                  : "bg-destructive/10 text-destructive",
+              )}
+            >
+              {label}
+            </span>
+            {onSelect ? <ChevronRight className="size-4 text-muted-foreground" /> : null}
+          </span>
+        </div>
+      </Card>
+    )
+  }
 
   return (
     <Card className={cn("dashboard-panel shadow-xs overflow-hidden flex flex-col gap-0 p-4", className)}>

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -189,10 +189,13 @@ function runtime({ stored = {}, defaultRange, href = "http://localhost/?view=ove
     const localRequire = (name) => {
       if (name === "react") return react
       if (name === "react/jsx-runtime") return { jsx, jsxs: jsx, Fragment: "Fragment" }
-      if (name === "lucide-react" || name.startsWith("@/components/")) return ui
+      if (name === "lucide-react" || name === "recharts" || name.startsWith("@/components/")) return ui
       if (name === "cn") return { cn: (...values) => values.filter(Boolean).join(" ") }
       const target = name.startsWith("@/") ? resolve(root, "src", name.slice(2)) : resolve(dirname(file), name)
-      return load(target.endsWith(".json") ? target : `${target}.ts`)
+      const sourcePath = target.endsWith(".json")
+        ? target
+        : existsSync(`${target}.ts`) ? `${target}.ts` : `${target}.tsx`
+      return load(sourcePath)
     }
     vm.runInContext(`(function(require,module,exports){${output}\n})`, context, { filename: file })(localRequire, module, module.exports)
     return module.exports
@@ -223,13 +226,23 @@ function runtime({ stored = {}, defaultRange, href = "http://localhost/?view=ove
     }
     return visit(tree)
   }
+  function findAll(type) {
+    const matches = []
+    function visit(node) {
+      if (!node || typeof node !== "object") return
+      if (node.type === type) matches.push(node.props)
+      for (const child of [node.props?.children].flat(Infinity)) visit(child)
+    }
+    visit(tree)
+    return matches
+  }
   async function settle() {
     await new Promise(setImmediate)
     render()
     await new Promise(setImmediate)
     return render()
   }
-  return { load, requests, collectionRequests, failures, held, storage, storageReads, historyCalls, window, timers, render, find, settle, setCollectionReply(reply) { collectionReply = reply }, setMetaReply(reply) { metaReply = reply }, setNow(value) { now = value } }
+  return { load, requests, collectionRequests, failures, held, storage, storageReads, historyCalls, window, timers, render, find, findAll, settle, setCollectionReply(reply) { collectionReply = reply }, setMetaReply(reply) { metaReply = reply }, setNow(value) { now = value } }
 }
 
 test("北京时间输入与范围不依赖 OS 时区，保留旧 24h/7d 锚点", () => {
@@ -562,6 +575,55 @@ test("切页补采部分成功后只读取一次，并显示更新账户与异�
   assert.equal(r.find("AlertTitle").children, "余额与充值部分成功")
   assert.equal(r.find("Alert")["data-floating"], "collection")
   assert.match(textContent(r.find("AlertDescription").children), /异常账户：网络错误/)
+})
+
+test("总览渠道占比支持悬停明细，新鲜度压缩为未同步计数", async () => {
+  let opened = 0
+  const r = runtime({
+    entry: "src/components/overview-view.tsx",
+    exportName: "OverviewView",
+    props: {
+      timeRange: "24h",
+      kpiData: {
+        revenue: 100, tokens: 10, requests: 2, cacheRate: 0.5,
+        upstreamCost: 40, profit: 60, margin: 0.6, coveredBuckets: 1,
+        bucketCount: 1, isCache7d: false, accountableRevenue: 100,
+      },
+      activeSites: [],
+      trendChartData: [],
+      trafficChartData: [],
+      getSiteColor: () => "var(--chart-1)",
+      channels: [
+        { channel_id: 1, channel_name: "渠道甲", revenue: 75 },
+        { channel_id: 2, channel_name: "渠道乙", revenue: 25 },
+      ],
+    },
+  })
+  r.render()
+  assert.ok(r.findAll("CardTitle").some((props) => props.children === "渠道占比"))
+  assert.ok(r.findAll("span").some((props) => props.title === "渠道甲：75.0%"))
+
+  const compact = runtime({
+    entry: "src/components/freshness-card.tsx",
+    exportName: "FreshnessCard",
+    props: {
+      compact: true,
+      now: NOW,
+      accounts: [
+        { id: "a", name: "账户甲", last_sync: null },
+        { id: "b", name: "账户乙", last_sync: NOW - 2 * HOUR },
+        { id: "c", name: "账户丙", last_sync: NOW },
+      ],
+      onSelect: () => { opened += 1 },
+    },
+  })
+  compact.render()
+  const card = compact.find("Card")
+  assert.equal(card.role, "button")
+  assert.match(card["aria-label"], /2 个未同步，点击查看详情/)
+  assert.equal(compact.find("QualityStatusRow"), null)
+  card.onClick()
+  assert.equal(opened, 1)
 })
 
 test("meta 读取分别报告超时与 HTTP 错误，切换时间范围取消旧请求", async () => {

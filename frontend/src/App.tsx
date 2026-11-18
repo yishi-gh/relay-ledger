@@ -618,6 +618,7 @@ export function App() {
                     profitData={currentProfit}
                     quality={currentQuality}
                     channels={currentChannels?.rows || []}
+                    onNavigateQuality={() => navigate("quality")}
                   />
                 )}
 

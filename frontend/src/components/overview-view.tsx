@@ -86,6 +86,7 @@ interface OverviewViewProps {
   profitData?: ProfitData | null
   quality?: QualityData | null
   channels?: ChannelRowData[]
+  onNavigateQuality?: () => void
 }
 
 export function OverviewView({
@@ -100,6 +101,7 @@ export function OverviewView({
   profitData,
   quality,
   channels,
+  onNavigateQuality,
 }: OverviewViewProps) {
   const isRawUnit = getPreferences().display.unitSystem === "raw"
   // 为数字和单位预留完整刻度宽度，避免中文单位折行。
@@ -529,7 +531,13 @@ export function OverviewView({
         </Card>
       </section>
 
-      <FundingStrip capital={capital} accounts={accounts} className="overview-funding" />
+      <FundingStrip
+        capital={capital}
+        accounts={accounts}
+        className="overview-funding"
+        compactFreshness
+        onNavigateFreshness={onNavigateQuality}
+      />
       <section className="grid shrink-0 grid-cols-1 gap-4 md:grid-cols-2">
         <Card className="min-w-0 gap-2 p-4 shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between p-0">
@@ -544,7 +552,7 @@ export function OverviewView({
         </Card>
         <Card className="min-w-0 gap-2 p-4 shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between p-0">
-            <CardTitle className="text-[14px] font-medium">渠道集中</CardTitle>
+            <CardTitle className="text-[14px] font-medium">渠道占比</CardTitle>
             <span className="text-[12px] text-muted-foreground">在售渠道</span>
           </CardHeader>
           <CardContent className="flex min-w-0 flex-col gap-2 p-0">
