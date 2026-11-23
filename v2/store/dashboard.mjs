@@ -37,9 +37,12 @@ export function openDashboardDb(file) {
   const target = path.resolve(file);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   const db = new DatabaseSync(target);
-  db.exec('PRAGMA busy_timeout = 3000');
+  db.exec('PRAGMA busy_timeout = 10000');
   try {
-    db.exec('PRAGMA journal_mode = WAL');
+    const mode = String(db.prepare('PRAGMA journal_mode').get()?.journal_mode ?? '').toLowerCase();
+    if (mode !== 'wal') db.exec('PRAGMA journal_mode = WAL');
+    // WAL 模式下 synchronous=NORMAL 既保证进程崩溃安全，又避免每次小事务都阻塞式 fsync
+    db.exec('PRAGMA synchronous = NORMAL');
   } catch {
     // 只读或不支持 WAL 的文件系统退回默认日志模式
   }
@@ -49,6 +52,8 @@ export function openDashboardDb(file) {
 
 /** 用配置里的账户覆盖/补充 upstream_account（只同步非敏感字段） */
 export function syncAccounts(db, accounts, now = Date.now()) {
+  const list = Array.isArray(accounts) ? accounts : [];
+  if (!list.length) return;
   const stmt = db.prepare(
     `INSERT INTO upstream_account (id, name, kind, base_url, unit, enabled, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -60,8 +65,19 @@ export function syncAccounts(db, accounts, now = Date.now()) {
        enabled = excluded.enabled,
        updated_at = excluded.updated_at`,
   );
-  for (const a of accounts) {
-    stmt.run(a.id, a.name ?? a.id, a.kind ?? null, a.base_url ?? null, a.unit ?? 'USD', a.enabled === false ? 0 : 1, now);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const a of list) {
+      stmt.run(a.id, a.name ?? a.id, a.kind ?? null, a.base_url ?? null, a.unit ?? 'USD', a.enabled === false ? 0 : 1, now);
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      // 忽略回滚失败
+    }
+    throw err;
   }
 }
 

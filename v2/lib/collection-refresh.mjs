@@ -166,8 +166,10 @@ export function createCollectionRefreshStore(db, { now = Date.now, isAlive = pro
     });
   }
   function heartbeat(resources) {
-    const statement = db.prepare('UPDATE collection_refresh SET heartbeat_at = ? WHERE resource = ? AND enabled = 1');
-    for (const resource of resources) statement.run(now(), resource);
+    transaction(() => {
+      const statement = db.prepare('UPDATE collection_refresh SET heartbeat_at = ? WHERE resource = ? AND enabled = 1');
+      for (const resource of resources) statement.run(now(), resource);
+    });
   }
   function claim(resource) {
     return transaction(() => {

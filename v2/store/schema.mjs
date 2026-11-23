@@ -208,11 +208,22 @@ function ensureColumns(db, table, columns) {
 
 /** 原地建表；不删除、不改写既有行 */
 export function initDashboardDb(db) {
-  for (const sql of DASHBOARD_SCHEMA) db.exec(sql);
-  ensureColumns(db, 'balance_snapshot', BALANCE_RAW_COLUMNS);
-  db.prepare(
-    `INSERT INTO schema_meta (key, value, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-  ).run('schema_version', String(SCHEMA_VERSION), Date.now());
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const sql of DASHBOARD_SCHEMA) db.exec(sql);
+    ensureColumns(db, 'balance_snapshot', BALANCE_RAW_COLUMNS);
+    db.prepare(
+      `INSERT INTO schema_meta (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    ).run('schema_version', String(SCHEMA_VERSION), Date.now());
+    db.exec('COMMIT');
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      // 忽略回滚失败
+    }
+    throw err;
+  }
   return db;
 }
