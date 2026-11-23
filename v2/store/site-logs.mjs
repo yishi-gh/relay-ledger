@@ -118,8 +118,27 @@ const AGG_INDEXES = [
               channel_name, model)`,
 ];
 
+const OPTIONAL_AGG_INDEXES = [
+  {
+    column: 'group_name',
+    sql: `CREATE INDEX IF NOT EXISTS idx_logs_groups
+            ON logs(t_ms, log_type, token_name, group_name, channel_id, cost,
+                     quota_raw, input_total, output, cache_read, input_uncached,
+                     latency_ms, channel_name, model)`,
+  },
+  {
+    column: 'user_name',
+    sql: `CREATE INDEX IF NOT EXISTS idx_logs_users
+            ON logs(t_ms, log_type, token_name, user_name, cost, input_total, output)`,
+  },
+];
+
 export function ensureAggIndexes(db) {
   for (const sql of AGG_INDEXES) db.exec(sql);
+  const cols = new Set(db.prepare('PRAGMA table_info(logs)').all().map((c) => c.name));
+  for (const { column, sql } of OPTIONAL_AGG_INDEXES) {
+    if (cols.has(column)) db.exec(sql);
+  }
 }
 
 /**
