@@ -38,6 +38,11 @@ export function openDashboardDb(file) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   const db = new DatabaseSync(target);
   db.exec('PRAGMA busy_timeout = 3000');
+  try {
+    db.exec('PRAGMA journal_mode = WAL');
+  } catch {
+    // 只读或不支持 WAL 的文件系统退回默认日志模式
+  }
   initDashboardDb(db);
   return db;
 }

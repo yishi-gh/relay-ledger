@@ -935,6 +935,36 @@ export function createApi({
     const rangeToDay = dayKey(range.to);
     const lastCollect = readLastRun(dashboard, 'collect-spend');
 
+    // 一次按 channel_id 汇总区间售出（明细 + 归档），避免按账户逐个查库（N+1）
+    const revenueByChannel = new Map();
+    const hasAnyChannel = associations.accounts.some((a) => Array.isArray(a.channels) && a.channels.length > 0);
+    if (hasAnyChannel) {
+      const detailRows = source.prepare(
+        `SELECT channel_id, COALESCE(SUM(cost), 0) AS revenue
+           FROM logs
+          WHERE ${LOCAL_FILTER} AND t_ms BETWEEN ? AND ?
+          GROUP BY channel_id`,
+      ).all(range.from, range.to);
+      for (const r of detailRows) {
+        if (r.channel_id == null) continue;
+        const id = Number(r.channel_id);
+        revenueByChannel.set(id, (revenueByChannel.get(id) ?? 0) + Number(r.revenue ?? 0));
+      }
+      const archive = archiveByChannel(range);
+      for (const r of archive?.rows ?? []) {
+        if (r.channel_id == null) continue;
+        const id = Number(r.channel_id);
+        revenueByChannel.set(id, (revenueByChannel.get(id) ?? 0) + Number(r.revenue ?? 0));
+      }
+    }
+    const revenueForChannels = (channels) => {
+      if (!Array.isArray(channels) || !channels.length) return 0;
+      const ids = new Set(channels.map(Number).filter((n) => Number.isFinite(n)));
+      let sum = 0;
+      for (const id of ids) sum += revenueByChannel.get(id) ?? 0;
+      return sum;
+    };
+
     // 不再过滤停用账户：面板要显示它们的「已禁用」状态并排在末尾。
     // 停用账户没有快照，账本自然是 unavailable，不影响别的账户。
     return associations.accounts
@@ -966,7 +996,7 @@ export function createApi({
           closingFresh: closing ? closing.fresh : false,
           configured: Boolean(a.base_url),
         });
-        const revenue = accountRevenue(a.channels, range);
+        const revenue = revenueForChannels(a.channels);
         const margin = computeMargin({ revenue, consumption: verdict.consumption });
         const latest = readLatestSnapshot(dashboard, a.id);
         const todayWindow = readLatestCreditWindow(dashboard, a.id, todayStart);
@@ -1702,23 +1732,52 @@ export function createApi({
       granularity: 'day',
     }).series.cost_by_site;
 
-    // 每个上游账户最主要的分组（按最近 7 天售出额），用于「最短续航」标注到组
+    // 每个上游账户最主要的分组（按最近 7 天售出额），用于「最短续航」标注到组；
+    // 一次按 (channel_id, group_name) 扫描汇总，避免每个账户重复回表扫 7 天明细。
+    const groupRevByChannel = new Map();
+    if (hasGroupName && eligible.some((a) => Array.isArray(a.channels) && a.channels.length > 0)) {
+      const groupRows = source
+        .prepare(
+          `SELECT channel_id,
+                  COALESCE(NULLIF(group_name, ''), '(未分组)') AS g,
+                  SUM(cost) AS rev
+             FROM logs
+            WHERE ${LOCAL_FILTER} AND t_ms BETWEEN ? AND ?
+            GROUP BY channel_id, g`,
+        )
+        .all(avgFrom, now);
+      for (const row of groupRows) {
+        if (row.channel_id == null) continue;
+        const chId = Number(row.channel_id);
+        let list = groupRevByChannel.get(chId);
+        if (!list) {
+          list = [];
+          groupRevByChannel.set(chId, list);
+        }
+        list.push({ g: row.g, rev: Number(row.rev ?? 0) });
+      }
+    }
     const topGroupOf = (account) => {
       if (!hasGroupName) return null;
       const ids = Array.isArray(account.channels)
-        ? account.channels.map(Number).filter((n) => Number.isFinite(n))
+        ? [...new Set(account.channels.map(Number).filter((n) => Number.isFinite(n)))]
         : [];
       if (!ids.length) return null;
-      const marks = ids.map(() => '?').join(',');
-      const row = source
-        .prepare(
-          `SELECT COALESCE(NULLIF(group_name, ''), '(未分组)') AS g, SUM(cost) AS rev
-             FROM logs
-            WHERE ${LOCAL_FILTER} AND t_ms BETWEEN ? AND ? AND channel_id IN (${marks})
-            GROUP BY g ORDER BY rev DESC LIMIT 1`,
-        )
-        .get(avgFrom, now, ...ids);
-      return row?.g ?? null;
+      const totals = new Map();
+      for (const id of ids) {
+        for (const item of groupRevByChannel.get(id) ?? []) {
+          totals.set(item.g, (totals.get(item.g) ?? 0) + item.rev);
+        }
+      }
+      let bestGroup = null;
+      let bestRev = -Infinity;
+      for (const [g, rev] of totals) {
+        if (rev > bestRev) {
+          bestRev = rev;
+          bestGroup = g;
+        }
+      }
+      return bestGroup;
     };
 
     const rows = eligible.map((a) => {

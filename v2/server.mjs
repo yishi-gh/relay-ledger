@@ -15,6 +15,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 
 import { createApi } from './lib/api.mjs';
+import { createApiQueryRunner } from './lib/api-runner.mjs';
 import { loadConfig, resolveConfigFile } from './lib/config.mjs';
 import { ensureDataDirs, INSTANCE, INSTANCE_FILE } from './lib/instance.mjs';
 import {
@@ -132,6 +133,7 @@ export function openSourceDb(file) {
   // 只读打开：不建表、不写 PRAGMA、不留 -wal
   const db = new DatabaseSync(resolved, { readOnly: true });
   // 连接级设置，不落盘，也不改变库文件
+  db.exec('PRAGMA busy_timeout = 3000');
   db.exec(`PRAGMA mmap_size = ${MMAP_BYTES}`);
   return db;
 }
@@ -261,7 +263,7 @@ function metaOf(api) {
   };
 }
 
-const API_ROUTES = {
+export const API_ROUTES = {
   '/api/meta': metaOf,
   '/api/overview': (api, url) => api.overview(url.searchParams),
   '/api/trend': (api, url) => api.trend(url.searchParams),
@@ -332,6 +334,11 @@ function cacheTtlFromEnv(raw = process.env.API_CACHE_TTL_MS) {
   return Number.isFinite(value) && value >= 0 ? value : 60_000;
 }
 
+function apiCacheKey({ api, pathname, url, collectionStore }) {
+  const version = typeof api?.cacheVersion === 'function' ? api.cacheVersion() : 'none';
+  return `${pathname}${url.search}|v=${version}${collectionStore ? `|c=${collectionStore.version(pathname)}` : ''}`;
+}
+
 /**
  * 跑一个 /api/* 请求并处理缓存。未知接口返回 null，由调用方回 404。
  * 返回的 payload 是 JSON 字符串，cache 是 'HIT' / 'MISS'（不缓存的接口为 null）。
@@ -341,8 +348,7 @@ export function respondApi({ api, cache, pathname, url, collectionStore = null }
   if (!handler) return null;
   const cacheable = pathname !== '/api/healthz';
   // 归属随路由快照变化：key 带快照身份，旧 HIT 在快照更新后自动失效；TTL 与容量不变
-  const version = cacheable && typeof api?.cacheVersion === 'function' ? api.cacheVersion() : 'none';
-  const key = `${pathname}${url.search}|v=${version}${collectionStore ? `|c=${collectionStore.version(pathname)}` : ''}`;
+  const key = cacheable ? apiCacheKey({ api, pathname, url, collectionStore }) : '';
   if (cacheable) {
     const hit = cache.get(key);
     if (hit !== null) return { payload: hit, cache: 'HIT' };
@@ -350,6 +356,36 @@ export function respondApi({ api, cache, pathname, url, collectionStore = null }
   const payload = JSON.stringify(handler(api, url));
   if (cacheable) cache.set(key, payload);
   return { payload, cache: cacheable && cache.enabled ? 'MISS' : null };
+}
+
+/**
+ * 异步版 /api/* 响应：主线程直接处理缓存命中与 healthz，未命中时交由工作线程执行，
+ * 不阻塞 /api/refresh、/api/meta、静态资源与其它请求。未注入 queryRunner 时退回同步。
+ */
+export async function respondApiAsync({
+  api,
+  cache,
+  pathname,
+  url,
+  collectionStore = null,
+  queryRunner = null,
+  signal = null,
+}) {
+  if (!queryRunner) {
+    return respondApi({ api, cache, pathname, url, collectionStore });
+  }
+  const handler = API_ROUTES[pathname];
+  if (!handler) return null;
+  if (pathname === '/api/healthz') {
+    return { payload: JSON.stringify(handler(api, url)), cache: null };
+  }
+  const key = apiCacheKey({ api, pathname, url, collectionStore });
+  const hit = cache.get(key);
+  if (hit !== null) return { payload: hit, cache: 'HIT' };
+  const payload = await queryRunner.run({ key, pathname, search: url.search, signal });
+  if (payload === null) return null;
+  cache.set(key, payload);
+  return { payload, cache: cache.enabled ? 'MISS' : null };
 }
 
 /** 图标参数的 id 形态：渠道只接受数字，账户只接受安全 id 字符 */
@@ -583,6 +619,7 @@ export function createRequestHandler({
   now = Date.now,
   logoService = null,
   collectionStore = null,
+  queryRunner = null,
   webDir = WEB_DIR,
 }) {
   return async (req, res) => {
@@ -710,7 +747,28 @@ export function createRequestHandler({
       }
 
       if (pathname.startsWith('/api/')) {
-        const result = respondApi({ api, cache, pathname, url, collectionStore });
+        const controller = queryRunner ? new AbortController() : null;
+        const onClose = controller
+          ? () => {
+              if (!res.writableEnded) controller.abort();
+            }
+          : null;
+        if (onClose) res.once('close', onClose);
+        let result;
+        try {
+          result = await respondApiAsync({
+            api,
+            cache,
+            pathname,
+            url,
+            collectionStore,
+            queryRunner,
+            signal: controller?.signal ?? null,
+          });
+        } finally {
+          if (onClose) res.off('close', onClose);
+        }
+        if (controller?.signal.aborted || res.destroyed) return;
         if (!result) {
           sendError(res, 404, 'not_found', `未知接口 ${pathname}`, { head });
           return;
@@ -724,6 +782,7 @@ export function createRequestHandler({
 
       serveStatic(res, pathname, { head, webDir });
     } catch (err) {
+      if (err?.name === 'AbortError' || res.destroyed) return;
       if (err instanceof RangeError || err instanceof TypeError) {
         sendError(res, 400, 'bad_request', err.message, { head });
       } else {
@@ -737,32 +796,31 @@ export function createRequestHandler({
 
 /**
  * 首屏预热：默认 7 天区间的 overview/trend/profit/channels/capital 各跑一次，
- * 把首屏要读的页读进 page cache（索引由写入侧的 openLogsDb 补齐，服务端只读）。
- * 后台执行、不阻塞监听；单项失败只告警、不影响其余接口；WARMUP=0 关闭。
+ * 把首屏要读的页读进 page cache，并顺带填热进程内缓存。
+ * 经工作线程逐项异步执行，不阻塞监听与主线程，也不阻塞 fast 通道的 /api/meta；WARMUP=0 关闭。
  */
-function warmup(api) {
+function warmup({ api, cache, collectionStore, queryRunner }) {
   if (process.env.WARMUP === '0') {
     console.log('[warmup] skipped');
     return;
   }
-  setImmediate(() => {
+  setImmediate(async () => {
     const startedAt = Date.now();
     const jobs = [
-      ['overview', (params) => api.overview(params)],
-      ['trend', (params) => api.trend(params)],
-      ['profit', (params) => api.profit(params)],
-      ['channels', (params) => api.channels(params)],
-      ['capital', (params) => api.capital(params)],
+      ['/api/overview', ''],
+      ['/api/trend', '?granularity=day'],
+      ['/api/profit', '?granularity=day'],
+      ['/api/channels', ''],
+      ['/api/capital', ''],
     ];
     let failed = 0;
-    for (const [name, run] of jobs) {
+    for (const [pathname, search] of jobs) {
       try {
-        const params = new URLSearchParams();
-        if (name === 'trend' || name === 'profit') params.set('granularity', 'day');
-        run(params);
+        const url = new URL(`${pathname}${search}`, 'http://localhost');
+        await respondApiAsync({ api, cache, pathname, url, collectionStore, queryRunner });
       } catch (err) {
         failed += 1;
-        console.warn(`[warmup] ${name} 预热失败: ${err.message}`);
+        console.warn(`[warmup] ${pathname} 预热失败: ${err.message}`);
       }
     }
     console.log(`[warmup] ${failed === 0 ? 'ok' : `完成，失败 ${failed} 项`} ${Date.now() - startedAt}ms`);
@@ -842,7 +900,30 @@ function main() {
   });
 
   const collectionStore = createCollectionRefreshStore(dashboard);
-  const server = http.createServer(createRequestHandler({ api, cache, settingsStore, dashboard, logoService, collectionStore }));
+  const collectionDefaults = {
+    logsMinutes: INSTANCE.collect.logsIntervalMs / 60_000,
+    spendMinutes: INSTANCE.collect.spendIntervalMs / 60_000,
+  };
+  const queryRunner = createApiQueryRunner({
+    sourcePath,
+    dashboardPath: path.resolve(DASHBOARD_FILE),
+    config,
+    siteName: opts.site,
+    siteDisplayName: INSTANCE.site.name,
+    sourceLabel,
+    siteBaseUrl: INSTANCE.site.base_url,
+    settingsDataDir: INSTANCE.paths.dataDir,
+    collectionDefaults,
+  });
+  const server = http.createServer(createRequestHandler({
+    api,
+    cache,
+    settingsStore,
+    dashboard,
+    logoService,
+    collectionStore,
+    queryRunner,
+  }));
 
   server.on('error', (err) => {
     console.error(`[v2] 服务启动失败: ${err.message}`);
@@ -855,16 +936,20 @@ function main() {
         `  配置=${configFile ? displayPath(configFile) : '默认'}  实例=${INSTANCE_FILE ? displayPath(INSTANCE_FILE) : '默认'}` +
         `  运行时设置=${displayPath(settingsStore.path)}`,
     );
-    warmup(api);
+    warmup({ api, cache, collectionStore, queryRunner });
   });
 
   const shutdown = () => {
-    server.close(() => {
+    server.close(async () => {
       try {
-        source.close();
-        dashboard.close();
+        await queryRunner.close();
       } finally {
-        process.exit(0);
+        try {
+          source.close();
+          dashboard.close();
+        } finally {
+          process.exit(0);
+        }
       }
     });
     setTimeout(() => process.exit(0), 2000).unref();
