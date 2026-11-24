@@ -1687,6 +1687,9 @@ export function createApi({
     };
   }
 
+  // 7 日主力分组仅随自然日或最新计费日志时间戳变化；按 (avgFrom, max_t) 缓存，避免切换窗口反复扫 7 天索引
+  let topGroupMemo = null;
+
   /**
    * 财务视角：每个上游账户的最新余额、区间成本/充值、最近 7 天日均与续航。
    * 只统计启用且非 external 的账户；停用/无上游账户既没有余额也不该参与续航。
@@ -1733,28 +1736,34 @@ export function createApi({
     }).series.cost_by_site;
 
     // 每个上游账户最主要的分组（按最近 7 天售出额），用于「最短续航」标注到组；
-    // 一次按 (channel_id, group_name) 扫描汇总，避免每个账户重复回表扫 7 天明细。
-    const groupRevByChannel = new Map();
+    // 一次按 (channel_id, group_name) 扫描汇总，并按 (avgFrom, max_t) 缓存。
+    let groupRevByChannel = new Map();
     if (hasGroupName && eligible.some((a) => Array.isArray(a.channels) && a.channels.length > 0)) {
-      const groupRows = source
-        .prepare(
-          `SELECT channel_id,
-                  COALESCE(NULLIF(group_name, ''), '(未分组)') AS g,
-                  SUM(cost) AS rev
-             FROM logs
-            WHERE ${LOCAL_FILTER} AND t_ms BETWEEN ? AND ?
-            GROUP BY channel_id, g`,
-        )
-        .all(avgFrom, now);
-      for (const row of groupRows) {
-        if (row.channel_id == null) continue;
-        const chId = Number(row.channel_id);
-        let list = groupRevByChannel.get(chId);
-        if (!list) {
-          list = [];
-          groupRevByChannel.set(chId, list);
+      const memoKey = `${avgFrom}:${sourceMaxT() ?? ''}`;
+      if (topGroupMemo && topGroupMemo.key === memoKey) {
+        groupRevByChannel = topGroupMemo.map;
+      } else {
+        const groupRows = source
+          .prepare(
+            `SELECT channel_id,
+                    COALESCE(NULLIF(group_name, ''), '(未分组)') AS g,
+                    SUM(cost) AS rev
+               FROM logs
+              WHERE ${LOCAL_FILTER} AND t_ms BETWEEN ? AND ?
+              GROUP BY channel_id, g`,
+          )
+          .all(avgFrom, now);
+        for (const row of groupRows) {
+          if (row.channel_id == null) continue;
+          const chId = Number(row.channel_id);
+          let list = groupRevByChannel.get(chId);
+          if (!list) {
+            list = [];
+            groupRevByChannel.set(chId, list);
+          }
+          list.push({ g: row.g, rev: Number(row.rev ?? 0) });
         }
-        list.push({ g: row.g, rev: Number(row.rev ?? 0) });
+        topGroupMemo = { key: memoKey, map: groupRevByChannel };
       }
     }
     const topGroupOf = (account) => {
